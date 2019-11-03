@@ -1,0 +1,10 @@
+game_name: Simgame
+path_name: simgame
+block_data_file_name: world_block_data.dat
+world_meta_file_name: world_meta.yaml
+
+block_config:
+  block_info:
+    - name: Rock
+      category: rock
+      char_repr: "*"
