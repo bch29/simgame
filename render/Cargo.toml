@@ -6,16 +6,11 @@ edition = "2018"
 
 [dependencies]
 simgame_core = { path = "../core" }
-cgmath = { version = "0.17", features = ["serde"] }
+cgmath = "0.17"
 directories = "2.0"
 anyhow = "1.0"
-lz4 = "1.23"
-structopt = "0.3"
-rand = "0.6"
 log = "0.4"
-env_logger = "0.7"
 # graphics
 winit = "0.20.0-alpha4"
 raw-window-handle = "0.3"
-shaderc = "0.6"
 wgpu = { path = "../../wgpu-rs/" }

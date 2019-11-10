@@ -1,176 +1,171 @@
 use anyhow::{anyhow, Result};
-use shaderc;
-use std::str;
-use winit::{
-    event,
-    event_loop::{ControlFlow, EventLoop},
-};
+use raw_window_handle::HasRawWindowHandle;
+// use simgame_core::world::{UpdatedWorldState, World};
 
-pub fn test_render() -> Result<()> {
-    let event_loop = EventLoop::new();
+pub mod test;
 
-    let (_window, size, surface) = {
-        let window = winit::window::Window::new(&event_loop)?;
-        let size = window.inner_size().to_physical(window.hidpi_factor());
+// TODO: UI render pipeline
 
-        let surface = wgpu::Surface::create(&window);
-        (window, size, surface)
-    };
+pub struct RenderInit<'a, RV, RF, W> {
+    pub window: &'a W,
+    pub world: WorldRenderInit<RV, RF>,
+    pub physical_win_size: (u32, u32),
+}
 
-    let adapter = wgpu::Adapter::request(&wgpu::RequestAdapterOptions {
-        power_preference: wgpu::PowerPreference::Default,
-        backends: wgpu::BackendBit::PRIMARY,
-    }).ok_or_else(|| anyhow!("Failed to request wgpu::Adaptor"))?;
+pub struct WorldRenderInit<RV, RF> {
+    pub vert_shader_spirv_bytes: RV,
+    pub frag_shader_spirv_bytes: RF,
+}
 
-    let (device, mut queue) = adapter.request_device(&wgpu::DeviceDescriptor {
-        extensions: wgpu::Extensions {
-            anisotropic_filtering: false,
-        },
-        limits: wgpu::Limits::default(),
-    });
+pub struct RenderState {
+    device: wgpu::Device,
+    swap_chain: wgpu::SwapChain,
+    queue: wgpu::Queue,
+    world: WorldRenderState,
+}
 
-    let SpirvShaders { vert: vs_spirv, frag: fs_spirv } = compile_shaders()?;
-    let vs_module = device.create_shader_module(vs_spirv.as_slice());
-    let fs_module = device.create_shader_module(fs_spirv.as_slice());
+struct WorldRenderState {
+    render_pipeline: wgpu::RenderPipeline,
+    bind_group: wgpu::BindGroup,
+}
 
-    let bind_group_layout =
-        device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor { bindings: &[] });
-    let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-        layout: &bind_group_layout,
-        bindings: &[],
-    });
-    let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-        bind_group_layouts: &[&bind_group_layout],
-    });
+impl RenderState {
+    pub fn new<RV, RF, W>(init: RenderInit<RV, RF, W>) -> Result<Self>
+    where
+        RV: std::io::Seek + std::io::Read,
+        RF: std::io::Seek + std::io::Read,
+        W: HasRawWindowHandle,
+    {
+        let surface = wgpu::Surface::create(init.window);
 
-    let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-        layout: &pipeline_layout,
-        vertex_stage: wgpu::ProgrammableStageDescriptor {
-            module: &vs_module,
-            entry_point: "main",
-        },
-        fragment_stage: Some(wgpu::ProgrammableStageDescriptor {
-            module: &fs_module,
-            entry_point: "main",
-        }),
-        rasterization_state: Some(wgpu::RasterizationStateDescriptor {
-            front_face: wgpu::FrontFace::Ccw,
-            cull_mode: wgpu::CullMode::None,
-            depth_bias: 0,
-            depth_bias_slope_scale: 0.0,
-            depth_bias_clamp: 0.0,
-        }),
-        primitive_topology: wgpu::PrimitiveTopology::TriangleList,
-        color_states: &[wgpu::ColorStateDescriptor {
-            format: wgpu::TextureFormat::Bgra8UnormSrgb,
-            color_blend: wgpu::BlendDescriptor::REPLACE,
-            alpha_blend: wgpu::BlendDescriptor::REPLACE,
-            write_mask: wgpu::ColorWrite::ALL,
-        }],
-        depth_stencil_state: None,
-        index_format: wgpu::IndexFormat::Uint16,
-        vertex_buffers: &[],
-        sample_count: 1,
-        sample_mask: !0,
-        alpha_to_coverage_enabled: false,
-    });
+        let adapter = wgpu::Adapter::request(&wgpu::RequestAdapterOptions {
+            power_preference: wgpu::PowerPreference::Default,
+            backends: wgpu::BackendBit::PRIMARY,
+        })
+        .ok_or_else(|| anyhow!("Failed to request wgpu::Adaptor"))?;
 
-    let mut swap_chain = device.create_swap_chain(
-        &surface,
-        &wgpu::SwapChainDescriptor {
-            usage: wgpu::TextureUsage::OUTPUT_ATTACHMENT,
-            format: wgpu::TextureFormat::Bgra8UnormSrgb,
-            width: size.width.round() as u32,
-            height: size.height.round() as u32,
-            present_mode: wgpu::PresentMode::Vsync,
-        },
-    );
-
-    event_loop.run(move |event, _, control_flow| {
-        *control_flow = if cfg!(feature = "metal-auto-capture") {
-            ControlFlow::Exit
-        } else {
-            ControlFlow::Poll
-        };
-        match event {
-            event::Event::WindowEvent { event, .. } => match event {
-                event::WindowEvent::KeyboardInput {
-                    input:
-                        event::KeyboardInput {
-                            virtual_keycode: Some(event::VirtualKeyCode::Escape),
-                            state: event::ElementState::Pressed,
-                            ..
-                        },
-                    ..
-                }
-                | event::WindowEvent::CloseRequested => {
-                    *control_flow = ControlFlow::Exit;
-                }
-                _ => {}
+        let (device, queue) = adapter.request_device(&wgpu::DeviceDescriptor {
+            extensions: wgpu::Extensions {
+                anisotropic_filtering: false,
             },
-            event::Event::EventsCleared => {
-                let frame = swap_chain.get_next_texture();
-                let mut encoder =
-                    device.create_command_encoder(&wgpu::CommandEncoderDescriptor { todo: 0 });
-                {
-                    let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                        color_attachments: &[wgpu::RenderPassColorAttachmentDescriptor {
-                            attachment: &frame.view,
-                            resolve_target: None,
-                            load_op: wgpu::LoadOp::Clear,
-                            store_op: wgpu::StoreOp::Store,
-                            clear_color: wgpu::Color::GREEN,
-                        }],
-                        depth_stencil_attachment: None,
-                    });
-                    rpass.set_pipeline(&render_pipeline);
-                    rpass.set_bind_group(0, &bind_group, &[]);
-                    rpass.draw(0..3, 0..1);
-                }
+            limits: wgpu::Limits::default(),
+        });
 
-                queue.submit(&[encoder.finish()]);
-            }
-            _ => (),
+        let swap_chain = device.create_swap_chain(
+            &surface,
+            &wgpu::SwapChainDescriptor {
+                usage: wgpu::TextureUsage::OUTPUT_ATTACHMENT,
+                format: wgpu::TextureFormat::Bgra8UnormSrgb,
+                width: init.physical_win_size.0,
+                height: init.physical_win_size.1,
+                present_mode: wgpu::PresentMode::Vsync,
+            },
+        );
+
+        let world_render_state = WorldRenderState::new(init.world, &device)?;
+
+        Ok(RenderState {
+            swap_chain,
+            world: world_render_state,
+            queue,
+            device,
+        })
+    }
+
+    pub fn render_frame(&mut self) {
+        let frame = self.swap_chain.get_next_texture();
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor { todo: 0 });
+
+        self.world.render_frame(&frame, &mut encoder);
+        self.queue.submit(&[encoder.finish()]);
+    }
+}
+
+impl WorldRenderState {
+    fn new<RV, RF>(
+        init: WorldRenderInit<RV, RF>,
+        device: &wgpu::Device,
+    ) -> Result<Self>
+    where
+        RV: std::io::Seek + std::io::Read,
+        RF: std::io::Seek + std::io::Read,
+    {
+        let vs_module =
+            device.create_shader_module(&wgpu::read_spirv(init.vert_shader_spirv_bytes)?);
+        let fs_module =
+            device.create_shader_module(&wgpu::read_spirv(init.frag_shader_spirv_bytes)?);
+
+        let bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor { bindings: &[] });
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            layout: &bind_group_layout,
+            bindings: &[],
+        });
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            bind_group_layouts: &[&bind_group_layout],
+        });
+
+        let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            layout: &pipeline_layout,
+            vertex_stage: wgpu::ProgrammableStageDescriptor {
+                module: &vs_module,
+                entry_point: "main",
+            },
+            fragment_stage: Some(wgpu::ProgrammableStageDescriptor {
+                module: &fs_module,
+                entry_point: "main",
+            }),
+            rasterization_state: Some(wgpu::RasterizationStateDescriptor {
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: wgpu::CullMode::Front,
+                depth_bias: 0,
+                depth_bias_slope_scale: 0.0,
+                depth_bias_clamp: 0.0,
+            }),
+            primitive_topology: wgpu::PrimitiveTopology::TriangleList,
+            color_states: &[wgpu::ColorStateDescriptor {
+                format: wgpu::TextureFormat::Bgra8UnormSrgb,
+                color_blend: wgpu::BlendDescriptor::REPLACE,
+                alpha_blend: wgpu::BlendDescriptor::REPLACE,
+                write_mask: wgpu::ColorWrite::ALL,
+            }],
+            depth_stencil_state: None,
+            index_format: wgpu::IndexFormat::Uint16,
+            vertex_buffers: &[],
+            sample_count: 1,
+            sample_mask: !0,
+            alpha_to_coverage_enabled: false,
+        });
+
+        Ok(WorldRenderState {
+            render_pipeline,
+            bind_group,
+        })
+    }
+
+    fn render_frame(&mut self, frame: &wgpu::SwapChainOutput, encoder: &mut wgpu::CommandEncoder) {
+        let background_color = wgpu::Color::BLACK;
+        {
+            let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                color_attachments: &[wgpu::RenderPassColorAttachmentDescriptor {
+                    attachment: &frame.view,
+                    resolve_target: None,
+                    load_op: wgpu::LoadOp::Clear,
+                    store_op: wgpu::StoreOp::Store,
+                    clear_color: background_color,
+                }],
+                depth_stencil_attachment: None,
+            });
+            rpass.set_pipeline(&self.render_pipeline);
+            rpass.set_bind_group(0, &self.bind_group, &[]);
+            rpass.draw(0..3, 0..1);
         }
-    });
-}
+    }
 
-struct SpirvShaders {
-    vert: Vec<u32>,
-    frag: Vec<u32>,
-}
 
-fn compile_shaders() -> Result<SpirvShaders> {
-    let mut compiler =
-        shaderc::Compiler::new().ok_or_else(|| anyhow!("Could not create shaderc::Compiler"))?;
-    // options.add_macro_definition("EP", Some("main"));
-    let vert = {
-        let source = str::from_utf8(include_bytes!("shader.vert"))?;
-        let options = shaderc::CompileOptions::new()
-            .ok_or_else(|| anyhow!("Could not create shaderc::CompileOptions"))?;
-        let compiled = compiler.compile_into_spirv(
-            source,
-            shaderc::ShaderKind::Vertex,
-            "shader.vert",
-            "main",
-            Some(&options),
-        )?;
-        wgpu::read_spirv(std::io::Cursor::new(compiled.as_binary_u8()))?
-    };
-
-    let frag = {
-        let source = str::from_utf8(include_bytes!("shader.frag"))?;
-        let options = shaderc::CompileOptions::new()
-            .ok_or_else(|| anyhow!("Could not create shaderc::CompileOptions"))?;
-        let compiled = compiler.compile_into_spirv(
-            source,
-            shaderc::ShaderKind::Fragment,
-            "shader.frag",
-            "main",
-            Some(&options),
-        )?;
-        wgpu::read_spirv(std::io::Cursor::new(compiled.as_binary_u8()))?
-    };
-
-    Ok(SpirvShaders { vert, frag })
+    // pub fn update(&mut self, world: &World, updated_state: &UpdatedWorldState) {
+    //     unimplemented!();
+    // }
 }

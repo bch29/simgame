@@ -5,11 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::io::{self, Read, Write};
 use std::slice;
 
-pub const CHUNK_SIZE_X: usize = 16;
-pub const CHUNK_SIZE_Y: usize = 16;
-pub const CHUNK_SIZE_Z: usize = 16;
-pub const CHUNK_SIZE_XY: usize = CHUNK_SIZE_X * CHUNK_SIZE_Y;
-pub const CHUNK_SIZE_TOTAL: usize = CHUNK_SIZE_X * CHUNK_SIZE_Y * CHUNK_SIZE_Z;
+pub mod index_utils;
 
 /// Represents the value of a single block in the world. The wrapped value is an index into the
 /// BlockConfig's list of BlockInfo.
@@ -56,14 +52,14 @@ pub struct BlockConfig {
 
 /// Stores the world's blocks, but not other things like entities.
 #[derive(Clone, PartialEq, Eq)]
-pub struct WorldBlocks {
+pub struct WorldBlockData {
     /// Number of chunks in each dimension
     count_chunks: Vector3<usize>,
     /// Storage for chunks.
     chunks: Vec<Chunk>,
 }
 
-impl std::fmt::Debug for WorldBlocks {
+impl std::fmt::Debug for WorldBlockData {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> Result<(), std::fmt::Error> {
         write!(
             f,
@@ -95,7 +91,7 @@ pub struct Chunk {
      | 16 17 18 19
      v 20 21 22 23
      */
-    blocks: [Block; CHUNK_SIZE_TOTAL],
+    blocks: [Block; index_utils::chunk_size_total()],
 }
 
 impl Block {
@@ -125,14 +121,14 @@ impl Chunk {
 
     /// Creates a chunk filled with zeroes (i.e. empty blocks).
     fn empty() -> Chunk {
-        let blocks = [Block(0); CHUNK_SIZE_TOTAL];
+        let blocks = [Block(0); index_utils::chunk_size_total()];
         Chunk { blocks }
     }
 }
 
 impl std::cmp::PartialEq for Chunk {
     fn eq(&self, other: &Self) -> bool {
-        for i in 0..CHUNK_SIZE_TOTAL {
+        for i in 0..index_utils::chunk_size_total() {
             if self.blocks[i] != other.blocks[i] {
                 return false;
             }
@@ -144,7 +140,7 @@ impl std::cmp::PartialEq for Chunk {
 
 impl Eq for Chunk {}
 
-impl WorldBlocks {
+impl WorldBlockData {
     pub fn get_chunk(&self, p: Point3<usize>) -> &Chunk {
         let (chunk_idx, _) = index_utils::to_chunk_index(self.count_chunks, p);
         &self.chunks[chunk_idx]
@@ -262,20 +258,20 @@ impl WorldBlocks {
         let size = index_utils::make_size(count_chunks);
         assert!(target.len() >= count_chunks.x * count_chunks.y * count_chunks.z);
 
-        let mut buf: [u16; CHUNK_SIZE_X] = [0; CHUNK_SIZE_X];
+        let mut buf = [0u16; index_utils::chunk_size().x];
 
         for z in 0..size.z {
             for y in 0..size.y {
                 for chunk_x in 0..count_chunks.x {
                     let start_pos = Point3 {
-                        x: chunk_x * CHUNK_SIZE_X,
+                        x: chunk_x * index_utils::chunk_size().x,
                         y,
                         z,
                     };
 
                     let (chunk_idx, inner_start_idx) =
                         index_utils::pack_index(count_chunks, start_pos);
-                    let inner_end_idx = inner_start_idx + CHUNK_SIZE_X;
+                    let inner_end_idx = inner_start_idx + index_utils::chunk_size().x;
 
                     src.read_u16_into::<LittleEndian>(&mut buf)?;
                     let blocks = blocks_from_u16(&buf);
@@ -295,26 +291,26 @@ impl WorldBlocks {
     }
 
     /// Constructs a WorldBlocks with the given size and block config, which is initially empty.
-    pub fn empty(count_chunks: Vector3<usize>) -> WorldBlocks {
+    pub fn empty(count_chunks: Vector3<usize>) -> WorldBlockData {
         let empty_chunk = Chunk::empty();
         let empty_chunks: Vec<_> = (0..count_chunks.x * count_chunks.y * count_chunks.z)
             .map(|_| empty_chunk.clone())
             .collect();
 
-        WorldBlocks {
+        WorldBlockData {
             count_chunks,
             chunks: empty_chunks,
         }
     }
 
-    pub fn debug_summary(&self) -> WorldBlocksSummary {
+    pub fn debug_summary(&self) -> WorldBlockDataSummary {
         let count_total = self.size().x * self.size().y * self.size().z;
         let count_empty = self.iter_blocks().filter(|block| block.is_empty()).count();
         let pct_empty = (count_empty as f64 / count_total as f64) * 100.0;
         let byte_size = std::mem::size_of::<Chunk>() * self.chunks.len();
         let mb_size = byte_size / (1024 * 1024);
 
-        WorldBlocksSummary {
+        WorldBlockDataSummary {
             count_total,
             count_empty,
             pct_empty,
@@ -325,7 +321,7 @@ impl WorldBlocks {
 }
 
 #[derive(Debug, PartialEq)]
-pub struct WorldBlocksSummary {
+pub struct WorldBlockDataSummary {
     count_total: usize,
     count_empty: usize,
     pct_empty: f64,
@@ -338,88 +334,6 @@ fn blocks_from_u16(buf: &[u16]) -> &[Block] {
     unsafe { slice::from_raw_parts(buf.as_ptr() as *const Block, buf.len()) }
 }
 
-pub mod index_utils {
-    use crate::block::{CHUNK_SIZE_X, CHUNK_SIZE_XY, CHUNK_SIZE_Y, CHUNK_SIZE_Z};
-    use cgmath::{ElementWise, Point3, Vector3};
-
-    #[inline]
-    pub fn chunk_size() -> Vector3<usize> {
-        Vector3 {
-            x: CHUNK_SIZE_X,
-            y: CHUNK_SIZE_Y,
-            z: CHUNK_SIZE_Z,
-        }
-    }
-
-    #[inline]
-    pub fn pack_xyz(bounds: Vector3<usize>, p: Point3<usize>) -> usize {
-        p.x + p.y * bounds.x + p.z * bounds.x * bounds.y
-    }
-
-    #[inline]
-    pub fn unpack_xyz(bounds: Vector3<usize>, index: usize) -> Point3<usize> {
-        let xy = index % (bounds.x * bounds.y);
-
-        Point3 {
-            x: xy % bounds.x,
-            y: xy / bounds.x,
-            z: index / (bounds.x * bounds.y),
-        }
-    }
-
-    /// indices is (chunk_index, inner_index)
-    #[inline]
-    pub fn unpack_index(count_chunks: Vector3<usize>, indices: (usize, usize)) -> Point3<usize> {
-        let (chunk_index, inner_index) = indices;
-
-        let origin = Point3::from((0, 0, 0));
-        let chunk_pos = unpack_xyz(count_chunks, chunk_index);
-        let inner_pos = unpack_xyz(chunk_size(), inner_index);
-        let inner_offset = inner_pos - origin;
-        chunk_pos.mul_element_wise(origin + chunk_size()) + inner_offset
-    }
-
-    /// From a point in block coordinates, return the chunk index and the position of the block
-    /// within that chunk.
-    #[inline]
-    pub fn to_chunk_index(
-        count_chunks: Vector3<usize>,
-        p: Point3<usize>,
-    ) -> (usize, Point3<usize>) {
-        let size = make_size(count_chunks);
-        assert!(p.x < size.x);
-        assert!(p.y < size.y);
-        assert!(p.z < size.z);
-
-        let origin = Point3::from((0, 0, 0));
-        let inner_pos = p.rem_element_wise(origin + chunk_size());
-        let chunk_pos = p.div_element_wise(origin + chunk_size());
-        let chunk_idx = pack_xyz(count_chunks, chunk_pos);
-        (chunk_idx, inner_pos)
-    }
-
-    #[inline]
-    pub fn pack_within_chunk(p: Point3<usize>) -> usize {
-        assert!(p.x < CHUNK_SIZE_X);
-        assert!(p.y < CHUNK_SIZE_Y);
-        assert!(p.z < CHUNK_SIZE_Z);
-        p.x + p.y * CHUNK_SIZE_X + p.z * CHUNK_SIZE_XY
-    }
-
-    /// Returns (chunk_index, inner_index),
-    #[inline]
-    pub fn pack_index(count_chunks: Vector3<usize>, p: Point3<usize>) -> (usize, usize) {
-        let (chunk_index, inner_point) = to_chunk_index(count_chunks, p);
-        let inner_index = pack_within_chunk(inner_point);
-        (chunk_index, inner_index)
-    }
-
-    #[inline]
-    pub fn make_size(count_chunks: Vector3<usize>) -> Vector3<usize> {
-        count_chunks.mul_element_wise(chunk_size())
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use cgmath::{Point3, Vector3};
@@ -427,67 +341,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_pack_index() {
-        let count_chunks = Vector3 { x: 17, y: 11, z: 7 };
-
-        assert_eq!(
-            (0, 0),
-            index_utils::pack_index(count_chunks, Point3 { x: 0, y: 0, z: 0 })
-        );
-
-        assert_eq!(
-            (0, 7 + 3 * CHUNK_SIZE_X),
-            index_utils::pack_index(count_chunks, Point3 { x: 7, y: 3, z: 0 })
-        );
-
-        assert_eq!(
-            (
-                2 + 8 * count_chunks.x + 3 * count_chunks.x * count_chunks.y,
-                5 + 4 * CHUNK_SIZE_X + 12 * CHUNK_SIZE_XY
-            ),
-            index_utils::pack_index(
-                count_chunks,
-                Point3 {
-                    x: 37,
-                    y: 132,
-                    z: 60
-                }
-            )
-        );
-    }
-
-    #[test]
-    fn test_unpack_index() {
-        let count_chunks = Vector3 { x: 16, y: 16, z: 8 };
-
-        assert_eq!(
-            Point3 { x: 7, y: 3, z: 0 },
-            index_utils::unpack_xyz(index_utils::chunk_size(), 7 + 3 * CHUNK_SIZE_X)
-        );
-
-        let check_point = |p| {
-            assert_eq!(
-                p,
-                index_utils::unpack_index(count_chunks, index_utils::pack_index(count_chunks, p))
-            );
-        };
-
-        check_point(Point3 { x: 0, y: 0, z: 0 });
-        check_point(Point3 { x: 7, y: 3, z: 0 });
-        check_point(Point3 { x: 21, y: 17, z: 4 });
-        check_point(Point3 {
-            x: 37,
-            y: 132,
-            z: 60,
-        });
-    }
-
-    #[test]
     fn test_reserialize() {
         let size = Vector3 { x: 2, y: 3, z: 4 };
         let mut buf = Vec::new();
 
-        let mut original = WorldBlocks::empty(size);
+        let mut original = WorldBlockData::empty(size);
 
         let points1 = vec![(0, 0, 0), (3, 4, 5), (24, 25, 26), (24, 35, 36)];
 
@@ -503,7 +361,7 @@ mod tests {
 
         original.serialize_blocks(&mut buf).unwrap();
 
-        let mut reserialized = WorldBlocks::empty(size);
+        let mut reserialized = WorldBlockData::empty(size);
         reserialized
             .deserialize_blocks(&mut buf.as_slice())
             .unwrap();

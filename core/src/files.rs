@@ -4,7 +4,7 @@ use directories::UserDirs;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
-use crate::block::WorldBlocks;
+use crate::block::WorldBlockData;
 use crate::settings::{CoreSettings, Settings};
 
 const CORE_SETTINGS_FILE_NAME: &str = "core_config.yaml";
@@ -95,7 +95,7 @@ impl FileContext {
         res
     }
 
-    pub fn save_world_blocks(&self, save_name: &str, blocks: &WorldBlocks) -> Result<()> {
+    pub fn save_world_blocks(&self, save_name: &str, blocks: &WorldBlockData) -> Result<()> {
         let save_dir = self.get_save_dir(save_name);
         if !save_dir.is_dir() {
             println!("Creating save directory at {}", save_dir.to_string_lossy());
@@ -142,7 +142,7 @@ impl FileContext {
         Ok(())
     }
 
-    pub fn load_world_blocks(&self, save_name: &str) -> Result<WorldBlocks> {
+    pub fn load_world_blocks(&self, save_name: &str) -> Result<WorldBlockData> {
         let save_dir = self.get_save_dir(save_name);
         if !save_dir.is_dir() {
             return Err(anyhow!(
@@ -195,13 +195,13 @@ impl FileContext {
         &self,
         meta: &WorldMeta,
         file_path: &Path,
-    ) -> Result<WorldBlocks> {
+    ) -> Result<WorldBlockData> {
         let file =
             std::fs::File::open(&file_path).context("Opening block data file for saved game")?;
         let mut decompressed =
             lz4::Decoder::new(file).context("Initializing decoder for block data file")?;
 
-        let mut world_blocks = WorldBlocks::empty(meta.count_chunks);
+        let mut world_blocks = WorldBlockData::empty(meta.count_chunks);
         world_blocks
             .deserialize_blocks(&mut decompressed)
             .context("Deserializing block data")?;
