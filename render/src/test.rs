@@ -28,6 +28,7 @@ pub fn test_render(vert_shader: &[u8], frag_shader: &[u8]) -> Result<()> {
         world: WorldRenderInit {
             vert_shader_spirv_bytes: std::io::Cursor::new(vert_shader),
             frag_shader_spirv_bytes: std::io::Cursor::new(frag_shader),
+            aspect_ratio: (physical_win_size.width / physical_win_size.height) as f32
         },
     };
 
@@ -55,7 +56,10 @@ pub fn test_render(vert_shader: &[u8], frag_shader: &[u8]) -> Result<()> {
                 }
                 _ => {}
             },
-            event::Event::EventsCleared => render_state.render_frame(),
+            event::Event::EventsCleared => {
+                render_state.update();
+                render_state.render_frame();
+            },
             _ => (),
         }
     });

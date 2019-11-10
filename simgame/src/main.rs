@@ -64,8 +64,8 @@ fn run(opt: Opts) -> Result<()> {
 }
 
 fn run_render() -> Result<()> {
-    let vert_shader: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/shader.vert.spv"));
-    let frag_shader: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/shader.frag.spv"));
+    let vert_shader: &[u8] = simgame_shaders::VERT_SHADER;
+    let frag_shader: &[u8] = simgame_shaders::FRAG_SHADER;
 
     simgame_render::test::test_render(vert_shader, frag_shader)
 }

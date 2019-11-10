@@ -3,18 +3,15 @@ name = "simgame"
 version = "0.1.0"
 authors = ["Bradley Hardy <bradleyhardy@live.com>"]
 edition = "2018"
-build = "build.rs"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
 simgame_core = { path = "../core/" }
 simgame_render = { path = "../render/" }
+simgame_shaders = { path = "../shaders/" }
 cgmath = "*"
 structopt = "0.3"
 env_logger = "0.7"
 log = "*"
 anyhow = "1.0"
-
-[build-dependencies]
-shaderc = "0.6"
