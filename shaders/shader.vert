@@ -49,7 +49,13 @@ void main() {
   v_Pos = u_Projection * u_View * model * a_Pos;
   v_Normal = (model * vec4(a_Normal, 0.0)).xyz;
 
-  v_BlockType = b_BlockTypes[gl_InstanceIndex];
+  // Block types is really an array of 16-bit uints but glsl treats it as an array of 32-bit uints
+  uint blockTypeBase = b_BlockTypes[gl_InstanceIndex / 2];
+  if (gl_InstanceIndex % 2 == 1)
+  {
+    blockTypeBase >>= 2;
+  }
+  v_BlockType = blockTypeBase & 0xFFFF;
 
   if (v_BlockType == 0)
   {

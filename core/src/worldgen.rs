@@ -31,11 +31,11 @@ pub fn generate_world(config: &GenerateWorldConfig) -> Result<WorldBlockData> {
     };
 
     println!("Generating terrain");
-    let base_z = world_size.z / 2.0;
-    let terrain_height = world_size.z / 2.0;
+    let base_z = 0.0;
+    let terrain_height = world_size.z;
 
-    let cos_factor = 1.0;
-    let sin_factor = 0.5;
+    let cos_factor = 2.0;
+    let sin_factor = 1.0;
 
     let mut blocks_done = 0;
     let total_blocks = blocks.size().x * blocks.size().y * blocks.size().z;
@@ -56,6 +56,7 @@ pub fn generate_world(config: &GenerateWorldConfig) -> Result<WorldBlockData> {
         use std::f64::consts::PI;
         // val in range [0, 1]
         let val = 0.5 * (1.0 + (p.x * PI * sin_factor).sin() * (p.y * PI * cos_factor).cos());
+        assert!(0. <= val && val <= 1.);
 
         // this is the height of the terrain at current x, y coordinate
         let height_here = base_z + val * terrain_height;
@@ -64,8 +65,8 @@ pub fn generate_world(config: &GenerateWorldConfig) -> Result<WorldBlockData> {
         if p.z * world_size.z > height_here {
             *block = Block::air();
         } else {
-            let block_val = rng.gen::<u16>() % 7;
-            *block = Block::from_u16(block_val);
+            // let block_val = rng.gen::<u16>() % 7;
+            *block = Block::from_u16(1);
         }
 
         blocks_done += 1;

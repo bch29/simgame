@@ -9,7 +9,7 @@ layout(location = 0) out vec4 o_Target;
 const vec4 ambientColor = vec4(1.0, 1.0, 1.0, 1.0);
 const float ambientStrength = 0.1;
 const vec3 lightPos = vec3(3., -10., 6.);
-const vec4 lightColor = vec4(1.0, 0.9, 0.8, 1.0);
+const vec4 lightColor = vec4(1.0, 1.0, 1.0, 1.0);
 
 float spot(vec2 p) {
   float max_dist = max(
@@ -44,7 +44,7 @@ void main() {
     float dist = length(vec2(0.75, 0.75));
     float hi = 1.;
     float lo = 0.2;
-    vec4 texColor = vec4(.2, .2, 1., 1.);
+    vec4 texColor = vec4(0., .1, 1.0, 1.);
     /* vec4 texColor = */
     /*   0.25 * vec4(hi, lo, lo, 1.) * spot(vec2(0.25, 0.25)) + */
     /*   0.25 * vec4(lo, hi, lo, 1.) * spot(vec2(0.25, 0.75)) + */
