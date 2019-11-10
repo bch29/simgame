@@ -250,7 +250,7 @@ impl WorldRenderState {
             rpass.set_bind_group(0, &bind_group, &[]);
             rpass.set_index_buffer(&self.cube_index_buf, 0);
             rpass.set_vertex_buffers(0, &[(&self.cube_vertex_buf, 0)]);
-            rpass.draw_indexed(0..self.cube_index_count as u32, 0, 0..1);
+            rpass.draw_indexed(0..self.cube_index_count as u32, 0, 0..4);
         }
     }
 

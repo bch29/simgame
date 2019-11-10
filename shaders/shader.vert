@@ -13,11 +13,21 @@ layout(set = 0, binding = 0) uniform Locals {
     mat4 u_Model;
 };
 
+const float[] offsets = {
+  vec3(1.0, 1.0, 0.0),
+  vec3(-1.0, 1.0, 0.0),
+  vec3(1.0, -1.0, 0.0),
+  vec3(-1.0, -1.0, 0.0),
+}
+
 void main() {
-    v_TexCoord = a_TexCoord;
-    v_Pos = u_Projection * u_View * u_Model * a_Pos;
-    v_Normal = (u_Model * vec4(a_Normal, 0.0)).xyz;
-    gl_Position = v_Pos;
+  const float scale = 0.25;
+  const float offset = offsets[gl_InstanceID];
+
+  v_TexCoord = a_TexCoord;
+  v_Pos = u_Projection * u_View * (offset + scale * u_Model * a_Pos);
+  v_Normal = (u_Model * vec4(a_Normal, 0.0)).xyz;
+  gl_Position = v_Pos;
 }
 
 // vi: ft=c
