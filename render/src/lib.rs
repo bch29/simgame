@@ -134,14 +134,14 @@ impl WorldRenderState {
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 bindings: &[
                     // Uniforms
-                    // wgpu::BindGroupLayoutBinding {
-                    //     binding: 0,
-                    //     visibility: wgpu::ShaderStage::VERTEX,
-                    //     ty: wgpu::BindingType::UniformBuffer { dynamic: false },
-                    // },
-                    // Block type buffer
                     wgpu::BindGroupLayoutBinding {
                         binding: 0,
+                        visibility: wgpu::ShaderStage::VERTEX,
+                        ty: wgpu::BindingType::UniformBuffer { dynamic: false },
+                    },
+                    // Block type buffer
+                    wgpu::BindGroupLayoutBinding {
+                        binding: 1,
                         visibility: wgpu::ShaderStage::VERTEX,
                         ty: wgpu::BindingType::StorageBuffer {
                             dynamic: false,
@@ -281,15 +281,15 @@ impl WorldRenderState {
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             layout: &self.bind_group_layout,
             bindings: &[
-                // wgpu::Binding {
-                //     binding: 0,
-                //     resource: wgpu::BindingResource::Buffer {
-                //         buffer: &self.uniform_buf,
-                //         range: 0..192,
-                //     },
-                // },
                 wgpu::Binding {
                     binding: 0,
+                    resource: wgpu::BindingResource::Buffer {
+                        buffer: &self.uniform_buf,
+                        range: 0..192,
+                    },
+                },
+                wgpu::Binding {
+                    binding: 1,
                     resource: wgpu::BindingResource::Buffer {
                         buffer: &self.block_type_buf,
                         range: 0..CHUNK_BUFFER_SIZE_BYTES,

@@ -8,13 +8,13 @@ layout(location = 1) out vec3 v_Normal;
 layout(location = 2) out vec4 v_Pos;
 layout(location = 3) out uint v_BlockType;
 
-/* layout(set = 0, binding = 0) uniform Locals { */
-/*     mat4 u_Projection; */
-/*     mat4 u_View; */
-/*     mat4 u_Model; */
-/* }; */
+layout(set = 0, binding = 0) uniform Locals {
+    mat4 u_Projection;
+    mat4 u_View;
+    mat4 u_Model;
+};
 
-layout(set = 0, binding = 0) buffer BTG {
+layout(set = 0, binding = 1) buffer BlockTypes {
   uint[] b_BlockTypes;
 };
 
@@ -43,16 +43,22 @@ void main() {
       0.0, 0.0, scale, 0.0,
       0.0, 0.0, 0.0, 1.0);
 
-  /* mat4 model = u_Model * translation * rescale; */
+  mat4 model = u_Model * translation * rescale;
 
-  /* v_TexCoord = a_TexCoord; */
-  /* v_Pos = u_Projection * u_View * model * a_Pos; */
-  /* v_Normal = (model * vec4(a_Normal, 0.0)).xyz; */
-  /* gl_Position = v_Pos; */
-  v_Normal = a_Normal;
-  gl_Position = a_Pos;
+  v_TexCoord = a_TexCoord;
+  v_Pos = u_Projection * u_View * model * a_Pos;
+  v_Normal = (model * vec4(a_Normal, 0.0)).xyz;
 
-  v_BlockType = b_BlockTypes[gl_InstanceIndex * 2];
+  v_BlockType = b_BlockTypes[gl_InstanceIndex];
+
+  if (v_BlockType == 0)
+  {
+    gl_Position = vec4(0);
+  }
+  else
+  {
+    gl_Position = v_Pos;
+  }
 }
 
 // vi: ft=c

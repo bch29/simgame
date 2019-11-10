@@ -44,11 +44,12 @@ void main() {
     float dist = length(vec2(0.75, 0.75));
     float hi = 1.;
     float lo = 0.2;
-    vec4 texColor =
-      0.25 * vec4(hi, lo, lo, 1.) * spot(vec2(0.25, 0.25)) +
-      0.25 * vec4(lo, hi, lo, 1.) * spot(vec2(0.25, 0.75)) +
-      0.25 * vec4(lo, lo, hi, 1.) * spot(vec2(0.75, 0.25)) +
-      0.25 * vec4(hi, lo, lo, 1.) * spot(vec2(0.75, 0.75));
+    vec4 texColor = vec4(.2, .2, 1., 1.);
+    /* vec4 texColor = */
+    /*   0.25 * vec4(hi, lo, lo, 1.) * spot(vec2(0.25, 0.25)) + */
+    /*   0.25 * vec4(lo, hi, lo, 1.) * spot(vec2(0.25, 0.75)) + */
+    /*   0.25 * vec4(lo, lo, hi, 1.) * spot(vec2(0.75, 0.25)) + */
+    /*   0.25 * vec4(hi, lo, lo, 1.) * spot(vec2(0.75, 0.75)); */
 
     o_Target = (ambient + diffuse) * texColor;
   }
