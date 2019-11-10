@@ -14,7 +14,7 @@ layout(location = 3) out uint v_BlockType;
 /*     mat4 u_Model; */
 /* }; */
 
-layout(set = 0, binding = 1) buffer BTG {
+layout(set = 0, binding = 0) buffer BTG {
   uint[] b_BlockTypes;
 };
 
