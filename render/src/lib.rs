@@ -1,7 +1,9 @@
 use anyhow::{anyhow, Result};
-use cgmath::{Deg, Rad, Angle, Matrix4, Point3, SquareMatrix, Vector3};
+use cgmath::{Angle, Deg, Matrix4, Point3, Rad, SquareMatrix, Vector3};
 use raw_window_handle::HasRawWindowHandle;
-// use simgame_core::world::{UpdatedWorldState, World};
+use simgame_core::block;
+use simgame_core::block::index_utils;
+use simgame_core::world::{UpdatedWorldState, World};
 
 mod mesh;
 pub mod test;
@@ -18,6 +20,8 @@ pub struct WorldRenderInit<RV, RF> {
     pub vert_shader_spirv_bytes: RV,
     pub frag_shader_spirv_bytes: RF,
     pub aspect_ratio: f32,
+    pub width: u32,
+    pub height: u32,
 }
 
 pub struct RenderState {
@@ -27,6 +31,11 @@ pub struct RenderState {
     world: WorldRenderState,
 }
 
+const BLOCK_TYPE_SIZE_BYTES: u32 = std::mem::size_of::<block::Block>() as u32;
+const CHUNK_BUFFER_SIZE_BYTES: wgpu::BufferAddress = index_utils::chunk_size_total()
+    as wgpu::BufferAddress
+    * BLOCK_TYPE_SIZE_BYTES as wgpu::BufferAddress;
+
 struct WorldRenderState {
     render_pipeline: wgpu::RenderPipeline,
     cube_vertex_buf: wgpu::Buffer,
@@ -35,6 +44,13 @@ struct WorldRenderState {
     uniform_buf: wgpu::Buffer,
     bind_group_layout: wgpu::BindGroupLayout,
     rotation: Matrix4<f32>,
+    depth_texture: wgpu::TextureView,
+    /// Each point is a u8, represents block type at that point
+    /// Dimensions are 16x16x16
+    block_type_buf: wgpu::Buffer,
+    // /// Contains textures for each block type.
+    // /// Dimensions are 16x16xN, where N is number of block types.
+    // block_master_texture: wgpu::TextureView,
 }
 
 impl RenderState {
@@ -90,8 +106,16 @@ impl RenderState {
         self.queue.submit(&[encoder.finish()]);
     }
 
-    pub fn update(&mut self) {
-        self.world.update();
+    pub fn init(&mut self, world: &World) {
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor { todo: 0 });
+        self.world.init(&mut encoder, &self.device, world);
+        self.queue.submit(&[encoder.finish()]);
+    }
+
+    pub fn update(&mut self, world: &World, diff: &UpdatedWorldState) {
+        self.world.update(world, diff);
     }
 }
 
@@ -109,10 +133,20 @@ impl WorldRenderState {
         let bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 bindings: &[
+                    // Uniforms
                     wgpu::BindGroupLayoutBinding {
                         binding: 0,
                         visibility: wgpu::ShaderStage::VERTEX,
                         ty: wgpu::BindingType::UniformBuffer { dynamic: false },
+                    },
+                    // Block type buffer
+                    wgpu::BindGroupLayoutBinding {
+                        binding: 1,
+                        visibility: wgpu::ShaderStage::VERTEX,
+                        ty: wgpu::BindingType::StorageBuffer {
+                            dynamic: false,
+                            readonly: true,
+                        },
                     },
                     // wgpu::BindGroupLayoutBinding {
                     //     binding: 1,
@@ -157,6 +191,27 @@ impl WorldRenderState {
             )
             .fill_from_slice(uniform_data.as_ref());
 
+        let depth_texture = device.create_texture(&wgpu::TextureDescriptor {
+            size: wgpu::Extent3d {
+                width: init.width,
+                height: init.height,
+                depth: 1,
+            },
+            array_layer_count: 1,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Depth32Float,
+            usage: wgpu::TextureUsage::OUTPUT_ATTACHMENT,
+        });
+
+        let block_type_buf = device.create_buffer(&wgpu::BufferDescriptor {
+            size: CHUNK_BUFFER_SIZE_BYTES,
+            usage: wgpu::BufferUsage::COPY_DST
+                | wgpu::BufferUsage::STORAGE
+                | wgpu::BufferUsage::STORAGE_READ,
+        });
+
         let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             layout: &pipeline_layout,
             vertex_stage: wgpu::ProgrammableStageDescriptor {
@@ -181,7 +236,15 @@ impl WorldRenderState {
                 alpha_blend: wgpu::BlendDescriptor::REPLACE,
                 write_mask: wgpu::ColorWrite::ALL,
             }],
-            depth_stencil_state: None,
+            depth_stencil_state: Some(wgpu::DepthStencilStateDescriptor {
+                format: wgpu::TextureFormat::Depth32Float,
+                depth_write_enabled: true,
+                depth_compare: wgpu::CompareFunction::Less,
+                stencil_front: wgpu::StencilStateFaceDescriptor::IGNORE,
+                stencil_back: wgpu::StencilStateFaceDescriptor::IGNORE,
+                stencil_read_mask: 0u32,
+                stencil_write_mask: 0u32,
+            }),
             index_format: cube_mesh.index_format(),
             vertex_buffers: &[cube_mesh.vertex_buffer_descriptor()],
             sample_count: 1,
@@ -196,7 +259,9 @@ impl WorldRenderState {
             cube_index_count: cube_mesh.indices.len(),
             uniform_buf,
             bind_group_layout,
-            rotation: Matrix4::identity()
+            rotation: Matrix4::identity(),
+            depth_texture: depth_texture.create_default_view(),
+            block_type_buf,
         })
     }
 
@@ -223,10 +288,13 @@ impl WorldRenderState {
                         range: 0..192,
                     },
                 },
-                // wgpu::Binding {
-                //     binding: 1,
-                //     resource: wgpu::BindingResource::TextureView(&texture_view),
-                // },
+                wgpu::Binding {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Buffer {
+                        buffer: &self.block_type_buf,
+                        range: 0..CHUNK_BUFFER_SIZE_BYTES,
+                    },
+                },
                 // wgpu::Binding {
                 //     binding: 2,
                 //     resource: wgpu::BindingResource::Sampler(&sampler),
@@ -244,24 +312,65 @@ impl WorldRenderState {
                     store_op: wgpu::StoreOp::Store,
                     clear_color: background_color,
                 }],
-                depth_stencil_attachment: None,
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachmentDescriptor {
+                    attachment: &self.depth_texture,
+                    depth_load_op: wgpu::LoadOp::Clear,
+                    depth_store_op: wgpu::StoreOp::Store,
+                    stencil_load_op: wgpu::LoadOp::Clear,
+                    stencil_store_op: wgpu::StoreOp::Store,
+                    clear_depth: 1.0,
+                    clear_stencil: 0,
+                }),
             });
             rpass.set_pipeline(&self.render_pipeline);
             rpass.set_bind_group(0, &bind_group, &[]);
             rpass.set_index_buffer(&self.cube_index_buf, 0);
             rpass.set_vertex_buffers(0, &[(&self.cube_vertex_buf, 0)]);
-            rpass.draw_indexed(0..self.cube_index_count as u32, 0, 0..4);
+            rpass.draw_indexed(
+                0..self.cube_index_count as u32,
+                0,
+                0..(index_utils::chunk_size_total() as u32),
+            );
         }
     }
 
-    pub fn update(&mut self) {
+    fn update_chunk_storage(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        device: &wgpu::Device,
+        world: &World,
+        loc: Point3<usize>,
+    ) {
+        let chunk = world.blocks.get_chunk(loc);
+        let blocks_slice = simgame_core::block::blocks_to_u16(&chunk.blocks);
+        let blocks_buf = device
+            .create_buffer_mapped(chunk.blocks.len(), wgpu::BufferUsage::COPY_SRC)
+            .fill_from_slice(blocks_slice);
+        encoder.copy_buffer_to_buffer(
+            &blocks_buf,
+            0,
+            &self.block_type_buf,
+            0,
+            index_utils::chunk_size_total() as wgpu::BufferAddress
+                * BLOCK_TYPE_SIZE_BYTES as wgpu::BufferAddress,
+        );
+    }
+
+    pub fn init(
+        &mut self,
+        encoder: &mut wgpu::CommandEncoder,
+        device: &wgpu::Device,
+        world: &World,
+    ) {
+        // temporarily just init the chunk at the origin
+        self.update_chunk_storage(encoder, device, world, Point3::new(0, 0, 0));
+    }
+
+    pub fn update(&mut self, _world: &World, _diff: &UpdatedWorldState) {
         self.rotation = self.rotation
             * Matrix4::<f32>::from_angle_z(Rad::full_turn() / 300.)
             * Matrix4::<f32>::from_angle_x(Rad::full_turn() / 600.)
     }
-    // pub fn update(&mut self, world: &World, updated_state: &UpdatedWorldState) {
-    //     unimplemented!();
-    // }
 }
 
 #[rustfmt::skip]

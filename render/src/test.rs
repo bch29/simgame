@@ -4,6 +4,7 @@ use winit::{
     event,
     event_loop::{ControlFlow, EventLoop},
 };
+use simgame_core::world::{World, UpdatedWorldState};
 
 pub fn build_window(
     event_loop: &winit::event_loop::EventLoop<()>,
@@ -15,24 +16,28 @@ pub fn build_window(
     Ok(builder.build(event_loop)?)
 }
 
-pub fn test_render(vert_shader: &[u8], frag_shader: &[u8]) -> Result<()> {
+pub fn test_render(world: World, vert_shader: &[u8], frag_shader: &[u8]) -> Result<()> {
     let event_loop = EventLoop::new();
 
     let window = build_window(&event_loop)?;
 
     let physical_win_size = window.inner_size().to_physical(window.hidpi_factor());
+    let win_size: (u32, u32) = physical_win_size.into();
 
     let render_init = RenderInit {
         window: &window,
-        physical_win_size: physical_win_size.into(),
+        physical_win_size: win_size,
         world: WorldRenderInit {
             vert_shader_spirv_bytes: std::io::Cursor::new(vert_shader),
             frag_shader_spirv_bytes: std::io::Cursor::new(frag_shader),
-            aspect_ratio: (physical_win_size.width / physical_win_size.height) as f32
+            aspect_ratio: (physical_win_size.width / physical_win_size.height) as f32,
+            width: win_size.0,
+            height: win_size.1,
         },
     };
 
     let mut render_state = RenderState::new(render_init)?;
+    render_state.init(&world);
 
     event_loop.run(move |event, _, control_flow| {
         *control_flow = if cfg!(feature = "metal-auto-capture") {
@@ -57,7 +62,7 @@ pub fn test_render(vert_shader: &[u8], frag_shader: &[u8]) -> Result<()> {
                 _ => {}
             },
             event::Event::EventsCleared => {
-                render_state.update();
+                render_state.update(&world, &UpdatedWorldState::empty());
                 render_state.render_frame();
             },
             _ => (),

@@ -91,7 +91,7 @@ pub struct Chunk {
      | 16 17 18 19
      v 20 21 22 23
      */
-    blocks: [Block; index_utils::chunk_size_total()],
+    pub blocks: [Block; index_utils::chunk_size_total()],
 }
 
 impl Block {
@@ -332,6 +332,11 @@ pub struct WorldBlockDataSummary {
 #[inline]
 fn blocks_from_u16(buf: &[u16]) -> &[Block] {
     unsafe { slice::from_raw_parts(buf.as_ptr() as *const Block, buf.len()) }
+}
+
+#[inline]
+pub fn blocks_to_u16(buf: &[Block]) -> &[u16] {
+    unsafe { slice::from_raw_parts(buf.as_ptr() as *const u16, buf.len()) }
 }
 
 #[cfg(test)]

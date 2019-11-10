@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use structopt::StructOpt;
 
 use simgame_core::files::FileContext;
+use simgame_core::world::World;
 use simgame_core::worldgen;
 // use simgame::settings::{CoreSettings, Settings};
 
@@ -26,7 +27,6 @@ enum Action {
         #[structopt(short, long)]
         save_name: String,
     },
-    TestRender,
 }
 
 #[derive(Debug, StructOpt)]
@@ -59,22 +59,19 @@ fn run(opt: Opts) -> Result<()> {
     match &opt.action {
         Action::GenerateWorld { options } => run_generate(&ctx, options),
         Action::LoadWorld { save_name } => run_load_world(&ctx, save_name),
-        Action::TestRender => run_render(),
     }
-}
-
-fn run_render() -> Result<()> {
-    let vert_shader: &[u8] = simgame_shaders::VERT_SHADER;
-    let frag_shader: &[u8] = simgame_shaders::FRAG_SHADER;
-
-    simgame_render::test::test_render(vert_shader, frag_shader)
 }
 
 fn run_load_world(ctx: &FileContext, save_name: &str) -> Result<()> {
     let blocks = ctx.load_world_blocks(save_name)?;
     info!("Loaded world: {:?}", blocks.debug_summary());
 
-    Ok(())
+    let vert_shader: &[u8] = simgame_shaders::VERT_SHADER;
+    let frag_shader: &[u8] = simgame_shaders::FRAG_SHADER;
+
+    let world = World { blocks };
+
+    simgame_render::test::test_render(world, vert_shader, frag_shader)
 }
 
 fn run_generate(ctx: &FileContext, options: &GenerateWorldOptions) -> Result<()> {

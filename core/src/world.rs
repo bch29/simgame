@@ -1,3 +1,6 @@
+#![allow(unused_variables)]
+#![allow(dead_code)]
+
 use std::collections::HashSet;
 
 use cgmath::Point3;
@@ -5,7 +8,7 @@ use cgmath::Point3;
 use crate::block::WorldBlockData;
 
 pub struct World {
-    blocks: WorldBlockData,
+    pub blocks: WorldBlockData,
 }
 
 pub struct UpdatedWorldState {
@@ -19,6 +22,12 @@ impl World {
 }
 
 impl UpdatedWorldState {
+    pub fn empty() -> Self {
+        UpdatedWorldState {
+            modified_chunks: HashSet::new()
+        }
+    }
+
     fn clear(&mut self) {
         self.modified_chunks.clear();
     }
