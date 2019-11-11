@@ -13,4 +13,4 @@ log = "0.4"
 # graphics
 winit = "0.20.0-alpha4"
 raw-window-handle = "0.3"
-wgpu = { path = "../../wgpu-rs/" }
+wgpu = "0.4"

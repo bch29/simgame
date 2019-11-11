@@ -66,12 +66,13 @@ fn run_load_world(ctx: &FileContext, save_name: &str) -> Result<()> {
     let blocks = ctx.load_world_blocks(save_name)?;
     info!("Loaded world: {:?}", blocks.debug_summary());
 
-    let vert_shader: &[u8] = simgame_shaders::VERT_SHADER;
-    let frag_shader: &[u8] = simgame_shaders::FRAG_SHADER;
+    let (vert_shader, frag_shader) = simgame_shaders::compile(
+        "shaders/shader.vert".as_ref(),
+        "shaders/shader.frag".as_ref())?;
 
     let world = World { blocks };
 
-    simgame_render::test::test_render(world, vert_shader, frag_shader)
+    simgame_render::test::test_render(world, vert_shader.as_ref(), frag_shader.as_ref())
 }
 
 fn run_generate(ctx: &FileContext, options: &GenerateWorldOptions) -> Result<()> {
