@@ -23,15 +23,17 @@ const uint CHUNK_SIZE_Y = 16;
 const uint CHUNK_SIZE_Z = 16;
 
 void main() {
-  const float scale = 0.15;
+  const float scale = 1.0;
+  const float scale_over_2 = scale / 2.;
 
   uint block_xy = gl_InstanceIndex  % (CHUNK_SIZE_X * CHUNK_SIZE_Y);
   uint block_x = block_xy % CHUNK_SIZE_X;
   uint block_y = block_xy / CHUNK_SIZE_Y;
   uint block_z = gl_InstanceIndex / (CHUNK_SIZE_X * CHUNK_SIZE_Y);
+
   vec3 offset = 
-    scale * vec3(block_x, block_y, block_z) 
-    + vec3(.5 - scale * CHUNK_SIZE_X * 0.5);
+    scale * (vec3(.5) + vec3(block_x, block_y, block_z))
+    - vec3(scale_over_2 * CHUNK_SIZE_X);
 
   mat4 translation = mat4(
       1.0, 0.0, 0.0, 0.0,
@@ -40,9 +42,9 @@ void main() {
       offset.x, offset.y, offset.z, 1.0);
 
   mat4 rescale = mat4(
-      0.5 * scale, 0.0, 0.0, 0.0,
-      0.0, 0.5 * scale, 0.0, 0.0,
-      0.0, 0.0, 0.5 * scale, 0.0,
+      scale_over_2, 0.0, 0.0, 0.0,
+      0.0, scale_over_2, 0.0, 0.0,
+      0.0, 0.0, scale_over_2, 0.0,
       0.0, 0.0, 0.0, 1.0);
 
   mat4 model = u_Model * translation * rescale;

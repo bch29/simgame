@@ -172,9 +172,9 @@ impl WorldRenderState {
         let cube_index_buf = cube_mesh.index_buffer(device);
 
         let proj_matrix =
-            OPENGL_TO_WGPU_MATRIX * cgmath::perspective(Deg(45f32), init.aspect_ratio, 1.0, 10.0);
+            OPENGL_TO_WGPU_MATRIX * cgmath::perspective(Deg(70f32), init.aspect_ratio, 1.0, 100.0);
         let view_matrix = Matrix4::look_at(
-            Point3::new(1.5f32, -5.0, 3.0),
+            Point3::new(10f32, -30.0, 20.0),
             Point3::new(0f32, 0.0, 0.0),
             Vector3::unit_z(),
         );
@@ -368,8 +368,8 @@ impl WorldRenderState {
 
     pub fn update(&mut self, _world: &World, _diff: &UpdatedWorldState) {
         self.rotation = self.rotation
-            * Matrix4::<f32>::from_angle_z(Rad::full_turn() / 300.)
-            * Matrix4::<f32>::from_angle_x(Rad::full_turn() / 600.)
+            * Matrix4::<f32>::from_angle_z(Rad::full_turn() / 1000.);
+            // * Matrix4::<f32>::from_angle_x(Rad::full_turn() / 600.)
     }
 }
 
