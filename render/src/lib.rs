@@ -1,14 +1,24 @@
 use anyhow::{anyhow, Result};
-use cgmath::{Angle, Deg, Matrix4, Point3, Rad, SquareMatrix, Vector3};
+use cgmath::{Angle, Deg, ElementWise, Matrix4, Point3, Rad, SquareMatrix, Vector3};
+use log::info;
 use raw_window_handle::HasRawWindowHandle;
 use simgame_core::block;
 use simgame_core::block::index_utils;
 use simgame_core::world::{UpdatedWorldState, World};
+use std::collections::HashMap;
 
 mod mesh;
 pub mod test;
 
 // TODO: UI rendering pipeline
+
+const BLOCK_TYPE_SIZE_BYTES: u32 = std::mem::size_of::<block::Block>() as u32;
+const CHUNK_BUFFER_SIZE_BYTES: wgpu::BufferAddress = index_utils::chunk_size_total()
+    as wgpu::BufferAddress
+    * BLOCK_TYPE_SIZE_BYTES as wgpu::BufferAddress;
+const COUNT_UNIFORM_MATRICES: wgpu::BufferAddress = 3;
+const MATRIX4_SIZE: wgpu::BufferAddress = std::mem::size_of::<[f32; 16]>() as wgpu::BufferAddress;
+const UNIFORM_BUF_LEN: wgpu::BufferAddress = COUNT_UNIFORM_MATRICES * MATRIX4_SIZE;
 
 pub struct RenderInit<'a, RV, RF, W> {
     pub window: &'a W,
@@ -31,23 +41,23 @@ pub struct RenderState {
     world: WorldRenderState,
 }
 
-const BLOCK_TYPE_SIZE_BYTES: u32 = std::mem::size_of::<block::Block>() as u32;
-const CHUNK_BUFFER_SIZE_BYTES: wgpu::BufferAddress = index_utils::chunk_size_total()
-    as wgpu::BufferAddress
-    * BLOCK_TYPE_SIZE_BYTES as wgpu::BufferAddress;
+struct PerChunkRenderState {
+    block_type_buf: wgpu::Buffer,
+    uniform_buf: wgpu::Buffer,
+}
 
 struct WorldRenderState {
     render_pipeline: wgpu::RenderPipeline,
     cube_vertex_buf: wgpu::Buffer,
     cube_index_buf: wgpu::Buffer,
     cube_index_count: usize,
-    uniform_buf: wgpu::Buffer,
+    base_uniform_buf: wgpu::Buffer,
     bind_group_layout: wgpu::BindGroupLayout,
     rotation: Matrix4<f32>,
     depth_texture: wgpu::TextureView,
     /// Each point is a u8, represents block type at that point
     /// Dimensions are 16x16x16
-    block_type_buf: wgpu::Buffer,
+    per_chunk: HashMap<Point3<usize>, PerChunkRenderState>,
     // /// Contains textures for each block type.
     // /// Dimensions are 16x16xN, where N is number of block types.
     // block_master_texture: wgpu::TextureView,
@@ -115,7 +125,11 @@ impl RenderState {
     }
 
     pub fn update(&mut self, world: &World, diff: &UpdatedWorldState) {
-        self.world.update(world, diff);
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor { todo: 0 });
+        self.world.update(&mut encoder, &self.device, world, diff);
+        self.queue.submit(&[encoder.finish()]);
     }
 }
 
@@ -184,11 +198,8 @@ impl WorldRenderState {
         uniform_data.extend::<&[f32; 16]>(view_matrix.as_ref());
         uniform_data.extend::<&[f32; 16]>(model_matrix.as_ref());
 
-        let uniform_buf = device
-            .create_buffer_mapped(
-                uniform_data.len(),
-                wgpu::BufferUsage::UNIFORM | wgpu::BufferUsage::COPY_DST,
-            )
+        let base_uniform_buf = device
+            .create_buffer_mapped(uniform_data.len(), wgpu::BufferUsage::COPY_SRC)
             .fill_from_slice(uniform_data.as_ref());
 
         let depth_texture = device.create_texture(&wgpu::TextureDescriptor {
@@ -203,13 +214,6 @@ impl WorldRenderState {
             dimension: wgpu::TextureDimension::D2,
             format: wgpu::TextureFormat::Depth32Float,
             usage: wgpu::TextureUsage::OUTPUT_ATTACHMENT,
-        });
-
-        let block_type_buf = device.create_buffer(&wgpu::BufferDescriptor {
-            size: CHUNK_BUFFER_SIZE_BYTES,
-            usage: wgpu::BufferUsage::COPY_DST
-                | wgpu::BufferUsage::STORAGE
-                | wgpu::BufferUsage::STORAGE_READ,
         });
 
         let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -257,11 +261,11 @@ impl WorldRenderState {
             cube_vertex_buf,
             cube_index_buf,
             cube_index_count: cube_mesh.indices.len(),
-            uniform_buf,
+            base_uniform_buf,
             bind_group_layout,
             rotation: Matrix4::identity(),
             depth_texture: depth_texture.create_default_view(),
-            block_type_buf,
+            per_chunk: HashMap::new(),
         })
     }
 
@@ -271,39 +275,69 @@ impl WorldRenderState {
         frame: &wgpu::SwapChainOutput,
         encoder: &mut wgpu::CommandEncoder,
     ) {
-        let model_matrix = self.rotation;
-        let model_slice: &[f32; 16] = model_matrix.as_ref();
-        let model_buf = device
-            .create_buffer_mapped(16, wgpu::BufferUsage::COPY_SRC)
-            .fill_from_slice(model_slice);
-        encoder.copy_buffer_to_buffer(&model_buf, 0, &self.uniform_buf, 128, 64);
-
-        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            layout: &self.bind_group_layout,
-            bindings: &[
-                wgpu::Binding {
-                    binding: 0,
-                    resource: wgpu::BindingResource::Buffer {
-                        buffer: &self.uniform_buf,
-                        range: 0..192,
-                    },
-                },
-                wgpu::Binding {
-                    binding: 1,
-                    resource: wgpu::BindingResource::Buffer {
-                        buffer: &self.block_type_buf,
-                        range: 0..CHUNK_BUFFER_SIZE_BYTES,
-                    },
-                },
-                // wgpu::Binding {
-                //     binding: 2,
-                //     resource: wgpu::BindingResource::Sampler(&sampler),
-                // },
-            ],
-        });
-
         let background_color = wgpu::Color::BLACK;
-        {
+        for (chunk_loc, per_chunk) in self.per_chunk.iter() {
+            if chunk_loc.y == 1 {
+                continue;
+            }
+
+            let chunk_offset_int =
+                (chunk_loc - Point3::new(0, 0, 0)).mul_element_wise(index_utils::chunk_size());
+            let chunk_offset = Vector3 {
+                x: chunk_offset_int.x as f32,
+                y: chunk_offset_int.y as f32,
+                z: chunk_offset_int.z as f32,
+            };
+            let translation = Matrix4::from_translation(chunk_offset);
+            let model_matrix = self.rotation * translation;
+
+            let model_slice: &[f32; 16] = model_matrix.as_ref();
+            let model_buf = device
+                .create_buffer_mapped(16, wgpu::BufferUsage::COPY_SRC)
+                .fill_from_slice(model_slice);
+
+            // Copy view/projection matrix from the base buffer
+            encoder.copy_buffer_to_buffer(
+                &self.base_uniform_buf,
+                0,
+                &per_chunk.uniform_buf,
+                0,
+                2 * MATRIX4_SIZE,
+            );
+
+            // Copy model matrix from the in-memory buffer
+            encoder.copy_buffer_to_buffer(
+                &model_buf,
+                0,
+                &per_chunk.uniform_buf,
+                2 * MATRIX4_SIZE,
+                MATRIX4_SIZE,
+            );
+
+            let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                layout: &self.bind_group_layout,
+                bindings: &[
+                    wgpu::Binding {
+                        binding: 0,
+                        resource: wgpu::BindingResource::Buffer {
+                            buffer: &per_chunk.uniform_buf,
+                            range: 0..UNIFORM_BUF_LEN,
+                        },
+                    },
+                    wgpu::Binding {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Buffer {
+                            buffer: &per_chunk.block_type_buf,
+                            range: 0..CHUNK_BUFFER_SIZE_BYTES,
+                        },
+                    },
+                    // wgpu::Binding {
+                    //     binding: 2,
+                    //     resource: wgpu::BindingResource::Sampler(&sampler),
+                    // },
+                ],
+            });
+
             let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 color_attachments: &[wgpu::RenderPassColorAttachmentDescriptor {
                     attachment: &frame.view,
@@ -334,14 +368,89 @@ impl WorldRenderState {
         }
     }
 
-    fn update_chunk_storage(
-        &self,
+    pub fn init(
+        &mut self,
         encoder: &mut wgpu::CommandEncoder,
         device: &wgpu::Device,
         world: &World,
-        loc: Point3<usize>,
     ) {
-        let chunk = world.blocks.get_chunk(loc);
+        for (p, chunk) in world.blocks.iter_chunks_with_loc() {
+            let all_empty = chunk.blocks.iter().all(|b| b.is_empty());
+            if all_empty {
+                continue;
+            }
+
+            self.insert_per_chunk(encoder, device, p, chunk);
+
+            info!("Inserted chunk at point {:?}", p);
+        }
+    }
+
+    fn insert_per_chunk(
+        &mut self,
+        encoder: &mut wgpu::CommandEncoder,
+        device: &wgpu::Device,
+        loc: Point3<usize>,
+        chunk: &block::Chunk,
+    ) {
+        let per_chunk = PerChunkRenderState::new(&device);
+        per_chunk.update(encoder, device, chunk);
+        self.per_chunk.insert(loc, per_chunk);
+    }
+
+    pub fn update(
+        &mut self,
+        encoder: &mut wgpu::CommandEncoder,
+        device: &wgpu::Device,
+        world: &World,
+        diff: &UpdatedWorldState,
+    ) {
+        self.rotation = self.rotation * Matrix4::<f32>::from_angle_z(Rad::full_turn() / 1000.);
+        // * Matrix4::<f32>::from_angle_x(Rad::full_turn() / 600.)
+
+        for &chunk_loc in &diff.modified_chunks {
+            let chunk = world.blocks.get_chunk(chunk_loc);
+            let chunk_empty = chunk.blocks.iter().all(|b| b.is_empty());
+            if self.per_chunk.contains_key(&chunk_loc) {
+                if chunk_empty {
+                    self.per_chunk.remove(&chunk_loc);
+                } else {
+                    self.per_chunk[&chunk_loc].update(encoder, device, &chunk);
+                }
+            } else if !chunk_empty {
+                self.insert_per_chunk(encoder, device, chunk_loc, chunk);
+            }
+        }
+    }
+}
+
+impl PerChunkRenderState {
+    fn new(device: &wgpu::Device) -> Self {
+        let block_type_buf = device.create_buffer(&wgpu::BufferDescriptor {
+            size: CHUNK_BUFFER_SIZE_BYTES,
+            usage: wgpu::BufferUsage::COPY_DST
+                | wgpu::BufferUsage::STORAGE
+                | wgpu::BufferUsage::STORAGE_READ,
+        });
+
+        let uniform_buf = device.create_buffer(&wgpu::BufferDescriptor {
+            size: UNIFORM_BUF_LEN,
+            usage: wgpu::BufferUsage::UNIFORM | wgpu::BufferUsage::COPY_DST,
+        });
+
+        PerChunkRenderState {
+            block_type_buf,
+            uniform_buf,
+        }
+    }
+
+    #[allow(clippy::cast_lossless)]
+    fn update(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        device: &wgpu::Device,
+        chunk: &block::Chunk,
+    ) {
         let blocks_slice = simgame_core::block::blocks_to_u16(&chunk.blocks);
         let blocks_buf = device
             .create_buffer_mapped(chunk.blocks.len(), wgpu::BufferUsage::COPY_SRC)
@@ -354,22 +463,6 @@ impl WorldRenderState {
             index_utils::chunk_size_total() as wgpu::BufferAddress
                 * BLOCK_TYPE_SIZE_BYTES as wgpu::BufferAddress,
         );
-    }
-
-    pub fn init(
-        &mut self,
-        encoder: &mut wgpu::CommandEncoder,
-        device: &wgpu::Device,
-        world: &World,
-    ) {
-        // temporarily just init the chunk at the origin
-        self.update_chunk_storage(encoder, device, world, Point3::new(0, 0, 0));
-    }
-
-    pub fn update(&mut self, _world: &World, _diff: &UpdatedWorldState) {
-        self.rotation = self.rotation
-            * Matrix4::<f32>::from_angle_z(Rad::full_turn() / 1000.);
-            // * Matrix4::<f32>::from_angle_x(Rad::full_turn() / 600.)
     }
 }
 

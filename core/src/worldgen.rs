@@ -1,6 +1,7 @@
 use anyhow::{bail, Result};
 use cgmath::{Vector3, ElementWise};
 use rand::Rng;
+use log::info;
 
 use crate::block::{index_utils, Block, WorldBlockData};
 
@@ -21,7 +22,7 @@ pub fn generate_world(config: &GenerateWorldConfig) -> Result<WorldBlockData> {
 
     let count_chunks = config.size.div_element_wise(chunk_size);
 
-    println!("Creating empty world");
+    info!("Creating empty world");
     let mut blocks = WorldBlockData::empty(count_chunks);
 
     let world_size = Vector3 {
@@ -30,7 +31,7 @@ pub fn generate_world(config: &GenerateWorldConfig) -> Result<WorldBlockData> {
         z: blocks.size().z as f64,
     };
 
-    println!("Generating terrain");
+    info!("Generating terrain");
     let base_z = 0.0;
     let terrain_height = world_size.z;
 
@@ -71,12 +72,12 @@ pub fn generate_world(config: &GenerateWorldConfig) -> Result<WorldBlockData> {
 
         blocks_done += 1;
         if blocks_done == (next_progress_step * total_blocks) / progress_count {
-            println!("{}%", next_progress_step * 10);
+            info!("{}%", next_progress_step * 10);
             next_progress_step += 1;
         }
     }
 
-    println!("Generated world: {:?}", blocks.debug_summary());
+    info!("Generated world: {:?}", blocks.debug_summary());
 
     Ok(blocks)
 }

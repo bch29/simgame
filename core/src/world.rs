@@ -12,7 +12,7 @@ pub struct World {
 }
 
 pub struct UpdatedWorldState {
-    modified_chunks: HashSet<Point3<usize>>
+    pub modified_chunks: HashSet<Point3<usize>>
 }
 
 impl World {

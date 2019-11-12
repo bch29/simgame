@@ -169,6 +169,16 @@ impl WorldBlockData {
             .flat_map(|chunk| chunk.blocks.iter_mut().map(|block| block))
     }
 
+    /// Visits every chunk in the world exactly once, in an unspecified order.
+    #[inline]
+    pub fn iter_chunks_with_loc(&self) -> impl Iterator<Item = (Point3<usize>, &Chunk)> + '_ {
+        let count_chunks = self.count_chunks;
+        self.chunks.iter().enumerate().map(move |(chunk_index, chunk)| {
+            let p = index_utils::unpack_xyz(count_chunks, chunk_index);
+            (p, chunk)
+        })
+    }
+
     /// Visits every block in the world exactly once, in an unspecified order.
     #[inline]
     pub fn iter_blocks_with_loc(&self) -> impl Iterator<Item = (Point3<usize>, Block)> + '_ {
@@ -316,6 +326,7 @@ impl WorldBlockData {
             pct_empty,
             byte_size,
             mb_size,
+            size: self.size()
         }
     }
 }
@@ -327,6 +338,7 @@ pub struct WorldBlockDataSummary {
     pct_empty: f64,
     byte_size: usize,
     mb_size: usize,
+    size: Vector3<usize>
 }
 
 #[inline]
