@@ -5,6 +5,7 @@ use winit::{
     event_loop::{ControlFlow, EventLoop},
 };
 use simgame_core::world::{World, UpdatedWorldState};
+use cgmath::{Vector3, InnerSpace};
 
 pub fn build_window(
     event_loop: &winit::event_loop::EventLoop<()>,
@@ -36,8 +37,14 @@ pub fn test_render(world: World, vert_shader: &[u8], frag_shader: &[u8]) -> Resu
         },
     };
 
+    let forward_step = Vector3::new(1., 1., 0.).normalize();
+    let right_step = Vector3::new(1., -1., 0.).normalize();
+    let up_step = Vector3::new(0., 0., 1.).normalize();
+
     let mut render_state = RenderState::new(render_init)?;
     render_state.init(&world);
+
+    use event::{Event, WindowEvent, VirtualKeyCode};
 
     event_loop.run(move |event, _, control_flow| {
         *control_flow = if cfg!(feature = "metal-auto-capture") {
@@ -46,22 +53,39 @@ pub fn test_render(world: World, vert_shader: &[u8], frag_shader: &[u8]) -> Resu
             ControlFlow::Poll
         };
         match event {
-            event::Event::WindowEvent { event, .. } => match event {
-                event::WindowEvent::KeyboardInput {
+            Event::WindowEvent { event, .. } => match event {
+                WindowEvent::KeyboardInput {
                     input:
                         event::KeyboardInput {
-                            virtual_keycode: Some(event::VirtualKeyCode::Escape),
+                            virtual_keycode: Some(VirtualKeyCode::Escape),
                             state: event::ElementState::Pressed,
                             ..
                         },
                     ..
                 }
-                | event::WindowEvent::CloseRequested => {
+                | WindowEvent::CloseRequested => {
                     *control_flow = ControlFlow::Exit;
+                }
+                WindowEvent::KeyboardInput {
+                    input:
+                        event::KeyboardInput {
+                            virtual_keycode: Some(key),
+                            state: event::ElementState::Pressed,
+                            ..
+                        },
+                    ..
+                } => match key {
+                    VirtualKeyCode::W => render_state.update_camera_pos(forward_step),
+                    VirtualKeyCode::S => render_state.update_camera_pos(-forward_step),
+                    VirtualKeyCode::D => render_state.update_camera_pos(right_step),
+                    VirtualKeyCode::A => render_state.update_camera_pos(-right_step),
+                    VirtualKeyCode::J => render_state.update_camera_pos(-up_step),
+                    VirtualKeyCode::K => render_state.update_camera_pos(up_step),
+                    _ => {}
                 }
                 _ => {}
             },
-            event::Event::EventsCleared => {
+            Event::EventsCleared => {
                 render_state.update(&world, &UpdatedWorldState::empty());
                 render_state.render_frame();
             },

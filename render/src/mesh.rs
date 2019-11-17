@@ -1,4 +1,5 @@
 pub mod cube;
+pub mod half_open_cube;
 
 #[derive(Clone, Copy, Debug)]
 pub struct Vertex {

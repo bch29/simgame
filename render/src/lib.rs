@@ -8,6 +8,7 @@ use simgame_core::world::{UpdatedWorldState, World};
 use std::collections::HashMap;
 
 mod mesh;
+mod triangulate;
 pub mod test;
 
 // TODO: UI rendering pipeline
@@ -16,9 +17,10 @@ const BLOCK_TYPE_SIZE_BYTES: u32 = std::mem::size_of::<block::Block>() as u32;
 const CHUNK_BUFFER_SIZE_BYTES: wgpu::BufferAddress = index_utils::chunk_size_total()
     as wgpu::BufferAddress
     * BLOCK_TYPE_SIZE_BYTES as wgpu::BufferAddress;
-const COUNT_UNIFORM_MATRICES: wgpu::BufferAddress = 3;
 const MATRIX4_SIZE: wgpu::BufferAddress = std::mem::size_of::<[f32; 16]>() as wgpu::BufferAddress;
-const UNIFORM_BUF_LEN: wgpu::BufferAddress = COUNT_UNIFORM_MATRICES * MATRIX4_SIZE;
+const POINT3_SIZE: wgpu::BufferAddress = std::mem::size_of::<[f32; 3]>() as wgpu::BufferAddress;
+const UNIFORM_BUF_LEN: wgpu::BufferAddress =
+    MATRIX4_SIZE + MATRIX4_SIZE + MATRIX4_SIZE + POINT3_SIZE;
 
 pub struct RenderInit<'a, RV, RF, W> {
     pub window: &'a W,
@@ -58,12 +60,17 @@ struct WorldRenderState {
     /// Each point is a u8, represents block type at that point
     /// Dimensions are 16x16x16
     per_chunk: HashMap<Point3<usize>, PerChunkRenderState>,
+    camera_pos: Point3<f32>,
     // /// Contains textures for each block type.
     // /// Dimensions are 16x16xN, where N is number of block types.
     // block_master_texture: wgpu::TextureView,
 }
 
 impl RenderState {
+    pub fn update_camera_pos(&mut self, delta: Vector3<f32>) {
+        self.world.camera_pos += delta;
+    }
+
     pub fn new<RV, RF, W>(init: RenderInit<RV, RF, W>) -> Result<Self>
     where
         RV: std::io::Seek + std::io::Read,
@@ -187,9 +194,9 @@ impl WorldRenderState {
 
         let proj_matrix =
             OPENGL_TO_WGPU_MATRIX * cgmath::perspective(Deg(70f32), init.aspect_ratio, 1.0, 100.0);
-        let view_matrix = Matrix4::look_at(
-            Point3::new(10f32, -30.0, 20.0),
-            Point3::new(0f32, 0.0, 0.0),
+        let view_matrix = Matrix4::look_at_dir(
+            Point3::new(0., 0., 0.),
+            Vector3::new(1., 1., -2.),
             Vector3::unit_z(),
         );
         let model_matrix = Matrix4::<f32>::identity();
@@ -197,6 +204,7 @@ impl WorldRenderState {
         uniform_data.extend::<&[f32; 16]>(proj_matrix.as_ref());
         uniform_data.extend::<&[f32; 16]>(view_matrix.as_ref());
         uniform_data.extend::<&[f32; 16]>(model_matrix.as_ref());
+        uniform_data.extend::<&[f32; 3]>(Point3::new(0f32, 0f32, 0f32).as_ref());
 
         let base_uniform_buf = device
             .create_buffer_mapped(uniform_data.len(), wgpu::BufferUsage::COPY_SRC)
@@ -266,6 +274,7 @@ impl WorldRenderState {
             rotation: Matrix4::identity(),
             depth_texture: depth_texture.create_default_view(),
             per_chunk: HashMap::new(),
+            camera_pos: Point3::new(-20f32, -20f32, 20f32),
         })
     }
 
@@ -276,11 +285,12 @@ impl WorldRenderState {
         encoder: &mut wgpu::CommandEncoder,
     ) {
         let background_color = wgpu::Color::BLACK;
-        for (chunk_loc, per_chunk) in self.per_chunk.iter() {
-            if chunk_loc.y == 1 {
-                continue;
-            }
 
+        // Clear texture and viewport on first pass (i.e. first chunk), then store it on later
+        // passes to preserve existing rendering.
+        let mut load_op = wgpu::LoadOp::Clear;
+
+        for (chunk_loc, per_chunk) in self.per_chunk.iter() {
             let chunk_offset_int =
                 (chunk_loc - Point3::new(0, 0, 0)).mul_element_wise(index_utils::chunk_size());
             let chunk_offset = Vector3 {
@@ -292,9 +302,14 @@ impl WorldRenderState {
             let model_matrix = self.rotation * translation;
 
             let model_slice: &[f32; 16] = model_matrix.as_ref();
-            let model_buf = device
-                .create_buffer_mapped(16, wgpu::BufferUsage::COPY_SRC)
-                .fill_from_slice(model_slice);
+            let vec_slice: &[f32; 3] = self.camera_pos.as_ref();
+            let extra_uniform_buf = {
+                let buffer_mapped =
+                    device.create_buffer_mapped(16 + 3, wgpu::BufferUsage::COPY_SRC);
+                buffer_mapped.data[..16].copy_from_slice(model_slice);
+                buffer_mapped.data[16..19].copy_from_slice(vec_slice);
+                buffer_mapped.finish()
+            };
 
             // Copy view/projection matrix from the base buffer
             encoder.copy_buffer_to_buffer(
@@ -307,11 +322,11 @@ impl WorldRenderState {
 
             // Copy model matrix from the in-memory buffer
             encoder.copy_buffer_to_buffer(
-                &model_buf,
+                &extra_uniform_buf,
                 0,
                 &per_chunk.uniform_buf,
                 2 * MATRIX4_SIZE,
-                MATRIX4_SIZE,
+                MATRIX4_SIZE + POINT3_SIZE,
             );
 
             let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -342,13 +357,13 @@ impl WorldRenderState {
                 color_attachments: &[wgpu::RenderPassColorAttachmentDescriptor {
                     attachment: &frame.view,
                     resolve_target: None,
-                    load_op: wgpu::LoadOp::Clear,
+                    load_op,
                     store_op: wgpu::StoreOp::Store,
                     clear_color: background_color,
                 }],
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachmentDescriptor {
                     attachment: &self.depth_texture,
-                    depth_load_op: wgpu::LoadOp::Clear,
+                    depth_load_op: load_op,
                     depth_store_op: wgpu::StoreOp::Store,
                     stencil_load_op: wgpu::LoadOp::Clear,
                     stencil_store_op: wgpu::StoreOp::Store,
@@ -365,6 +380,8 @@ impl WorldRenderState {
                 0,
                 0..(index_utils::chunk_size_total() as u32),
             );
+
+            load_op = wgpu::LoadOp::Load;
         }
     }
 
@@ -405,8 +422,7 @@ impl WorldRenderState {
         world: &World,
         diff: &UpdatedWorldState,
     ) {
-        self.rotation = self.rotation * Matrix4::<f32>::from_angle_z(Rad::full_turn() / 1000.);
-        // * Matrix4::<f32>::from_angle_x(Rad::full_turn() / 600.)
+        // self.rotation = self.rotation * Matrix4::<f32>::from_angle_z(Rad::full_turn() / 1000.);
 
         for &chunk_loc in &diff.modified_chunks {
             let chunk = world.blocks.get_chunk(chunk_loc);
