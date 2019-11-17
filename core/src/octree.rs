@@ -1,29 +1,22 @@
 use cgmath::Point3;
 use std::io::{self, Read, Write};
 
-/// Indexed by (x, y, z)
-type Branch<T> = [T; 8];
-
 enum Node<T> {
-    Branch(Branch<Octree<T>>),
+    Branch([Octree<T>; 8]),
     Leaf(T),
-    Empty,
 }
 
 pub struct Octree<T> {
     height: u8,
-    node: Box<Node<T>>,
+    node: Option<Box<Node<T>>>,
 }
 
 impl<T> Octree<T> {
     pub fn new(height: u8) -> Octree<T> {
-        Octree {
-            height,
-            node: Box::new(Node::Empty),
-        }
+        Octree { height, node: None }
     }
 
-    fn empty_branch(height: u8) -> Branch<Self> {
+    fn new_branch(height: u8) -> [Self; 8] {
         [
             Self::new(height),
             Self::new(height),
@@ -36,7 +29,7 @@ impl<T> Octree<T> {
         ]
     }
 
-    /// Given a point, subdivide it into its octant and the point within that octant.
+    /// Subdivide a point into its octant and the point within that octant.
     #[inline(always)]
     fn subdivide(height: u8, pos: Point3<usize>) -> (usize, Point3<usize>) {
         assert!(height > 0);
@@ -65,51 +58,65 @@ impl<T> Octree<T> {
     }
 
     pub fn insert(&mut self, pos: Point3<usize>, data: T) -> &mut T {
-        let children = match *self.node {
-            Node::Leaf(ref mut old_data) => {
-                *old_data = data;
-                return old_data;
-            }
-            Node::Empty => {
+        let node: &mut Node<T> = match self.node {
+            None => {
                 if self.height == 0 {
-                    *self.node = Node::Leaf(data);
-                    match &mut *self.node {
-                        Node::Leaf(data) => return data,
+                    self.node = Some(Box::new(Node::Leaf(data)));
+                    let node: &mut Node<T> = &mut *self.node.as_mut().expect("unreachable");
+                    match node {
+                        Node::Leaf(data) => {
+                            return data;
+                        }
                         _ => unreachable!(),
                     }
                 } else {
-                    *self.node = Node::Branch(Self::empty_branch(self.height - 1));
-                    match &mut *self.node {
-                        Node::Branch(children) => children,
-                        _ => unreachable!(),
-                    }
+                    self.node = Some(Box::new(Node::Branch(Self::new_branch(self.height - 1))));
+                    &mut *self.node.as_mut().expect("unreachable")
                 }
             }
-            Node::Branch(ref mut children) => children,
+            Some(ref mut node) => &mut *node,
         };
 
-        let (octant, next_pos) = Self::subdivide(self.height, pos);
-        children[octant].insert(next_pos, data)
+        match node {
+            Node::Leaf(old_data) => {
+                *old_data = data;
+                old_data
+            }
+            Node::Branch(children) => {
+                let (octant, next_pos) = Self::subdivide(self.height, pos);
+                children[octant].insert(next_pos, data)
+            }
+        }
     }
 
     pub fn get(&self, pos: Point3<usize>) -> Option<&T> {
-        match &*self.node {
-            Node::Empty => None,
-            Node::Leaf(data) => Some(data),
-            Node::Branch(children) => {
-                let (octant, next_pos) = Self::subdivide(self.height, pos);
-                children[octant].get(next_pos)
+        match &self.node {
+            None => None,
+            Some(boxed_node) => {
+                let node: &Node<T> = &*boxed_node;
+                match node {
+                    Node::Leaf(data) => Some(data),
+                    Node::Branch(children) => {
+                        let (octant, next_pos) = Self::subdivide(self.height, pos);
+                        children[octant].get(next_pos)
+                    }
+                }
             }
         }
     }
 
     pub fn get_mut(&mut self, pos: Point3<usize>) -> Option<&mut T> {
-        match &mut *self.node {
-            Node::Empty => None,
-            Node::Leaf(data) => Some(data),
-            Node::Branch(children) => {
-                let (octant, next_pos) = Self::subdivide(self.height, pos);
-                children[octant].get_mut(next_pos)
+        match &mut self.node {
+            None => None,
+            Some(boxed_node) => {
+                let node: &mut Node<T> = &mut *boxed_node;
+                match node {
+                    Node::Leaf(data) => Some(data),
+                    Node::Branch(children) => {
+                        let (octant, next_pos) = Self::subdivide(self.height, pos);
+                        children[octant].get_mut(next_pos)
+                    }
+                }
             }
         }
     }
@@ -118,20 +125,19 @@ impl<T> Octree<T> {
     where
         F: FnOnce() -> T,
     {
-        let children = match *self.node {
-            Node::Leaf(ref mut data) => return data,
-            Node::Branch(ref mut children) => children,
-            Node::Empty => {
-                *self.node = Node::Branch(Self::empty_branch(self.height - 1));
-                match *self.node {
-                    Node::Branch(ref mut children) => children,
-                    _ => unreachable!(),
+        match self.node {
+            None => self.insert(pos, make_data()),
+            Some(ref mut boxed_node) => {
+                let node: &mut Node<T> = &mut *boxed_node;
+                match node {
+                    Node::Leaf(data) => data,
+                    Node::Branch(children) => {
+                        let (octant, next_pos) = Self::subdivide(self.height, pos);
+                        children[octant].get_or_insert(next_pos, make_data)
+                    }
                 }
             }
-        };
-
-        let (octant, next_pos) = Self::subdivide(self.height, pos);
-        children[octant].get_or_insert(next_pos, make_data)
+        }
     }
 
     /// Serializes the octree in a binary format. Returns the number of bytes written.
@@ -151,17 +157,21 @@ impl<T> Octree<T> {
         assert!(self.height < 255);
 
         let mut bytes_written = 0;
-        // bytes_written += writer.write(&[self.height + 1])?;
 
-        match &*self.node {
-            Node::Empty => bytes_written += writer.write(&[0])?,
-            Node::Leaf(data) => {
-                bytes_written += writer.write(&[1])?;
-                bytes_written += serialize_data(data, writer)?;
-            }
-            Node::Branch(children) => {
-                for child in children {
-                    bytes_written += child.serialize(writer, serialize_data)?;
+        match &self.node {
+            None => bytes_written += writer.write(&[0])?,
+            Some(boxed_node) => {
+                let node: &Node<T> = &*boxed_node;
+                match node {
+                    Node::Leaf(data) => {
+                        bytes_written += writer.write(&[1])?;
+                        bytes_written += serialize_data(data, writer)?;
+                    }
+                    Node::Branch(children) => {
+                        for child in children {
+                            bytes_written += child.serialize(writer, serialize_data)?;
+                        }
+                    }
                 }
             }
         };
@@ -181,11 +191,11 @@ impl<T> Octree<T> {
         match byte0 {
             0 => Ok(Octree {
                 height: 0,
-                node: Box::new(Node::Empty),
+                node: None,
             }),
             1 => Ok(Octree {
                 height: 0,
-                node: Box::new(Node::Leaf(deserialize_data(reader)?)),
+                node: Some(Box::new(Node::Leaf(deserialize_data(reader)?))),
             }),
             _ => {
                 let mut de = || Self::deserialize(reader, deserialize_data);
@@ -193,13 +203,9 @@ impl<T> Octree<T> {
 
                 Ok(Octree {
                     height: byte0 - 1,
-                    node: Box::new(node),
+                    node: Some(Box::new(node)),
                 })
             }
         }
     }
 }
-
-// struct RefIterator<'a, T> {
-//     tree: Octree
-// }
