@@ -1,45 +1,45 @@
-use anyhow::anyhow;
 use cgmath::Point3;
 use std::io::{self, Read, Write};
 
 /// Indexed by (x, y, z)
-type Branch<T> = [[[T; 2]; 2]; 2];
+type Branch<T> = [T; 8];
 
 enum Node<T> {
-    Tree(Octree<T>),
+    Branch(Branch<Octree<T>>),
     Leaf(T),
     Empty,
 }
 
 pub struct Octree<T> {
     height: u8,
-    children: Branch<Box<Node<T>>>,
+    node: Box<Node<T>>,
 }
 
 impl<T> Octree<T> {
-    fn empty_branch() -> Branch<Box<Node<T>>> {
-        [
-            [
-                [Box::new(Node::Empty), Box::new(Node::Empty)],
-                [Box::new(Node::Empty), Box::new(Node::Empty)],
-            ],
-            [
-                [Box::new(Node::Empty), Box::new(Node::Empty)],
-                [Box::new(Node::Empty), Box::new(Node::Empty)],
-            ],
-        ]
-    }
-
     pub fn new(height: u8) -> Octree<T> {
-        assert!(height >= 1);
         Octree {
             height,
-            children: Self::empty_branch(),
+            node: Box::new(Node::Empty),
         }
     }
 
+    fn empty_branch(height: u8) -> Branch<Self> {
+        [
+            Self::new(height),
+            Self::new(height),
+            Self::new(height),
+            Self::new(height),
+            Self::new(height),
+            Self::new(height),
+            Self::new(height),
+            Self::new(height),
+        ]
+    }
+
     /// Given a point, subdivide it into its octant and the point within that octant.
-    fn subdivide(height: u8, pos: Point3<usize>) -> (Point3<u8>, Point3<usize>) {
+    #[inline(always)]
+    fn subdivide(height: u8, pos: Point3<usize>) -> (usize, Point3<usize>) {
+        assert!(height > 0);
         let half_size: usize = 1 << (height - 1);
         let size: usize = half_size * 2;
 
@@ -60,62 +60,57 @@ impl<T> Octree<T> {
         let (x_octant, x) = get_step(pos.x);
         let (y_octant, y) = get_step(pos.y);
         let (z_octant, z) = get_step(pos.z);
-        (
-            Point3::new(x_octant, y_octant, z_octant),
-            Point3::new(x, y, z),
-        )
+
+        (x_octant + y_octant * 2 + z_octant * 4, Point3::new(x, y, z))
     }
 
     pub fn insert(&mut self, pos: Point3<usize>, data: T) -> &mut T {
-        let (quadrant, next_pos) = Self::subdivide(self.height, pos);
-        let next_node =
-            &mut *self.children[quadrant.x as usize][quadrant.y as usize][quadrant.z as usize];
-
-        match next_node {
-            Node::Tree(child_tree) => child_tree.insert(next_pos, data),
-            Node::Leaf(old_data) => {
+        let children = match *self.node {
+            Node::Leaf(ref mut old_data) => {
                 *old_data = data;
-                old_data
+                return old_data;
             }
             Node::Empty => {
-                if self.height == 1 {
-                    *next_node = Node::Leaf(data);
-                    match next_node {
-                        Node::Leaf(data) => data,
+                if self.height == 0 {
+                    *self.node = Node::Leaf(data);
+                    match &mut *self.node {
+                        Node::Leaf(data) => return data,
                         _ => unreachable!(),
                     }
                 } else {
-                    *next_node = Node::Tree(Self::new(self.height - 1));
-                    match next_node {
-                        Node::Tree(child_tree) => child_tree.insert(next_pos, data),
+                    *self.node = Node::Branch(Self::empty_branch(self.height - 1));
+                    match &mut *self.node {
+                        Node::Branch(children) => children,
                         _ => unreachable!(),
                     }
                 }
             }
-        }
+            Node::Branch(ref mut children) => children,
+        };
+
+        let (octant, next_pos) = Self::subdivide(self.height, pos);
+        children[octant].insert(next_pos, data)
     }
 
     pub fn get(&self, pos: Point3<usize>) -> Option<&T> {
-        let (quadrant, next_pos) = Self::subdivide(self.height, pos);
-        let next_node =
-            &*self.children[quadrant.x as usize][quadrant.y as usize][quadrant.z as usize];
-
-        match next_node {
-            Node::Tree(child_tree) => child_tree.get(next_pos),
-            Node::Leaf(data) => Some(data),
+        match &*self.node {
             Node::Empty => None,
+            Node::Leaf(data) => Some(data),
+            Node::Branch(children) => {
+                let (octant, next_pos) = Self::subdivide(self.height, pos);
+                children[octant].get(next_pos)
+            }
         }
     }
 
     pub fn get_mut(&mut self, pos: Point3<usize>) -> Option<&mut T> {
-        let (quadrant, next_pos) = Self::subdivide(self.height, pos);
-        let next_node =
-            &mut *self.children[quadrant.x as usize][quadrant.y as usize][quadrant.z as usize];
-
-        match next_node {
-            Node::Tree(child_tree) => child_tree.get_mut(next_pos),
-            Node::Leaf(data) => Some(data),
+        match &mut *self.node {
             Node::Empty => None,
+            Node::Leaf(data) => Some(data),
+            Node::Branch(children) => {
+                let (octant, next_pos) = Self::subdivide(self.height, pos);
+                children[octant].get_mut(next_pos)
+            }
         }
     }
 
@@ -123,47 +118,21 @@ impl<T> Octree<T> {
     where
         F: FnOnce() -> T,
     {
-        let (quadrant, next_pos) = Self::subdivide(self.height, pos);
-        let next_node =
-            &mut *self.children[quadrant.x as usize][quadrant.y as usize][quadrant.z as usize];
-
-        match next_node {
-            Node::Tree(child_tree) => child_tree.get_or_insert(next_pos, make_data),
-            Node::Leaf(data) => data,
+        let children = match *self.node {
+            Node::Leaf(ref mut data) => return data,
+            Node::Branch(ref mut children) => children,
             Node::Empty => {
-                *next_node = Node::Tree(Self::new(self.height - 1));
-                match next_node {
-                    Node::Tree(child_tree) => child_tree.insert(pos, make_data()),
+                *self.node = Node::Branch(Self::empty_branch(self.height - 1));
+                match *self.node {
+                    Node::Branch(ref mut children) => children,
                     _ => unreachable!(),
                 }
             }
-        }
+        };
+
+        let (octant, next_pos) = Self::subdivide(self.height, pos);
+        children[octant].get_or_insert(next_pos, make_data)
     }
-
-    // pub fn iter(&self) -> impl Iterator<Item=&T> {
-    //     self.children.iter().flat_map(|cx| {
-    //         cx.iter().flat_map(|cy| {
-    //             cy.iter().flat_map(|child| {
-    //                 match child {
-    //                     Node::Empty => unimplemented!(),
-    //                     Node::Leaf(data) => Some(data).iter(),
-    //                     _ => unimplemented!()
-    //                 }
-    //             })
-    //         })
-    //     })
-
-    //     // for cx in &self.children {
-    //     //     for cy in cx {
-    //     //         for child in cy {
-    //     //             match &*child {
-    //     //                 Node::Empty => Box::new((&[]).iter()),
-    //     //                 _ => unimplemented!()
-    //     //             }
-    //     //         }
-    //     //     }
-    //     // }
-    // }
 
     /// Serializes the octree in a binary format. Returns the number of bytes written.
     /// Accepts a function to serialize individual data leaves. This function must precisely report
@@ -173,49 +142,31 @@ impl<T> Octree<T> {
         W: Write,
         F: FnMut(&T, &mut W) -> io::Result<usize>,
     {
-        // Cannot serialize a tree of height 255 because first byte is height + 1
-        assert!(self.height < 255);
-
-        let mut bytes_written = 0;
-        bytes_written += writer.write(&[self.height + 1])?;
-
-        // Loop through all 3 layers in the children array
-        for cx in &self.children {
-            for cy in cx {
-                for child in cy {
-                    bytes_written += Self::serialize_node(&*child, writer, serialize_data)?;
-                }
-            }
-        }
-
-        Ok(bytes_written)
-    }
-
-    fn serialize_node<W, F>(
-        node: &Node<T>,
-        writer: &mut W,
-        serialize_data: &mut F,
-    ) -> io::Result<usize>
-    where
-        W: Write,
-        F: FnMut(&T, &mut W) -> io::Result<usize>,
-    {
         // First byte
         // - 0 for empty
         // - 1 for leaf, followed by serialize_data encoding
         // - height + 1 for tree, followed by tree encoding
+        //
+        // Cannot serialize a tree of height 255 because first byte is height + 1
+        assert!(self.height < 255);
 
-        match node {
-            Node::Empty => writer.write(&[0]),
+        let mut bytes_written = 0;
+        // bytes_written += writer.write(&[self.height + 1])?;
+
+        match &*self.node {
+            Node::Empty => bytes_written += writer.write(&[0])?,
             Node::Leaf(data) => {
-                let initial_size = writer.write(&[1])?;
-                Ok(initial_size + serialize_data(data, writer)?)
+                bytes_written += writer.write(&[1])?;
+                bytes_written += serialize_data(data, writer)?;
             }
-            Node::Tree(tree) => {
-                // Tree encodes its own height
-                tree.serialize(writer, serialize_data)
+            Node::Branch(children) => {
+                for child in children {
+                    bytes_written += child.serialize(writer, serialize_data)?;
+                }
             }
-        }
+        };
+
+        Ok(bytes_written)
     }
 
     pub fn deserialize<R, F>(reader: &mut R, deserialize_data: &mut F) -> io::Result<Self>
@@ -228,54 +179,23 @@ impl<T> Octree<T> {
         let byte0 = buf0[0];
 
         match byte0 {
-            0 | 1 => Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                anyhow!("Initial byte value of {} not valid: must be > 1", byte0),
-            )),
-            _ => Self::deserialize_known_height(byte0 - 1, reader, deserialize_data),
-        }
-    }
+            0 => Ok(Octree {
+                height: 0,
+                node: Box::new(Node::Empty),
+            }),
+            1 => Ok(Octree {
+                height: 0,
+                node: Box::new(Node::Leaf(deserialize_data(reader)?)),
+            }),
+            _ => {
+                let mut de = || Self::deserialize(reader, deserialize_data);
+                let node = Node::Branch([de()?, de()?, de()?, de()?, de()?, de()?, de()?, de()?]);
 
-    fn deserialize_known_height<R, F>(
-        height: u8,
-        reader: &mut R,
-        deserialize_data: &mut F,
-    ) -> io::Result<Self>
-    where
-        R: Read,
-        F: FnMut(&mut R) -> io::Result<T>,
-    {
-        let mut node =
-            || Ok::<_, io::Error>(Box::new(Self::deserialize_node(reader, deserialize_data)?));
-
-        let children = [
-            [[node()?, node()?], [node()?, node()?]],
-            [[node()?, node()?], [node()?, node()?]],
-        ];
-
-        Ok(Octree { height, children })
-    }
-
-    fn deserialize_node<R, F>(reader: &mut R, deserialize_data: &mut F) -> io::Result<Node<T>>
-    where
-        R: Read,
-        F: FnMut(&mut R) -> io::Result<T>,
-    {
-        let mut buf0: [u8; 1] = [0];
-        reader.read_exact(&mut buf0)?;
-        let byte0 = buf0[0];
-
-        match byte0 {
-            0 => Ok(Node::Empty),
-            1 => {
-                let data = deserialize_data(reader)?;
-                Ok(Node::Leaf(data))
+                Ok(Octree {
+                    height: byte0 - 1,
+                    node: Box::new(node),
+                })
             }
-            _ => Ok(Node::Tree(Self::deserialize_known_height(
-                byte0 - 1,
-                reader,
-                deserialize_data,
-            )?)),
         }
     }
 }
