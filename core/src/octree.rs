@@ -1,4 +1,4 @@
-use cgmath::Point3;
+use cgmath::{Point3, Vector3};
 use std::io::{self, Read, Write};
 
 enum Node<T> {
@@ -51,8 +51,7 @@ impl<T> Octree<T> {
         match node {
             None => None,
             Some(boxed_node) => {
-                let node: Node<_> = *boxed_node;
-                match node {
+                match *boxed_node {
                     Node::Leaf(_) => {
                         unreachable!("Leaf node at the top level in a tree of height > 0")
                     }
@@ -68,11 +67,11 @@ impl<T> Octree<T> {
     /// Inserts data at the given point in the octree. Returns a mutable reference to the data at
     /// its new location inside the tree.
     pub fn insert(&mut self, pos: Point3<usize>, data: T) -> &mut T {
-        let node: &mut Node<T> = match self.node {
+        let node = match self.node {
             None => {
                 if self.height == 0 {
                     self.node = Some(Box::new(Node::Leaf(data)));
-                    let node: &mut Node<T> = &mut *self.node.as_mut().expect("unreachable");
+                    let node = &mut **self.node.as_mut().expect("unreachable");
                     match node {
                         Node::Leaf(data) => {
                             return data;
@@ -81,10 +80,10 @@ impl<T> Octree<T> {
                     }
                 } else {
                     self.node = Some(Box::new(Node::Branch(Self::new_branch(self.height - 1))));
-                    &mut *self.node.as_mut().expect("unreachable")
+                    &mut **self.node.as_mut().expect("unreachable")
                 }
             }
-            Some(ref mut node) => &mut *node,
+            Some(ref mut node) => &mut **node,
         };
 
         match node {
@@ -131,8 +130,7 @@ impl<T> Octree<T> {
         match &self.node {
             None => None,
             Some(boxed_node) => {
-                let node: &Node<T> = &*boxed_node;
-                match node {
+                match &**boxed_node {
                     Node::Leaf(data) => Some(data),
                     Node::Branch(children) => {
                         let (octant, next_pos) = Self::subdivide(self.height, pos);
@@ -147,8 +145,7 @@ impl<T> Octree<T> {
         match &mut self.node {
             None => None,
             Some(boxed_node) => {
-                let node: &mut Node<T> = &mut *boxed_node;
-                match node {
+                match &mut **boxed_node {
                     Node::Leaf(data) => Some(data),
                     Node::Branch(children) => {
                         let (octant, next_pos) = Self::subdivide(self.height, pos);
@@ -166,8 +163,7 @@ impl<T> Octree<T> {
         match self.node {
             None => self.insert(pos, make_data()),
             Some(ref mut boxed_node) => {
-                let node: &mut Node<T> = &mut *boxed_node;
-                match node {
+                match &mut **boxed_node {
                     Node::Leaf(data) => data,
                     Node::Branch(children) => {
                         let (octant, next_pos) = Self::subdivide(self.height, pos);
@@ -199,8 +195,7 @@ impl<T> Octree<T> {
         match &self.node {
             None => bytes_written += writer.write(&[0])?,
             Some(boxed_node) => {
-                let node: &Node<T> = &*boxed_node;
-                match node {
+                match &**boxed_node {
                     Node::Leaf(data) => {
                         bytes_written += writer.write(&[1])?;
                         bytes_written += serialize_data(data, writer)?;
@@ -295,6 +290,11 @@ impl<T> Octree<T> {
 
         (x_octant + y_octant * 2 + z_octant * 4, Point3::new(x, y, z))
     }
+
+    pub fn bounds(&self) -> Vector3<usize> {
+        let width = 1 << self.height;
+        Vector3::new(width, width, width)
+    }
 }
 
 pub struct RefIterator<'a, T> {
@@ -305,10 +305,13 @@ pub struct RefIterator<'a, T> {
 
 impl<'a, T> RefIterator<'a, T> {
     fn new(tree: &'a Octree<T>) -> Self {
-        let mut stack = Vec::with_capacity(tree.height as usize);
+        let mut stack = Vec::new();
         match tree.node {
             None => {}
-            Some(ref boxed_node) => stack.push((&**boxed_node, 0)),
+            Some(ref boxed_node) => {
+                stack.reserve_exact(7 + tree.height as usize);
+                stack.push((&**boxed_node, 0));
+            }
         }
 
         RefIterator { stack }
@@ -344,21 +347,22 @@ impl<'a, T> Iterator for RefIterator<'a, T> {
 }
 
 pub struct MutIterator<'a, T> {
-    _marker: std::marker::PhantomData<&'a mut Octree<T>>,
-    stack: Vec<(*mut Node<T>, usize)>,
+    stack: Vec<&'a mut Node<T>>,
 }
 
 impl<'a, T> MutIterator<'a, T> {
     fn new(tree: &'a mut Octree<T>) -> Self {
-        let mut stack = Vec::with_capacity(tree.height as usize);
+        let mut stack = Vec::new();
 
         match &mut tree.node {
             None => {}
-            Some(node) => stack.push((&mut **node as *mut Node<T>, 0)),
+            Some(node) => {
+                stack.reserve_exact(7 + 8 * (tree.height as usize - 1));
+                stack.push(&mut **node);
+            }
         }
 
         MutIterator {
-            _marker: std::marker::PhantomData,
             stack,
         }
     }
@@ -369,32 +373,17 @@ impl<'a, T> Iterator for MutIterator<'a, T> {
 
     fn next(&mut self) -> Option<&'a mut T> {
         loop {
-            let (this_node, this_index) = match self.stack.pop() {
-                None => break None,
-                Some(x) => x,
+            let this_node = self.stack.pop()?;
+
+            let children = match this_node {
+                Node::Leaf(data) => break Some(data),
+                Node::Branch(children) => children,
             };
 
-            let children = {
-                // This potentially creates overlapping mutable references to children of
-                // this_node.  Since we never return the same child twice and we do not mutate the
-                // tree directly in this function, this should be OK.
-                let this_node = unsafe { &mut *this_node };
-
-                match this_node {
-                    Node::Leaf(data) => break Some(data),
-                    Node::Branch(children) => children,
+            for child in children.iter_mut() {
+                for node in &mut child.node {
+                    self.stack.push(&mut **node);
                 }
-            };
-
-            if this_index == 8 {
-                continue;
-            }
-
-            let next_tree = &mut children[this_index];
-            self.stack.push((this_node, 1 + this_index));
-            match &mut next_tree.node {
-                None => continue,
-                Some(next_node) => self.stack.push((&mut **next_node as *mut Node<T>, 0)),
             }
         }
     }
@@ -454,5 +443,38 @@ mod test {
         let all_vals: Vec<i64> = tree.iter().copied().collect();
         assert_eq!(all_vals.len(), iter_count);
         assert_eq!(all_vals, vec![14, 16, 18, 10, 12]);
+    }
+
+    #[test]
+    fn test_dense_iter_mut() {
+        let mut tree: Octree<i64> = Octree::new(3);
+
+        let bounds = tree.bounds();
+
+        use std::collections::HashSet;
+
+        let mut expected_vals = HashSet::new();
+
+        for x in 0..bounds.x {
+            for y in 0..bounds.y {
+                for z in 0..bounds.z {
+                    let k = Point3::new(x, y, z);
+                    let v = (x + y * bounds.x + z * bounds.x * bounds.y) as i64;
+                    expected_vals.insert(v);
+                    tree.insert(k, v);
+                }
+            }
+        }
+
+        let actual_vals: HashSet<i64> = tree.iter().copied().collect();
+        assert_eq!(actual_vals, expected_vals);
+
+        for v in tree.iter_mut() {
+            *v *= 3;
+        }
+
+        let expected_vals: HashSet<i64> = expected_vals.iter().map(|x| *x * 3).collect();
+        let actual_vals: HashSet<i64> = tree.iter().copied().collect();
+        assert_eq!(actual_vals, expected_vals);
     }
 }
