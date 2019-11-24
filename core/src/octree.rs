@@ -106,14 +106,12 @@ impl<T> Octree<T> {
         match node {
             None => None,
             Some(mut boxed_node) => {
-
                 // We want ownership of the node inside the box in case we need to return the
                 // data inside. So we swap out the node with a dummy value, then replace it later
                 // if need be. This could also be done by moving out of the box unconditionally and
                 // then making a new box to replace it, but this would require an allocation per
                 // level of height in the tree.
-                let branch =
-                    std::mem::replace(&mut *boxed_node, DetachedNode::dummy_node());
+                let branch = std::mem::replace(&mut *boxed_node, Node::dummy());
 
                 match branch {
                     Node::Leaf(data) => Some(data),
@@ -253,6 +251,10 @@ impl<T> Octree<T> {
         RefIterator::new(self)
     }
 
+    pub fn iter_mut(&mut self) -> MutIterator<T> {
+        MutIterator::new(self)
+    }
+
     const fn new_branch(height: u8) -> [Self; 8] {
         [
             Self::new(height),
@@ -303,12 +305,13 @@ pub struct RefIterator<'a, T> {
 
 impl<'a, T> RefIterator<'a, T> {
     fn new(tree: &'a Octree<T>) -> Self {
+        let mut stack = Vec::with_capacity(tree.height as usize);
         match tree.node {
-            None => RefIterator { stack: Vec::new() },
-            Some(ref boxed_node) => RefIterator {
-                stack: vec![(&*boxed_node, 0)],
-            },
+            None => {}
+            Some(ref boxed_node) => stack.push((&**boxed_node, 0)),
         }
+
+        RefIterator { stack }
     }
 }
 
@@ -340,95 +343,66 @@ impl<'a, T> Iterator for RefIterator<'a, T> {
     }
 }
 
-// pub struct MutIterator<'a, T> {
-//     stack: Vec<(DetachedNode<'a, T>, usize)>,
-// }
-
-// impl<'a, T> MutIterator<'a, T> {
-//     fn new(tree: &'a mut Octree<T>) -> Self {
-//         MutIterator {
-//             stack: vec![(&mut tree.node, 0)]
-//         }
-//     }
-// }
-
-// impl<'a, T> Iterator for MutIterator<'a, T> {
-//     type Item = &'a mut T;
-
-//     fn next(&mut self) -> Option<&'a mut T> {
-//         loop {
-//             let (this_node_ref, this_index) = match self.stack.pop() {
-//                 None => break None,
-//                 Some(x) => x,
-//             };
-
-//             let mut this_node = std::mem::replace(this_node_ref, None);
-
-//             match this_node {
-//                 None => continue,
-//                 Some(mut boxed_node) => {
-//                     match *boxed_node {
-//                         Node::Leaf(x) => break Some(&mut x),
-//                         Node::Branch(children) => {
-//                         }
-//                     }
-//                 }
-//             }
-
-//             // match this_node {
-//             //     Node::Leaf(x) => break Some(x),
-//             //     Node::Branch(children) => {
-//             //         if this_index == 8 {
-//             //             continue;
-//             //         };
-//             //         let next_tree = &mut children[this_index];
-//             //         self.stack.push((this_node, 1 + this_index));
-//             //         match &mut next_tree.node {
-//             //             None => continue,
-//             //             Some(next_node) => self.stack.push((next_node, 0)),
-//             //         }
-//             //     }
-//             // }
-//         }
-//     }
-// }
-
-struct DetachedNode<'a, T> {
-    original: &'a mut Node<T>,
-    stolen: Node<T>,
+pub struct MutIterator<'a, T> {
+    _marker: std::marker::PhantomData<&'a mut Octree<T>>,
+    stack: Vec<(*mut Node<T>, usize)>,
 }
 
-impl<'a, T> DetachedNode<'a, T> {
-    fn new(node: &'a mut Node<T>) -> Self {
-        let stolen = std::mem::replace(node, Self::dummy_node());
-        DetachedNode {
-            original: node,
-            stolen
+impl<'a, T> MutIterator<'a, T> {
+    fn new(tree: &'a mut Octree<T>) -> Self {
+        let mut stack = Vec::with_capacity(tree.height as usize);
+
+        match &mut tree.node {
+            None => {}
+            Some(node) => stack.push((&mut **node as *mut Node<T>, 0)),
+        }
+
+        MutIterator {
+            _marker: std::marker::PhantomData,
+            stack,
         }
     }
+}
 
-    const fn dummy_node() -> Node<T> {
+impl<'a, T> Iterator for MutIterator<'a, T> {
+    type Item = &'a mut T;
+
+    fn next(&mut self) -> Option<&'a mut T> {
+        loop {
+            let (this_node, this_index) = match self.stack.pop() {
+                None => break None,
+                Some(x) => x,
+            };
+
+            let children = {
+                // This potentially creates overlapping mutable references to children of
+                // this_node.  Since we never return the same child twice and we do not mutate the
+                // tree directly in this function, this should be OK.
+                let this_node = unsafe { &mut *this_node };
+
+                match this_node {
+                    Node::Leaf(data) => break Some(data),
+                    Node::Branch(children) => children,
+                }
+            };
+
+            if this_index == 8 {
+                continue;
+            }
+
+            let next_tree = &mut children[this_index];
+            self.stack.push((this_node, 1 + this_index));
+            match &mut next_tree.node {
+                None => continue,
+                Some(next_node) => self.stack.push((&mut **next_node as *mut Node<T>, 0)),
+            }
+        }
+    }
+}
+
+impl<T> Node<T> {
+    const fn dummy() -> Node<T> {
         Node::Branch(Octree::new_branch(0))
-    }
-}
-
-impl<'a, T> std::ops::Deref for DetachedNode<'a, T> {
-    type Target = Node<T>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.stolen
-    }
-}
-
-impl<'a, T> std::ops::DerefMut for DetachedNode<'a, T> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.stolen
-    }
-}
-
-impl<'a, T> Drop for DetachedNode<'a, T> {
-    fn drop(&mut self) {
-        std::mem::swap(self.original, &mut self.stolen);
     }
 }
 
@@ -466,5 +440,19 @@ mod test {
         // Iteration after removal still yields the values that were not removed
         let all_vals: Vec<i64> = tree.iter().copied().collect();
         assert_eq!(all_vals, vec![5, 6]);
+
+        tree.insert(Point3::new(1, 1, 1), 7);
+        tree.insert(Point3::new(1, 2, 1), 8);
+        tree.insert(Point3::new(1, 1, 2), 9);
+
+        let mut iter_count = 0;
+        for x in tree.iter_mut() {
+            *x *= 2;
+            iter_count += 1;
+        }
+
+        let all_vals: Vec<i64> = tree.iter().copied().collect();
+        assert_eq!(all_vals.len(), iter_count);
+        assert_eq!(all_vals, vec![14, 16, 18, 10, 12]);
     }
 }
