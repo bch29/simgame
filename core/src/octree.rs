@@ -50,17 +50,15 @@ impl<T> Octree<T> {
 
         match node {
             None => None,
-            Some(boxed_node) => {
-                match *boxed_node {
-                    Node::Leaf(_) => {
-                        unreachable!("Leaf node at the top level in a tree of height > 0")
-                    }
-                    Node::Branch(mut children) => {
-                        self.node = std::mem::replace(&mut children[octant].node, None);
-                        Some(children)
-                    }
+            Some(boxed_node) => match *boxed_node {
+                Node::Leaf(_) => {
+                    unreachable!("Leaf node at the top level in a tree of height > 0")
                 }
-            }
+                Node::Branch(mut children) => {
+                    self.node = std::mem::replace(&mut children[octant].node, None);
+                    Some(children)
+                }
+            },
         }
     }
 
@@ -129,30 +127,26 @@ impl<T> Octree<T> {
     pub fn get(&self, pos: Point3<usize>) -> Option<&T> {
         match &self.node {
             None => None,
-            Some(boxed_node) => {
-                match &**boxed_node {
-                    Node::Leaf(data) => Some(data),
-                    Node::Branch(children) => {
-                        let (octant, next_pos) = Self::subdivide(self.height, pos);
-                        children[octant].get(next_pos)
-                    }
+            Some(boxed_node) => match &**boxed_node {
+                Node::Leaf(data) => Some(data),
+                Node::Branch(children) => {
+                    let (octant, next_pos) = Self::subdivide(self.height, pos);
+                    children[octant].get(next_pos)
                 }
-            }
+            },
         }
     }
 
     pub fn get_mut(&mut self, pos: Point3<usize>) -> Option<&mut T> {
         match &mut self.node {
             None => None,
-            Some(boxed_node) => {
-                match &mut **boxed_node {
-                    Node::Leaf(data) => Some(data),
-                    Node::Branch(children) => {
-                        let (octant, next_pos) = Self::subdivide(self.height, pos);
-                        children[octant].get_mut(next_pos)
-                    }
+            Some(boxed_node) => match &mut **boxed_node {
+                Node::Leaf(data) => Some(data),
+                Node::Branch(children) => {
+                    let (octant, next_pos) = Self::subdivide(self.height, pos);
+                    children[octant].get_mut(next_pos)
                 }
-            }
+            },
         }
     }
 
@@ -162,15 +156,13 @@ impl<T> Octree<T> {
     {
         match self.node {
             None => self.insert(pos, make_data()),
-            Some(ref mut boxed_node) => {
-                match &mut **boxed_node {
-                    Node::Leaf(data) => data,
-                    Node::Branch(children) => {
-                        let (octant, next_pos) = Self::subdivide(self.height, pos);
-                        children[octant].get_or_insert(next_pos, make_data)
-                    }
+            Some(ref mut boxed_node) => match &mut **boxed_node {
+                Node::Leaf(data) => data,
+                Node::Branch(children) => {
+                    let (octant, next_pos) = Self::subdivide(self.height, pos);
+                    children[octant].get_or_insert(next_pos, make_data)
                 }
-            }
+            },
         }
     }
 
@@ -194,19 +186,17 @@ impl<T> Octree<T> {
 
         match &self.node {
             None => bytes_written += writer.write(&[0])?,
-            Some(boxed_node) => {
-                match &**boxed_node {
-                    Node::Leaf(data) => {
-                        bytes_written += writer.write(&[1])?;
-                        bytes_written += serialize_data(data, writer)?;
-                    }
-                    Node::Branch(children) => {
-                        for child in children {
-                            bytes_written += child.serialize(writer, serialize_data)?;
-                        }
+            Some(boxed_node) => match &**boxed_node {
+                Node::Leaf(data) => {
+                    bytes_written += writer.write(&[1])?;
+                    bytes_written += serialize_data(data, writer)?;
+                }
+                Node::Branch(children) => {
+                    for child in children {
+                        bytes_written += child.serialize(writer, serialize_data)?;
                     }
                 }
-            }
+            },
         };
 
         Ok(bytes_written)
@@ -242,12 +232,12 @@ impl<T> Octree<T> {
         }
     }
 
-    pub fn iter(&self) -> RefIterator<T> {
-        RefIterator::new(self)
+    pub fn iter(&self) -> Iter<T> {
+        Iter::new(self)
     }
 
-    pub fn iter_mut(&mut self) -> MutIterator<T> {
-        MutIterator::new(self)
+    pub fn iter_mut(&mut self) -> IterMut<T> {
+        IterMut::new(self)
     }
 
     const fn new_branch(height: u8) -> [Self; 8] {
@@ -297,28 +287,28 @@ impl<T> Octree<T> {
     }
 }
 
-pub struct RefIterator<'a, T> {
+pub struct Iter<'a, T> {
     /// Traces the path currently taken through the tree. Each point along the path records the
     /// node and the index of the next branch to take.
     stack: Vec<(&'a Node<T>, usize)>,
 }
 
-impl<'a, T> RefIterator<'a, T> {
+impl<'a, T> Iter<'a, T> {
     fn new(tree: &'a Octree<T>) -> Self {
         let mut stack = Vec::new();
         match tree.node {
             None => {}
             Some(ref boxed_node) => {
-                stack.reserve_exact(7 + tree.height as usize);
+                stack.reserve_exact(1 + tree.height as usize);
                 stack.push((&**boxed_node, 0));
             }
         }
 
-        RefIterator { stack }
+        Iter { stack }
     }
 }
 
-impl<'a, T> Iterator for RefIterator<'a, T> {
+impl<'a, T> Iterator for Iter<'a, T> {
     type Item = &'a T;
 
     fn next(&mut self) -> Option<&'a T> {
@@ -346,43 +336,77 @@ impl<'a, T> Iterator for RefIterator<'a, T> {
     }
 }
 
-pub struct MutIterator<'a, T> {
-    stack: Vec<&'a mut Node<T>>,
+pub struct IterMut<'a, T> {
+    // This could be implemented safely without using raw pointers but that would require using a
+    // stack of size 8 * tree height instead of the 1 + tree height that we can get away with in
+    // unsafe code.
+    stack: Vec<(*mut Node<T>, usize)>,
+    _marker: std::marker::PhantomData<&'a mut Octree<T>>,
+
+    // this is used to test that the stack never re-allocates
+    #[cfg(test)]
+    capacity: usize,
 }
 
-impl<'a, T> MutIterator<'a, T> {
+impl<'a, T> IterMut<'a, T> {
     fn new(tree: &'a mut Octree<T>) -> Self {
         let mut stack = Vec::new();
+        #[allow(unused_assignments)]
+        let mut capacity = 0;
 
         match &mut tree.node {
             None => {}
             Some(node) => {
-                stack.reserve_exact(7 + 8 * (tree.height as usize - 1));
-                stack.push(&mut **node);
+                capacity = 1 + tree.height as usize;
+                stack.reserve_exact(capacity);
+                stack.push((&mut **node as *mut Node<T>, 0));
             }
         }
 
-        MutIterator {
+        IterMut {
             stack,
+            _marker: std::marker::PhantomData,
+            #[cfg(test)]
+            capacity,
         }
     }
 }
 
-impl<'a, T> Iterator for MutIterator<'a, T> {
+impl<'a, T> Iterator for IterMut<'a, T> {
     type Item = &'a mut T;
 
     fn next(&mut self) -> Option<&'a mut T> {
         loop {
-            let this_node = self.stack.pop()?;
+            let (this_node_ptr, mut next_index) = self.stack.pop()?;
+            let next_child = {
+                let this_node = unsafe { &mut *this_node_ptr };
 
-            let children = match this_node {
-                Node::Leaf(data) => break Some(data),
-                Node::Branch(children) => children,
+                let children = match this_node {
+                    Node::Leaf(data) => break Some(data),
+                    Node::Branch(children) => children,
+                };
+
+                loop {
+                    if next_index == 8 {
+                        break None;
+                    }
+
+                    match children[next_index].node {
+                        None => next_index += 1,
+                        Some(ref mut boxed_node) => {
+                            break Some(&mut **boxed_node);
+                        }
+                    }
+                }
             };
 
-            for child in children.iter_mut() {
-                for node in &mut child.node {
-                    self.stack.push(&mut **node);
+            match next_child {
+                None => {}
+                Some(next_child) => {
+                    self.stack.push((this_node_ptr, 1 + next_index));
+                    self.stack.push((next_child as *mut Node<T>, 0));
+                    #[cfg(test)]
+                    assert_eq!(self.stack.capacity(), self.capacity);
                 }
             }
         }
