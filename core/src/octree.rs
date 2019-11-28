@@ -1,6 +1,7 @@
+use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use cgmath::{Point3, Vector3};
+use serde::{Deserialize, Serialize};
 use std::io::{self, Read, Write};
-use serde::{Serialize, Deserialize};
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 enum Node<T> {
@@ -11,14 +12,14 @@ enum Node<T> {
 /// A tree structure providing a sparse representation of values in a 3D grid.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct Octree<T> {
-    height: u8,
+    height: usize,
     node: Option<Box<Node<T>>>,
 }
 
 impl<T> Octree<T> {
     /// Creates a new octree with the given height. It will have space for `2^height` distinct
     /// points.
-    pub const fn new(height: u8) -> Octree<T> {
+    pub const fn new(height: usize) -> Octree<T> {
         Octree { height, node: None }
     }
 
@@ -180,24 +181,32 @@ impl<T> Octree<T> {
         W: Write,
         F: FnMut(&T, &mut W) -> io::Result<usize>,
     {
-        // First byte
+        // First 8 bytes
         // - 0 for empty
         // - 1 for leaf, followed by serialize_data encoding
         // - height + 1 for tree, followed by tree encoding
         //
-        // Cannot serialize a tree of height 255 because first byte is height + 1
-        assert!(self.height < 255);
+        // Cannot serialize a tree of height std::u64::MAX because first byte is height + 1.
+        // In practice a tree that big would consume an impossibly large amount of memory
+        // as soon as any value was inserted into it.
+        assert!((self.height as u64) < std::u64::MAX);
 
         let mut bytes_written = 0;
 
         match &self.node {
-            None => bytes_written += writer.write(&[0])?,
+            None => {
+                writer.write_u64::<BigEndian>(0)?;
+                bytes_written += 8;
+            }
             Some(boxed_node) => match &**boxed_node {
                 Node::Leaf(data) => {
-                    bytes_written += writer.write(&[1])?;
+                    writer.write_u64::<BigEndian>(1)?;
+                    bytes_written += 8;
                     bytes_written += serialize_data(data, writer)?;
                 }
                 Node::Branch(children) => {
+                    writer.write_u64::<BigEndian>(1 + self.height as u64)?;
+                    bytes_written += 8;
                     for child in children {
                         bytes_written += child.serialize(writer, serialize_data)?;
                     }
@@ -213,9 +222,8 @@ impl<T> Octree<T> {
         R: Read,
         F: FnMut(&mut R) -> io::Result<T>,
     {
-        let mut buf0: [u8; 1] = [0];
-        reader.read_exact(&mut buf0)?;
-        let byte0 = buf0[0];
+        let mut buf0: [usize; 1] = [0];
+        let byte0 = reader.read_u64::<BigEndian>()? as usize;
 
         match byte0 {
             0 => Ok(Octree {
@@ -246,7 +254,7 @@ impl<T> Octree<T> {
         IterMut::new(self)
     }
 
-    const fn new_branch(height: u8) -> [Self; 8] {
+    const fn new_branch(height: usize) -> [Self; 8] {
         [
             Self::new(height),
             Self::new(height),
@@ -261,7 +269,7 @@ impl<T> Octree<T> {
 
     /// Subdivide a point into its octant and the point within that octant.
     #[inline(always)]
-    pub fn subdivide(height: u8, pos: Point3<usize>) -> (usize, Point3<usize>) {
+    pub fn subdivide(height: usize, pos: Point3<usize>) -> (usize, Point3<usize>) {
         assert!(height > 0);
         let half_size: usize = 1 << (height - 1);
         let size: usize = half_size * 2;
@@ -302,7 +310,7 @@ impl<T> Octree<T> {
     /// assert_eq!(sub.0, octant);
     /// assert_eq!(sub.1, Point3::new(0, 0, 0));
     /// ```
-    pub fn quadrant_offset(height: u8, octant: usize) -> Vector3<usize> {
+    pub fn quadrant_offset(height: usize, octant: usize) -> Vector3<usize> {
         assert!(height > 0);
         assert!(octant < 8);
         let distance = 1 << (height - 1);
@@ -314,7 +322,6 @@ impl<T> Octree<T> {
 
         distance * direction
     }
-
 
     pub fn bounds(&self) -> Vector3<usize> {
         let width = 1 << self.height;
@@ -414,7 +421,7 @@ impl<'a, T> Iterator for Iter<'a, T> {
                     self.stack.push(IterNode {
                         node: next_node,
                         next_index: 0,
-                        octant_origin
+                        octant_origin,
                     });
                 }
             }
@@ -497,7 +504,7 @@ impl<'a, T> Iterator for IterMut<'a, T> {
                         node: next_node as *mut Node<T>,
                         next_index: 0,
                         octant_origin,
-                        _marker: std::marker::PhantomData
+                        _marker: std::marker::PhantomData,
                     });
                     #[cfg(test)]
                     assert_eq!(self.stack.capacity(), self.capacity);
