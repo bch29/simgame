@@ -1,5 +1,5 @@
 use anyhow::{anyhow, Result};
-use cgmath::{Angle, Deg, ElementWise, Matrix4, Point3, Rad, SquareMatrix, Vector3};
+use cgmath::{Deg, ElementWise, Matrix4, Point3, SquareMatrix, Vector3};
 use log::info;
 use raw_window_handle::HasRawWindowHandle;
 use simgame_core::block;
@@ -7,8 +7,8 @@ use simgame_core::block::index_utils;
 use simgame_core::world::{UpdatedWorldState, World};
 use std::collections::HashMap;
 
-mod mesh;
-mod triangulate;
+pub mod mesh;
+pub mod triangulate;
 pub mod test;
 
 // TODO: UI rendering pipeline
