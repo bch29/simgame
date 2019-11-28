@@ -6,12 +6,15 @@ enum Node<T> {
     Leaf(T),
 }
 
+/// A tree structure providing a sparse representation of values in a 3D grid.
 pub struct Octree<T> {
     height: u8,
     node: Option<Box<Node<T>>>,
 }
 
 impl<T> Octree<T> {
+    /// Creates a new octree with the given height. It will have space for `2^height` distinct
+    /// points.
     pub const fn new(height: u8) -> Octree<T> {
         Octree { height, node: None }
     }
@@ -255,7 +258,7 @@ impl<T> Octree<T> {
 
     /// Subdivide a point into its octant and the point within that octant.
     #[inline(always)]
-    fn subdivide(height: u8, pos: Point3<usize>) -> (usize, Point3<usize>) {
+    pub fn subdivide(height: u8, pos: Point3<usize>) -> (usize, Point3<usize>) {
         assert!(height > 0);
         let half_size: usize = 1 << (height - 1);
         let size: usize = half_size * 2;
@@ -281,16 +284,51 @@ impl<T> Octree<T> {
         (x_octant + y_octant * 2 + z_octant * 4, Point3::new(x, y, z))
     }
 
+    /// Calculates the offset from the parent node's origin where a child node's origin will be,
+    /// within a tree of the given height, for the child in the given octant.
+    ///
+    /// ## Example
+    /// ```
+    /// use cgmath::{Point3, Vector3};
+    /// use simgame_core::octree::Octree;
+    /// let height = 7;
+    /// let octant = 3;
+    /// let offset = Octree::<()>::quadrant_offset(height, octant);
+    /// assert_eq!(offset, Vector3::new(64, 64, 0));
+    /// let sub = Octree::<()>::subdivide(height, Point3::new(0, 0, 0) + offset);
+    /// assert_eq!(sub.0, octant);
+    /// assert_eq!(sub.1, Point3::new(0, 0, 0));
+    /// ```
+    pub fn quadrant_offset(height: u8, octant: usize) -> Vector3<usize> {
+        assert!(height > 0);
+        assert!(octant < 8);
+        let distance = 1 << (height - 1);
+        let direction = Vector3 {
+            x: octant % 2,
+            y: (octant % 4) / 2,
+            z: octant / 4,
+        };
+
+        distance * direction
+    }
+
+
     pub fn bounds(&self) -> Vector3<usize> {
         let width = 1 << self.height;
         Vector3::new(width, width, width)
     }
 }
 
+struct IterNode<'a, T> {
+    node: &'a Node<T>,
+    next_index: usize,
+    octant_origin: Point3<usize>,
+}
+
 pub struct Iter<'a, T> {
     /// Traces the path currently taken through the tree. Each point along the path records the
     /// node and the index of the next branch to take.
-    stack: Vec<(&'a Node<T>, usize)>,
+    stack: Vec<IterNode<'a, T>>,
 }
 
 impl<'a, T> Iter<'a, T> {
@@ -300,7 +338,11 @@ impl<'a, T> Iter<'a, T> {
             None => {}
             Some(ref boxed_node) => {
                 stack.reserve_exact(1 + tree.height as usize);
-                stack.push((&**boxed_node, 0));
+                stack.push(IterNode {
+                    node: &**boxed_node,
+                    next_index: 0,
+                    octant_origin: Point3::new(0, 0, 0),
+                });
             }
         }
 
@@ -309,27 +351,53 @@ impl<'a, T> Iter<'a, T> {
 }
 
 impl<'a, T> Iterator for Iter<'a, T> {
-    type Item = &'a T;
+    type Item = (Point3<usize>, &'a T);
 
-    fn next(&mut self) -> Option<&'a T> {
+    fn next(&mut self) -> Option<Self::Item> {
         loop {
-            let (this_node, this_index) = match self.stack.pop() {
+            let mut iter_node = match self.stack.pop() {
                 None => break None,
                 Some(x) => x,
             };
 
-            match this_node {
-                Node::Leaf(x) => break Some(x),
-                Node::Branch(children) => {
-                    if this_index == 8 {
-                        continue;
-                    };
-                    let next_tree = &children[this_index];
-                    self.stack.push((this_node, 1 + this_index));
-                    match &next_tree.node {
-                        None => continue,
-                        Some(next_node) => self.stack.push((next_node, 0)),
+            let children = match &iter_node.node {
+                Node::Leaf(data) => break Some((iter_node.octant_origin, data)),
+                Node::Branch(children) => children,
+            };
+
+            let next_child = loop {
+                if iter_node.next_index == 8 {
+                    break None;
+                }
+
+                let child = &children[iter_node.next_index];
+                match &child.node {
+                    None => iter_node.next_index += 1,
+                    Some(boxed_node) => {
+                        let height = child.height;
+                        let distance = 1 << height;
+                        let dir = Vector3 {
+                            x: iter_node.next_index % 2,
+                            y: (iter_node.next_index % 4) / 2,
+                            z: iter_node.next_index / 4,
+                        };
+
+                        iter_node.next_index += 1;
+                        let octant_origin = iter_node.octant_origin + (distance * dir);
+                        break Some((&**boxed_node, octant_origin));
                     }
+                }
+            };
+
+            match next_child {
+                None => {}
+                Some((next_node, octant_origin)) => {
+                    self.stack.push(iter_node);
+                    self.stack.push(IterNode {
+                        node: next_node,
+                        next_index: 0,
+                        octant_origin
+                    });
                 }
             }
         }
@@ -420,85 +488,4 @@ impl<T> Node<T> {
 }
 
 #[cfg(test)]
-mod test {
-    use super::*;
-
-    use cgmath::Point3;
-
-    #[test]
-    fn test_octree() {
-        let mut tree: Octree<i64> = Octree::new(8);
-        tree.insert(Point3::new(34, 2, 17), 6);
-        assert_eq!(tree.get(Point3::new(34, 2, 17)), Some(&6));
-        assert_eq!(tree.get(Point3::new(0, 2, 17)), None);
-
-        {
-            let inner_ref = tree.get_or_insert(Point3::new(2, 3, 4), || 7);
-            assert_eq!(*inner_ref, 7);
-            *inner_ref = 5;
-        }
-
-        assert_eq!(tree.get_or_insert(Point3::new(2, 3, 4), || 4), &mut 5);
-
-        tree.insert(Point3::new(34, 3, 16), 2);
-
-        // Iteration
-        let all_vals: Vec<i64> = tree.iter().copied().collect();
-        assert_eq!(all_vals, vec![5, 2, 6]);
-
-        // Remove
-        assert_eq!(tree.remove(Point3::new(34, 3, 16)), Some(2));
-        assert_eq!(tree.remove(Point3::new(34, 3, 16)), None);
-
-        // Iteration after removal still yields the values that were not removed
-        let all_vals: Vec<i64> = tree.iter().copied().collect();
-        assert_eq!(all_vals, vec![5, 6]);
-
-        tree.insert(Point3::new(1, 1, 1), 7);
-        tree.insert(Point3::new(1, 2, 1), 8);
-        tree.insert(Point3::new(1, 1, 2), 9);
-
-        let mut iter_count = 0;
-        for x in tree.iter_mut() {
-            *x *= 2;
-            iter_count += 1;
-        }
-
-        let all_vals: Vec<i64> = tree.iter().copied().collect();
-        assert_eq!(all_vals.len(), iter_count);
-        assert_eq!(all_vals, vec![14, 16, 18, 10, 12]);
-    }
-
-    #[test]
-    fn test_dense_iter_mut() {
-        let mut tree: Octree<i64> = Octree::new(3);
-
-        let bounds = tree.bounds();
-
-        use std::collections::HashSet;
-
-        let mut expected_vals = HashSet::new();
-
-        for x in 0..bounds.x {
-            for y in 0..bounds.y {
-                for z in 0..bounds.z {
-                    let k = Point3::new(x, y, z);
-                    let v = (x + y * bounds.x + z * bounds.x * bounds.y) as i64;
-                    expected_vals.insert(v);
-                    tree.insert(k, v);
-                }
-            }
-        }
-
-        let actual_vals: HashSet<i64> = tree.iter().copied().collect();
-        assert_eq!(actual_vals, expected_vals);
-
-        for v in tree.iter_mut() {
-            *v *= 3;
-        }
-
-        let expected_vals: HashSet<i64> = expected_vals.iter().map(|x| *x * 3).collect();
-        let actual_vals: HashSet<i64> = tree.iter().copied().collect();
-        assert_eq!(actual_vals, expected_vals);
-    }
-}
+mod tests;
