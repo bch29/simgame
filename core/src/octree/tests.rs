@@ -55,7 +55,7 @@ fn test_iter_mut_basic() {
     tree.insert(Point3::new(1, 1, 2), 9);
 
     let mut iter_count = 0;
-    for x in tree.iter_mut() {
+    for (_, x) in tree.iter_mut() {
         *x *= 2;
         iter_count += 1;
     }
@@ -67,7 +67,7 @@ fn test_iter_mut_basic() {
 
 #[test]
 fn test_dense_iter_mut() {
-    let mut tree: Octree<i64> = Octree::new(3);
+    let mut tree: Octree<i64> = Octree::new(5);
 
     let bounds = tree.bounds();
 
@@ -89,7 +89,7 @@ fn test_dense_iter_mut() {
     let actual_vals: HashSet<i64> = tree.iter().map(|(_, &v)| v).collect();
     assert_eq!(actual_vals, expected_vals);
 
-    for v in tree.iter_mut() {
+    for (_, v) in tree.iter_mut() {
         *v *= 3;
     }
 

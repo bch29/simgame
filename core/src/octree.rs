@@ -287,7 +287,7 @@ impl<T> Octree<T> {
     /// Calculates the offset from the parent node's origin where a child node's origin will be,
     /// within a tree of the given height, for the child in the given octant.
     ///
-    /// ## Example
+    /// # Example
     /// ```
     /// use cgmath::{Point3, Vector3};
     /// use simgame_core::octree::Octree;
@@ -319,16 +319,34 @@ impl<T> Octree<T> {
     }
 }
 
+pub struct Iter<'a, T> {
+    /// Traces the path currently taken through the tree. Each point along the path records the
+    /// node and the index of the next branch to take.
+    stack: Vec<IterNode<'a, T>>,
+}
+
 struct IterNode<'a, T> {
     node: &'a Node<T>,
     next_index: usize,
     octant_origin: Point3<usize>,
 }
 
-pub struct Iter<'a, T> {
-    /// Traces the path currently taken through the tree. Each point along the path records the
-    /// node and the index of the next branch to take.
-    stack: Vec<IterNode<'a, T>>,
+pub struct IterMut<'a, T> {
+    // This could be implemented safely without using raw pointers but that would require using a
+    // stack of size 8 * tree height instead of the 1 + tree height that we can get away with in
+    // unsafe code.
+    stack: Vec<IterMutNode<'a, T>>,
+
+    // this is used to test that the stack never re-allocates
+    #[cfg(test)]
+    capacity: usize,
+}
+
+struct IterMutNode<'a, T> {
+    node: *mut Node<T>,
+    next_index: usize,
+    octant_origin: Point3<usize>,
+    _marker: std::marker::PhantomData<&'a mut Octree<T>>,
 }
 
 impl<'a, T> Iter<'a, T> {
@@ -355,10 +373,7 @@ impl<'a, T> Iterator for Iter<'a, T> {
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
-            let mut iter_node = match self.stack.pop() {
-                None => break None,
-                Some(x) => x,
-            };
+            let mut iter_node = self.stack.pop()?;
 
             let children = match &iter_node.node {
                 Node::Leaf(data) => break Some((iter_node.octant_origin, data)),
@@ -384,14 +399,14 @@ impl<'a, T> Iterator for Iter<'a, T> {
 
                         iter_node.next_index += 1;
                         let octant_origin = iter_node.octant_origin + (distance * dir);
-                        break Some((&**boxed_node, octant_origin));
+                        break Some((octant_origin, &**boxed_node));
                     }
                 }
             };
 
             match next_child {
                 None => {}
-                Some((next_node, octant_origin)) => {
+                Some((octant_origin, next_node)) => {
                     self.stack.push(iter_node);
                     self.stack.push(IterNode {
                         node: next_node,
@@ -402,18 +417,6 @@ impl<'a, T> Iterator for Iter<'a, T> {
             }
         }
     }
-}
-
-pub struct IterMut<'a, T> {
-    // This could be implemented safely without using raw pointers but that would require using a
-    // stack of size 8 * tree height instead of the 1 + tree height that we can get away with in
-    // unsafe code.
-    stack: Vec<(*mut Node<T>, usize)>,
-    _marker: std::marker::PhantomData<&'a mut Octree<T>>,
-
-    // this is used to test that the stack never re-allocates
-    #[cfg(test)]
-    capacity: usize,
 }
 
 impl<'a, T> IterMut<'a, T> {
@@ -427,13 +430,17 @@ impl<'a, T> IterMut<'a, T> {
             Some(node) => {
                 capacity = 1 + tree.height as usize;
                 stack.reserve_exact(capacity);
-                stack.push((&mut **node as *mut Node<T>, 0));
+                stack.push(IterMutNode {
+                    node: &mut **node as *mut Node<T>,
+                    next_index: 0,
+                    octant_origin: Point3::new(0, 0, 0),
+                    _marker: std::marker::PhantomData,
+                });
             }
         }
 
         IterMut {
             stack,
-            _marker: std::marker::PhantomData,
             #[cfg(test)]
             capacity,
         }
@@ -441,28 +448,39 @@ impl<'a, T> IterMut<'a, T> {
 }
 
 impl<'a, T> Iterator for IterMut<'a, T> {
-    type Item = &'a mut T;
+    type Item = (Point3<usize>, &'a mut T);
 
-    fn next(&mut self) -> Option<&'a mut T> {
+    fn next(&mut self) -> Option<Self::Item> {
         loop {
-            let (this_node_ptr, mut next_index) = self.stack.pop()?;
+            let mut iter_node = self.stack.pop()?;
             let next_child = {
-                let this_node = unsafe { &mut *this_node_ptr };
+                let this_node = unsafe { &mut *iter_node.node };
 
                 let children = match this_node {
-                    Node::Leaf(data) => break Some(data),
+                    Node::Leaf(data) => break Some((iter_node.octant_origin, data)),
                     Node::Branch(children) => children,
                 };
 
                 loop {
-                    if next_index == 8 {
+                    if iter_node.next_index == 8 {
                         break None;
                     }
 
-                    match children[next_index].node {
-                        None => next_index += 1,
+                    let child = &mut children[iter_node.next_index];
+                    match &mut child.node {
+                        None => iter_node.next_index += 1,
                         Some(ref mut boxed_node) => {
-                            break Some(&mut **boxed_node);
+                            let height = child.height;
+                            let distance = 1 << height;
+                            let dir = Vector3 {
+                                x: iter_node.next_index % 2,
+                                y: (iter_node.next_index % 4) / 2,
+                                z: iter_node.next_index / 4,
+                            };
+
+                            iter_node.next_index += 1;
+                            let octant_origin = iter_node.octant_origin + (distance * dir);
+                            break Some((octant_origin, &mut **boxed_node));
                         }
                     }
                 }
@@ -470,9 +488,14 @@ impl<'a, T> Iterator for IterMut<'a, T> {
 
             match next_child {
                 None => {}
-                Some(next_child) => {
-                    self.stack.push((this_node_ptr, 1 + next_index));
-                    self.stack.push((next_child as *mut Node<T>, 0));
+                Some((octant_origin, next_node)) => {
+                    self.stack.push(iter_node);
+                    self.stack.push(IterMutNode {
+                        node: next_node as *mut Node<T>,
+                        next_index: 0,
+                        octant_origin,
+                        _marker: std::marker::PhantomData
+                    });
                     #[cfg(test)]
                     assert_eq!(self.stack.capacity(), self.capacity);
                 }
