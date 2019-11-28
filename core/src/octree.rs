@@ -1,12 +1,15 @@
 use cgmath::{Point3, Vector3};
 use std::io::{self, Read, Write};
+use serde::{Serialize, Deserialize};
 
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 enum Node<T> {
     Branch([Octree<T>; 8]),
     Leaf(T),
 }
 
 /// A tree structure providing a sparse representation of values in a 3D grid.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct Octree<T> {
     height: u8,
     node: Option<Box<Node<T>>>,
