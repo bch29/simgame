@@ -201,26 +201,24 @@ impl WorldBlockData {
     where
         F: FnMut(Point3<usize>, Block) -> Result<Block, E>,
     {
-        let min_height = bounds_to_octree_height(bounds);
-        while self.chunks.height() < min_height {
+        while !self.bounds().contains_bounds(bounds) {
             self.chunks.grow(0);
         }
 
         let chunk_bounds = bounds.quantize_down(index_utils::chunk_size());
 
+        // TODO: the possible positions in the Octree could be iterated over more efficiently
+        // with a (not yet present) `replace_all_points` method.
         for chunk_pos in chunk_bounds.iter_points() {
             let chunk_start =
                 chunk_pos.mul_element_wise(Point3::origin() + index_utils::chunk_size());
-            // let inner_bounds = bounds.with_origin(chunk_start).clamp(index_utils::chunk_size());
 
-            // TODO: the possible positions in the Octree could be iterated over more efficiently
-            // with a (not yet present) `replace_all_points` method.
             let current_chunk = self.chunks.get_or_insert(chunk_pos, || Chunk::empty());
             let mut count_nonempty = 0;
 
             for inner_pos in Bounds::from_size(index_utils::chunk_size()).iter_points() {
                 let block_pos = chunk_start + (inner_pos - Point3::origin());
-                if !bounds.contains(block_pos) {
+                if !bounds.contains_point(block_pos) {
                     continue;
                 }
 
@@ -290,24 +288,23 @@ impl WorldBlockData {
     }
 
     pub fn debug_summary(&self) -> WorldBlockDataSummary {
-        let mut count_total = 0;
-        let mut count_empty = 0;
-
+        let size = self.bounds().size();
+        let count_total = size.x * size.y * size.z;
+        let mut count_nonempty = 0;
         for (_, block) in self.iter_blocks() {
-            count_total += 1;
-            if block.is_empty() {
-                count_empty += 1;
+            if !block.is_empty() {
+                count_nonempty += 1;
             }
         }
 
-        let pct_empty = (count_empty as f64 / count_total as f64) * 100.0;
+        let pct_nonempty = (count_nonempty as f64 / count_total as f64) * 100.0;
         let byte_size = std::mem::size_of::<Block>() * count_total;
         let mb_size = byte_size / (1024 * 1024);
 
         WorldBlockDataSummary {
             count_total,
-            count_empty,
-            pct_empty,
+            count_nonempty,
+            pct_nonempty,
             byte_size,
             mb_size,
             bounds: self.bounds(),
@@ -318,8 +315,8 @@ impl WorldBlockData {
 #[derive(Debug, PartialEq)]
 pub struct WorldBlockDataSummary {
     count_total: usize,
-    count_empty: usize,
-    pct_empty: f64,
+    count_nonempty: usize,
+    pct_nonempty: f64,
     byte_size: usize,
     mb_size: usize,
     bounds: Bounds<usize>,
@@ -337,17 +334,45 @@ pub fn blocks_to_u16_mut(buf: &mut [Block]) -> &mut [u16] {
 
 fn bounds_to_octree_height(min_bounds: Bounds<usize>) -> usize {
     let chunk_size = index_utils::chunk_size();
-    let max_dim = (min_bounds.limit().x as f64 / chunk_size.x as f64)
-        .max(min_bounds.limit().y as f64 / chunk_size.y as f64)
-        .max(min_bounds.limit().z as f64 / chunk_size.z as f64);
-    1 + max_dim.log2().max(0.0).ceil() as usize
+    let max_dim = [
+        min_bounds.limit().x as f64 / chunk_size.x as f64,
+        min_bounds.limit().y as f64 / chunk_size.y as f64,
+        min_bounds.limit().z as f64 / chunk_size.z as f64,
+    ]
+    .iter()
+    .copied()
+    .fold(0.0, f64::max);
+
+    1 + f64::max(max_dim.log2(), 0.0).ceil() as usize
 }
 
 #[cfg(test)]
 mod tests {
     use cgmath::{EuclideanSpace, Point3, Vector3};
 
+    use crate::util::Bounds;
+
     use super::*;
+
+    #[test]
+    fn test_bounds_to_octree_height() {
+        let bounds = Bounds::from_size(Vector3 { x: 27, y: 31, z: 2 });
+        assert_eq!(bounds_to_octree_height(bounds), 2);
+
+        let bounds = Bounds::from_size(Vector3 {
+            x: 32,
+            y: 32,
+            z: 32,
+        });
+        assert_eq!(bounds_to_octree_height(bounds), 2);
+
+        let bounds = Bounds::from_size(Vector3 {
+            x: 33,
+            y: 32,
+            z: 32,
+        });
+        assert_eq!(bounds_to_octree_height(bounds), 3);
+    }
 
     #[test]
     fn test_reserialize() {
