@@ -1,7 +1,10 @@
+use anyhow::anyhow;
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use cgmath::{Point3, Vector3};
 use serde::{Deserialize, Serialize};
 use std::io::{self, Read, Write};
+
+use crate::util::Bounds;
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 enum Node<T> {
@@ -181,32 +184,25 @@ impl<T> Octree<T> {
         W: Write,
         F: FnMut(&T, &mut W) -> io::Result<usize>,
     {
-        // First 8 bytes
-        // - 0 for empty
-        // - 1 for leaf, followed by serialize_data encoding
-        // - height + 1 for tree, followed by tree encoding
-        //
-        // Cannot serialize a tree of height std::u64::MAX because first byte is height + 1.
-        // In practice a tree that big would consume an impossibly large amount of memory
-        // as soon as any value was inserted into it.
-        assert!((self.height as u64) < std::u64::MAX);
-
         let mut bytes_written = 0;
+
+        writer.write_u64::<BigEndian>(self.height as u64)?;
+        bytes_written += 8;
 
         match &self.node {
             None => {
-                writer.write_u64::<BigEndian>(0)?;
-                bytes_written += 8;
+                writer.write_u8(0)?;
+                bytes_written += 1;
             }
             Some(boxed_node) => match &**boxed_node {
                 Node::Leaf(data) => {
-                    writer.write_u64::<BigEndian>(1)?;
-                    bytes_written += 8;
+                    writer.write_u8(1)?;
+                    bytes_written += 1;
                     bytes_written += serialize_data(data, writer)?;
                 }
                 Node::Branch(children) => {
-                    writer.write_u64::<BigEndian>(1 + self.height as u64)?;
-                    bytes_written += 8;
+                    writer.write_u8(2)?;
+                    bytes_written += 1;
                     for child in children {
                         bytes_written += child.serialize(writer, serialize_data)?;
                     }
@@ -222,27 +218,37 @@ impl<T> Octree<T> {
         R: Read,
         F: FnMut(&mut R) -> io::Result<T>,
     {
-        let mut buf0: [usize; 1] = [0];
-        let byte0 = reader.read_u64::<BigEndian>()? as usize;
+        let height = reader.read_u64::<BigEndian>()? as usize;
+        let tag = reader.read_u8()?;
 
-        match byte0 {
-            0 => Ok(Octree {
-                height: 0,
-                node: None,
-            }),
-            1 => Ok(Octree {
-                height: 0,
-                node: Some(Box::new(Node::Leaf(deserialize_data(reader)?))),
-            }),
-            _ => {
+        match tag {
+            0 => Ok(Octree { height, node: None }),
+            1 => {
+                if height != 0 {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        anyhow!("Leaf with nonzero height value {}", height),
+                    ));
+                }
+
+                Ok(Octree {
+                    height: 0,
+                    node: Some(Box::new(Node::Leaf(deserialize_data(reader)?))),
+                })
+            }
+            2 => {
                 let mut de = || Self::deserialize(reader, deserialize_data);
                 let node = Node::Branch([de()?, de()?, de()?, de()?, de()?, de()?, de()?, de()?]);
 
                 Ok(Octree {
-                    height: byte0 - 1,
+                    height,
                     node: Some(Box::new(node)),
                 })
             }
+            _ => Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                anyhow!("Invalid tag byte value {}", tag),
+            )),
         }
     }
 
@@ -323,9 +329,27 @@ impl<T> Octree<T> {
         distance * direction
     }
 
-    pub fn bounds(&self) -> Vector3<usize> {
+    pub fn height(&self) -> usize {
+        self.height
+    }
+
+    /// Returns a bounding box that is guaranteed to contain every point currently within the
+    /// Octree. No guarantees are made about whether it is the smallest such bounding box.
+    pub fn bounds(&self) -> Bounds<usize> {
         let width = 1 << self.height;
-        Vector3::new(width, width, width)
+        Bounds::from_size(Vector3::new(width, width, width))
+    }
+
+    pub fn check_height_invariant(&self) -> bool {
+        match &self.node {
+            None => true,
+            Some(boxed_node) => match &**boxed_node {
+                Node::Leaf(_) => self.height == 0,
+                Node::Branch(children) => children.iter().all(|child| {
+                    1 + child.height == self.height && child.check_height_invariant()
+                }),
+            },
+        }
     }
 }
 

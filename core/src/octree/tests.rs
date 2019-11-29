@@ -1,6 +1,15 @@
 use super::*;
 
+use std::collections::HashSet;
 use cgmath::Point3;
+
+fn values_vec<T: Copy>(tree: &Octree<T>) -> Vec<T> {
+    tree.iter().map(|(_, &v)| v).collect()
+}
+
+fn values_set<T: Copy + Eq + std::hash::Hash>(tree: &Octree<T>) -> HashSet<T> {
+    tree.iter().map(|(_, &v)| v).collect()
+}
 
 #[test]
 fn test_insert_remove() {
@@ -8,6 +17,7 @@ fn test_insert_remove() {
     tree.insert(Point3::new(34, 2, 17), 6);
     assert_eq!(tree.get(Point3::new(34, 2, 17)), Some(&6));
     assert_eq!(tree.get(Point3::new(0, 2, 17)), None);
+    assert!(tree.check_height_invariant());
 
     {
         let inner_ref = tree.get_or_insert(Point3::new(2, 3, 4), || 7);
@@ -16,32 +26,46 @@ fn test_insert_remove() {
     }
 
     assert_eq!(tree.get_or_insert(Point3::new(2, 3, 4), || 4), &mut 5);
+    assert!(tree.check_height_invariant());
 
     tree.insert(Point3::new(34, 3, 16), 2);
+    assert!(tree.check_height_invariant());
 
     // Remove
     assert_eq!(tree.remove(Point3::new(34, 3, 16)), Some(2));
     assert_eq!(tree.remove(Point3::new(34, 3, 16)), None);
+    assert!(tree.check_height_invariant());
 }
 
 #[test]
 fn test_iter_basic() {
+    let tree: Octree<i64> = Octree::new(0);
+    assert_eq!(values_vec(&tree), Vec::<i64>::new());
+    assert!(tree.check_height_invariant());
+
+    let tree: Octree<i64> = Octree::new(100);
+    assert_eq!(values_vec(&tree), Vec::<i64>::new());
+    assert!(tree.check_height_invariant());
+
     let mut tree: Octree<i64> = Octree::new(8);
     tree.insert(Point3::new(34, 2, 17), 6);
     tree.insert(Point3::new(2, 3, 4), 5);
     tree.insert(Point3::new(34, 3, 16), 2);
+    assert!(tree.check_height_invariant());
 
     let mut iter = tree.iter();
     assert_eq!(iter.next(), Some((Point3::new(2, 3, 4), &5)));
     assert_eq!(iter.next(), Some((Point3::new(34, 3, 16), &2)));
     assert_eq!(iter.next(), Some((Point3::new(34, 2, 17), &6)));
     assert_eq!(iter.next(), None);
+    assert!(tree.check_height_invariant());
 
     tree.remove(Point3::new(34, 3, 16));
+    assert!(tree.check_height_invariant());
 
     // Iteration after removal still yields the values that were not removed
-    let all_vals: Vec<i64> = tree.iter().map(|(_, &v)| v).collect();
-    assert_eq!(all_vals, vec![5, 6]);
+    assert_eq!(values_vec(&tree), vec![5, 6]);
+    assert!(tree.check_height_invariant());
 }
 
 #[test]
@@ -53,6 +77,7 @@ fn test_iter_mut_basic() {
     tree.insert(Point3::new(1, 1, 1), 7);
     tree.insert(Point3::new(1, 2, 1), 8);
     tree.insert(Point3::new(1, 1, 2), 9);
+    assert!(tree.check_height_invariant());
 
     let mut iter_count = 0;
     for (_, x) in tree.iter_mut() {
@@ -60,9 +85,10 @@ fn test_iter_mut_basic() {
         iter_count += 1;
     }
 
-    let all_vals: Vec<i64> = tree.iter().map(|(_, &v)| v).collect();
+    let all_vals = values_vec(&tree);
     assert_eq!(all_vals.len(), iter_count);
     assert_eq!(all_vals, vec![14, 16, 18, 10, 4, 12]);
+    assert!(tree.check_height_invariant());
 }
 
 #[test]
@@ -71,29 +97,22 @@ fn test_dense_iter_mut() {
 
     let bounds = tree.bounds();
 
-    use std::collections::HashSet;
-
     let mut expected_vals = HashSet::new();
 
-    for x in 0..bounds.x {
-        for y in 0..bounds.y {
-            for z in 0..bounds.z {
-                let k = Point3::new(x, y, z);
-                let v = (x + y * bounds.x + z * bounds.x * bounds.y) as i64;
-                expected_vals.insert(v);
-                tree.insert(k, v);
-            }
-        }
+    let size = bounds.size();
+    for k in bounds.iter_points() {
+        let v = (k.x + k.y * size.x + k.z * size.x * size.y) as i64;
+        expected_vals.insert(v);
+        tree.insert(k, v);
     }
 
-    let actual_vals: HashSet<i64> = tree.iter().map(|(_, &v)| v).collect();
-    assert_eq!(actual_vals, expected_vals);
+    assert!(tree.check_height_invariant());
+    assert_eq!(values_set(&tree), expected_vals);
 
     for (_, v) in tree.iter_mut() {
         *v *= 3;
     }
 
     let expected_vals: HashSet<i64> = expected_vals.iter().map(|x| *x * 3).collect();
-    let actual_vals: HashSet<i64> = tree.iter().map(|(_, &v)| v).collect();
-    assert_eq!(actual_vals, expected_vals);
+    assert_eq!(values_set(&tree), expected_vals);
 }
