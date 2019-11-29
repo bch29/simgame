@@ -13,7 +13,8 @@ pub struct GenerateWorldConfig {
 
 pub fn generate_world(config: &GenerateWorldConfig) -> Result<WorldBlockData> {
     info!("Creating empty world");
-    let mut blocks = WorldBlockData::empty(Bounds::from_size(config.size));
+    let world_bounds = Bounds::from_size(config.size);
+    let mut blocks = WorldBlockData::empty(world_bounds);
 
     let world_size = Vector3 {
         x: config.size.x as f64,
@@ -29,43 +30,48 @@ pub fn generate_world(config: &GenerateWorldConfig) -> Result<WorldBlockData> {
     let sin_factor = 1.0;
 
     let mut blocks_done = 0;
-    let total_blocks = blocks.bounds().iter_points().count();
+    let total_blocks = config.size.x * config.size.y * config.size.z;
 
     let progress_count = 10;
     let mut next_progress_step = 1;
 
+    info!("Bounds are {:?}", world_bounds);
     let mut rng = rand::thread_rng();
-    for (loc, block) in blocks.iter_blocks_mut() {
-        // Normalized point with coords in range (0, 1)
-        let p = Vector3 {
-            x: loc.x as f64 / world_size.x,
-            y: loc.y as f64 / world_size.y,
-            z: loc.z as f64 / world_size.z,
-        };
+    blocks
+        .replace_blocks(world_bounds, |loc, _| -> Result<Block> {
+            // Normalized point with coords in range (0, 1)
+            let p = Vector3 {
+                x: loc.x as f64 / world_size.x,
+                y: loc.y as f64 / world_size.y,
+                z: loc.z as f64 / world_size.z,
+            };
 
-        // Empty above curve, filled below curve
-        use std::f64::consts::PI;
-        // val in range [0, 1]
-        let val = 0.5 * (1.0 + (p.x * PI * sin_factor).sin() * (p.y * PI * cos_factor).cos());
-        assert!(0. <= val && val <= 1.);
+            // Empty above curve, filled below curve
+            use std::f64::consts::PI;
+            // val in range [0, 1]
+            let val = 0.5 * (1.0 + (p.x * PI * sin_factor).sin() * (p.y * PI * cos_factor).cos());
+            assert!(0. <= val && val <= 1.);
 
-        // this is the height of the terrain at current x, y coordinate
-        let height_here = base_z + val * terrain_height;
+            // this is the height of the terrain at current x, y coordinate
+            let height_here = base_z + val * terrain_height;
 
-        // fill with air if current z is above height_here, else rock
-        if p.z * world_size.z > height_here {
-            *block = Block::air();
-        } else {
-            let block_val = rng.gen::<u16>() % 7;
-            *block = Block::from_u16(block_val);
-        }
+            // fill with air if current z is above height_here, else rock
+            let block = if p.z * world_size.z > height_here {
+                Block::air()
+            } else {
+                let block_val = rng.gen::<u16>() % 9;
+                Block::from_u16(block_val)
+            };
 
-        blocks_done += 1;
-        if blocks_done == (next_progress_step * total_blocks) / progress_count {
-            info!("{}%", next_progress_step * 10);
-            next_progress_step += 1;
-        }
-    }
+            blocks_done += 1;
+            if blocks_done == (next_progress_step * total_blocks) / progress_count {
+                info!("{}%", next_progress_step * 10);
+                next_progress_step += 1;
+            }
+
+            Ok(block)
+        })
+        .unwrap();
 
     info!("Generated world: {:?}", blocks.debug_summary());
 
