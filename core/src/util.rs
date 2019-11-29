@@ -48,7 +48,7 @@ impl<T: BaseNum> Bounds<T> {
         self.origin + self.size
     }
 
-    pub fn contains(self, point: Point3<T>) -> bool {
+    pub fn contains_point(self, point: Point3<T>) -> bool {
         let limit = self.limit();
         point.x >= self.origin.x
             && point.x < limit.x
@@ -56,6 +56,18 @@ impl<T: BaseNum> Bounds<T> {
             && point.y < limit.y
             && point.z >= self.origin.z
             && point.z < limit.z
+    }
+
+    pub fn contains_bounds(self, bounds: Bounds<T>) -> bool {
+        let limit = self.limit();
+        let a = bounds.origin();
+        let b = bounds.limit();
+        a.x >= self.origin.x
+            && b.x <= limit.x
+            && a.y >= self.origin.y
+            && b.y <= limit.y
+            && a.z >= self.origin.z
+            && b.z <= limit.z
     }
 
     pub fn clamp(self, point: Point3<T>) -> Point3<T> {
