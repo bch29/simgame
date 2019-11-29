@@ -30,19 +30,12 @@ impl<T> Octree<T> {
     /// existing tree into the eighth. The given octant is the one where the existing tree ends up.
     /// To keep the set of points in the tree unchanged, grow into the zeroth octant.
     pub fn grow(&mut self, octant: usize) {
-        assert!(self.height < 255);
         assert!(octant < 8);
 
-        let new_height = 1 + self.height;
+        let mut branch = Self::new_branch(self.height);
+        branch[octant].node = std::mem::replace(&mut self.node, None);
 
-        let active_child = Octree {
-            height: self.height,
-            node: std::mem::replace(&mut self.node, None),
-        };
-
-        let mut branch = Self::new_branch(new_height);
-        branch[octant] = active_child;
-
+        self.height += 1;
         self.node = Some(Box::new(Node::Branch(branch)))
     }
 
@@ -288,8 +281,8 @@ impl<T> Octree<T> {
             } else {
                 panic!(
                     "Subdividing point {:?} into octants but it falls outside the current octant
-                     at height {}",
-                    pos, height
+                     at height {} with max size {}",
+                    pos, height, size
                 )
             }
         };
@@ -348,6 +341,22 @@ impl<T> Octree<T> {
                 Node::Branch(children) => children.iter().all(|child| {
                     1 + child.height == self.height && child.check_height_invariant()
                 }),
+            },
+        }
+    }
+
+    pub fn assert_height_invariant(&self) {
+        match &self.node {
+            None => {}
+            Some(boxed_node) => match &**boxed_node {
+                Node::Leaf(_) => assert_eq!(self.height, 0),
+                Node::Branch(children) => {
+                    assert!(self.height > 0);
+                    for child in children {
+                        assert_eq!(child.height, self.height - 1);
+                        child.assert_height_invariant();
+                    }
+                }
             },
         }
     }
