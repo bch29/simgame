@@ -391,7 +391,7 @@ impl WorldRenderState {
         device: &wgpu::Device,
         world: &World,
     ) {
-        for (p, chunk) in world.blocks.iter_chunks_with_loc() {
+        for (p, chunk) in world.blocks.iter_chunks() {
             let all_empty = chunk.blocks.iter().all(|b| b.is_empty());
             if all_empty {
                 continue;

@@ -1,11 +1,11 @@
 use anyhow::{anyhow, bail, Context, Result};
-use cgmath::Vector3;
 use directories::UserDirs;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
 use crate::block::WorldBlockData;
 use crate::settings::{CoreSettings, Settings};
+use crate::util::Bounds;
 
 const CORE_SETTINGS_FILE_NAME: &str = "core_config.yaml";
 const USER_SETTINGS_FILE_NAME: &str = "settings.yaml";
@@ -26,7 +26,7 @@ pub struct FileContext {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct WorldMeta {
-    count_chunks: Vector3<usize>,
+    world_bounds: Bounds<usize>,
 }
 
 impl FileContext {
@@ -114,11 +114,12 @@ impl FileContext {
                 path
             };
             let meta = WorldMeta {
-                count_chunks: blocks.get_count_chunks(),
+                world_bounds: blocks.bounds(),
             };
             let file = std::fs::File::create(&file_path)
                 .context("Creating world meta file for saved game")?;
-            serde_yaml::to_writer(file, &meta).context("Writing world meta file for saved game")?;
+            serde_yaml::to_writer(file, &meta)
+                .context("Writing world meta file for saved game")?;
         }
 
         {
@@ -201,7 +202,7 @@ impl FileContext {
         let mut decompressed =
             lz4::Decoder::new(file).context("Initializing decoder for block data file")?;
 
-        let mut world_blocks = WorldBlockData::empty(meta.count_chunks);
+        let mut world_blocks = WorldBlockData::empty(meta.world_bounds);
         world_blocks
             .deserialize_blocks(&mut decompressed)
             .context("Deserializing block data")?;

@@ -1,9 +1,10 @@
-use anyhow::{bail, Result};
-use cgmath::{Vector3, ElementWise};
-use rand::Rng;
+use anyhow::Result;
+use cgmath::Vector3;
 use log::info;
+use rand::Rng;
 
-use crate::block::{index_utils, Block, WorldBlockData};
+use crate::block::{Block, WorldBlockData};
+use crate::util::Bounds;
 
 #[derive(Debug)]
 pub struct GenerateWorldConfig {
@@ -11,24 +12,13 @@ pub struct GenerateWorldConfig {
 }
 
 pub fn generate_world(config: &GenerateWorldConfig) -> Result<WorldBlockData> {
-    let chunk_size = index_utils::chunk_size();
-
-    let size_rem = config.size.rem_element_wise(chunk_size);
-    if size_rem.x != 0 || size_rem.y != 0 || size_rem.z != 0 {
-        bail!("size must be a multiple of [{}, {}, {}] (got [{}, {}, {}])", 
-              chunk_size.x, chunk_size.y, chunk_size.y,
-              config.size.x, config.size.y, config.size.z);
-    }
-
-    let count_chunks = config.size.div_element_wise(chunk_size);
-
     info!("Creating empty world");
-    let mut blocks = WorldBlockData::empty(count_chunks);
+    let mut blocks = WorldBlockData::empty(Bounds::from_size(config.size));
 
     let world_size = Vector3 {
-        x: blocks.size().x as f64,
-        y: blocks.size().y as f64,
-        z: blocks.size().z as f64,
+        x: config.size.x as f64,
+        y: config.size.y as f64,
+        z: config.size.z as f64,
     };
 
     info!("Generating terrain");
@@ -39,13 +29,13 @@ pub fn generate_world(config: &GenerateWorldConfig) -> Result<WorldBlockData> {
     let sin_factor = 1.0;
 
     let mut blocks_done = 0;
-    let total_blocks = blocks.size().x * blocks.size().y * blocks.size().z;
+    let total_blocks = blocks.bounds().iter_points().count();
 
     let progress_count = 10;
     let mut next_progress_step = 1;
 
     let mut rng = rand::thread_rng();
-    for (loc, block) in blocks.iter_blocks_with_loc_mut() {
+    for (loc, block) in blocks.iter_blocks_mut() {
         // Normalized point with coords in range (0, 1)
         let p = Vector3 {
             x: loc.x as f64 / world_size.x,

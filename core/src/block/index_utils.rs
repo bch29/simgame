@@ -39,12 +39,11 @@ pub fn point_within_size(point: Point3<usize>, bounds: Vector3<usize>) -> bool {
     point.x < bounds.x && point.y < bounds.y && point.z < bounds.z
 }
 
-/// indices is (chunk_index, inner_index)
+/// indices is (chunk_pos, inner_index)
 #[inline]
-pub fn unpack_index(count_chunks: Vector3<usize>, indices: (usize, usize)) -> Point3<usize> {
-    let (chunk_index, inner_index) = indices;
+pub fn unpack_index(indices: (Point3<usize>, usize)) -> Point3<usize> {
+    let (chunk_pos, inner_index) = indices;
     let origin = Point3::from((0, 0, 0));
-    let chunk_pos = unpack_xyz(count_chunks, chunk_index);
     let inner_pos = unpack_xyz(chunk_size(), inner_index);
     let inner_offset = inner_pos - origin;
     chunk_pos.mul_element_wise(origin + chunk_size()) + inner_offset
@@ -53,15 +52,13 @@ pub fn unpack_index(count_chunks: Vector3<usize>, indices: (usize, usize)) -> Po
 /// From a point in block coordinates, return the chunk index and the position of the block
 /// within that chunk.
 #[inline]
-pub fn to_chunk_index(count_chunks: Vector3<usize>, p: Point3<usize>) -> (usize, Point3<usize>) {
-    let size = make_size(count_chunks);
-    assert!(point_within_size(p, size));
-
+pub fn to_chunk_pos(
+    p: Point3<usize>,
+) -> (Point3<usize>, Point3<usize>) {
     let origin = Point3::from((0, 0, 0));
     let inner_pos = p.rem_element_wise(origin + chunk_size());
     let chunk_pos = p.div_element_wise(origin + chunk_size());
-    let chunk_idx = pack_xyz(count_chunks, chunk_pos);
-    (chunk_idx, inner_pos)
+    (chunk_pos, inner_pos)
 }
 
 #[inline]
@@ -70,12 +67,12 @@ pub fn pack_within_chunk(p: Point3<usize>) -> usize {
     p.x + p.y * chunk_size().x + p.z * chunk_size().x * chunk_size().y
 }
 
-/// Returns (chunk_index, inner_index),
+/// Returns (chunk_pos, inner_index),
 #[inline]
-pub fn pack_index(count_chunks: Vector3<usize>, p: Point3<usize>) -> (usize, usize) {
-    let (chunk_index, inner_point) = to_chunk_index(count_chunks, p);
+pub fn pack_index(p: Point3<usize>) -> (Point3<usize>, usize) {
+    let (chunk_pos, inner_point) = to_chunk_pos(p);
     let inner_index = pack_within_chunk(inner_point);
-    (chunk_index, inner_index)
+    (chunk_pos, inner_index)
 }
 
 #[inline]
@@ -138,11 +135,14 @@ pub struct Vec3D<T> {
     size: Vector3<usize>,
 }
 
-impl<T> Vec3D<T> where T: Clone {
+impl<T> Vec3D<T>
+where
+    T: Clone,
+{
     pub fn new(val: &T, size: Vector3<usize>) -> Self {
         Vec3D {
-            data: (0..size.x*size.y*size.z).map(|_| val.clone()).collect(), 
-            size 
+            data: (0..size.x * size.y * size.z).map(|_| val.clone()).collect(),
+            size,
         }
     }
 }
@@ -187,25 +187,22 @@ mod tests {
 
     #[test]
     fn test_pack_index() {
-        let count_chunks = Vector3 { x: 17, y: 11, z: 7 };
-
         assert_eq!(
-            (0, 0),
-            pack_index(count_chunks, Point3 { x: 0, y: 0, z: 0 })
+            (Point3 { x: 0, y: 0, z: 0}, 0),
+            pack_index(Point3 { x: 0, y: 0, z: 0 })
         );
 
         assert_eq!(
-            (0, 7 + 3 * chunk_size().x),
-            pack_index(count_chunks, Point3 { x: 7, y: 3, z: 0 })
+            (Point3 { x: 0, y: 0, z: 0}, 7 + 3 * chunk_size().x),
+            pack_index(Point3 { x: 7, y: 3, z: 0 })
         );
 
         assert_eq!(
             (
-                2 + 8 * count_chunks.x + 3 * count_chunks.x * count_chunks.y,
+                Point3 { x: 2, y: 8, z: 3},
                 5 + 4 * chunk_size().x + 12 * chunk_size().x * chunk_size().y
             ),
             pack_index(
-                count_chunks,
                 Point3 {
                     x: 37,
                     y: 132,
@@ -217,18 +214,13 @@ mod tests {
 
     #[test]
     fn test_unpack_index() {
-        let count_chunks = Vector3 { x: 16, y: 16, z: 8 };
-
         assert_eq!(
             Point3 { x: 7, y: 3, z: 0 },
             unpack_xyz(chunk_size(), 7 + 3 * chunk_size().x)
         );
 
         let check_point = |p| {
-            assert_eq!(
-                p,
-                unpack_index(count_chunks, pack_index(count_chunks, p))
-            );
+            assert_eq!(p, unpack_index(pack_index(p)));
         };
 
         check_point(Point3 { x: 0, y: 0, z: 0 });
