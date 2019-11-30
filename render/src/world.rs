@@ -27,7 +27,7 @@ pub struct WorldRenderInit<RV, RF> {
     pub height: u32,
 }
 
-pub(crate) struct WorldRenderState {
+pub struct WorldRenderState {
     render_pipeline: wgpu::RenderPipeline,
     cube_vertex_buf: wgpu::Buffer,
     cube_index_buf: wgpu::Buffer,

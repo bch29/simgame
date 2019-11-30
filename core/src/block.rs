@@ -86,15 +86,15 @@ pub struct Chunk {
 
 impl std::fmt::Debug for Chunk {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Chunk {{\n")?;
+        writeln!(f, "Chunk {{")?;
         for z in 0..index_utils::chunk_size().z {
-            write!(f, "z={}\n", z)?;
+            writeln!(f, "z={}", z)?;
             for y in 0..index_utils::chunk_size().y {
                 for x in 0..index_utils::chunk_size().x {
                     let ix = index_utils::pack_xyz(index_utils::chunk_size(), Point3 { x, y, z });
                     write!(f, "{}", self.blocks[ix].0)?;
                 }
-                write!(f, "\n")?;
+                writeln!(f)?;
             }
         }
         write!(f, "}}")
@@ -225,7 +225,7 @@ impl WorldBlockData {
             let chunk_start =
                 chunk_pos.mul_element_wise(Point3::origin() + index_utils::chunk_size());
 
-            let current_chunk = self.chunks.get_or_insert(chunk_pos, || Chunk::empty());
+            let current_chunk = self.chunks.get_or_insert(chunk_pos, Chunk::empty);
             let mut count_nonempty = 0;
 
             for inner_pos in Bounds::from_size(index_utils::chunk_size()).iter_points() {

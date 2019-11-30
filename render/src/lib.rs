@@ -6,8 +6,8 @@ use simgame_core::world::{UpdatedWorldState, World};
 
 pub mod mesh;
 pub mod test;
-pub mod triangulate;
-pub mod world;
+mod triangulate;
+mod world;
 
 pub use world::WorldRenderInit;
 
