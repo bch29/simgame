@@ -86,8 +86,18 @@ pub struct Chunk {
 
 impl std::fmt::Debug for Chunk {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let count_empty = self.blocks.iter().filter(|b| b.is_empty()).count();
-        write!(f, "Chunk {{ {} empty blocks }}", count_empty)
+        write!(f, "Chunk {{\n")?;
+        for z in 0..index_utils::chunk_size().z {
+            write!(f, "z={}\n", z)?;
+            for y in 0..index_utils::chunk_size().y {
+                for x in 0..index_utils::chunk_size().x {
+                    let ix = index_utils::pack_xyz(index_utils::chunk_size(), Point3 { x, y, z });
+                    write!(f, "{}", self.blocks[ix].0)?;
+                }
+                write!(f, "\n")?;
+            }
+        }
+        write!(f, "}}")
     }
 }
 
@@ -138,6 +148,8 @@ impl std::cmp::PartialEq for Chunk {
 impl Eq for Chunk {}
 
 impl WorldBlockData {
+    /// Returns the chunk in which the given block position resides.
+    #[inline]
     pub fn get_chunk(&self, p: Point3<usize>) -> &Chunk {
         let (chunk_pos, _) = index_utils::to_chunk_pos(p);
         self.chunks
@@ -348,7 +360,7 @@ fn bounds_to_octree_height(min_bounds: Bounds<usize>) -> usize {
 
 #[cfg(test)]
 mod tests {
-    use cgmath::{EuclideanSpace, Point3, Vector3};
+    use cgmath::{ElementWise, EuclideanSpace, Point3, Vector3};
 
     use crate::util::Bounds;
 
@@ -356,21 +368,21 @@ mod tests {
 
     #[test]
     fn test_bounds_to_octree_height() {
-        let bounds = Bounds::from_size(Vector3 { x: 27, y: 31, z: 2 });
+        let bounds = Bounds::from_size(
+            index_utils::chunk_size() * 2
+                - Vector3 {
+                    x: 5,
+                    y: 1,
+                    z: index_utils::chunk_size().z - 2,
+                },
+        );
         assert_eq!(bounds_to_octree_height(bounds), 2);
 
-        let bounds = Bounds::from_size(Vector3 {
-            x: 32,
-            y: 32,
-            z: 32,
-        });
+        let bounds = Bounds::from_size(index_utils::chunk_size() * 2);
         assert_eq!(bounds_to_octree_height(bounds), 2);
 
-        let bounds = Bounds::from_size(Vector3 {
-            x: 33,
-            y: 32,
-            z: 32,
-        });
+        let bounds =
+            Bounds::from_size(index_utils::chunk_size() * 2 + Vector3 { x: 1, y: 0, z: 0 });
         assert_eq!(bounds_to_octree_height(bounds), 3);
     }
 
@@ -384,7 +396,6 @@ mod tests {
         let mut buf = Vec::new();
 
         let mut original = WorldBlockData::empty(bounds);
-        assert_eq!(original.chunks.height(), 3);
 
         let points1 = vec![(0, 0, 0), (3, 4, 5), (24, 25, 26), (24, 35, 36)];
 
@@ -411,21 +422,23 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            original.debug_summary().count_empty,
-            reserialized.debug_summary().count_empty
+            original.debug_summary().count_nonempty,
+            reserialized.debug_summary().count_nonempty
         );
+
+        let chunk_limit = Point3::origin() + index_utils::chunk_size();
 
         assert_eq!(
             Block::from_u16(1),
-            original
-                .get_chunk(Point3::new(24, 35, 36))
-                .get_block(Point3::new(8, 3, 4))
+            dbg!(original
+                .get_chunk(Point3::new(24, 35, 36)))
+                .get_block(dbg!(Point3::new(24, 35, 36).rem_element_wise(chunk_limit)))
         );
         assert_eq!(
-            Block::from_u16(1),
+            Block::from_u16(257),
             reserialized
-                .get_chunk(Point3::new(24, 35, 36))
-                .get_block(Point3::new(8, 3, 4))
+                .get_chunk(Point3::new(31, 47, 63))
+                .get_block(Point3::new(31, 47, 63).rem_element_wise(chunk_limit))
         );
 
         assert_eq!(Block::from_u16(1), reserialized.get_block(Point3::origin()));

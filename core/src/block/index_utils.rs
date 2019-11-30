@@ -4,11 +4,7 @@ use cgmath::{ElementWise, Point3, Vector3};
 
 #[inline]
 pub const fn chunk_size() -> Vector3<usize> {
-    Vector3 {
-        x: 16,
-        y: 16,
-        z: 16,
-    }
+    Vector3 { x: 16, y: 16, z: 4 }
 }
 
 #[inline]
@@ -52,9 +48,7 @@ pub fn unpack_index(indices: (Point3<usize>, usize)) -> Point3<usize> {
 /// From a point in block coordinates, return the chunk index and the position of the block
 /// within that chunk.
 #[inline]
-pub fn to_chunk_pos(
-    p: Point3<usize>,
-) -> (Point3<usize>, Point3<usize>) {
+pub fn to_chunk_pos(p: Point3<usize>) -> (Point3<usize>, Point3<usize>) {
     let origin = Point3::from((0, 0, 0));
     let inner_pos = p.rem_element_wise(origin + chunk_size());
     let chunk_pos = p.div_element_wise(origin + chunk_size());
@@ -188,35 +182,21 @@ mod tests {
     #[test]
     fn test_pack_index() {
         assert_eq!(
-            (Point3 { x: 0, y: 0, z: 0}, 0),
+            (Point3 { x: 0, y: 0, z: 0 }, 0),
             pack_index(Point3 { x: 0, y: 0, z: 0 })
         );
 
         assert_eq!(
-            (Point3 { x: 0, y: 0, z: 0}, 7 + 3 * chunk_size().x),
-            pack_index(Point3 { x: 7, y: 3, z: 0 })
-        );
-
-        assert_eq!(
-            (
-                Point3 { x: 2, y: 8, z: 3},
-                5 + 4 * chunk_size().x + 12 * chunk_size().x * chunk_size().y
-            ),
-            pack_index(
-                Point3 {
-                    x: 37,
-                    y: 132,
-                    z: 60
-                }
-            )
+            (Point3 { x: 0, y: 0, z: 0 }, 2 + 3 * chunk_size().x),
+            pack_index(Point3 { x: 2, y: 3, z: 0 })
         );
     }
 
     #[test]
     fn test_unpack_index() {
         assert_eq!(
-            Point3 { x: 7, y: 3, z: 0 },
-            unpack_xyz(chunk_size(), 7 + 3 * chunk_size().x)
+            Point3 { x: 2, y: 3, z: 0 },
+            unpack_xyz(chunk_size(), 2 + 3 * chunk_size().x)
         );
 
         let check_point = |p| {
