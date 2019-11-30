@@ -7,3 +7,4 @@ edition = "2018"
 [dependencies]
 shaderc = "0.6"
 anyhow = "1.*"
+log = "0.4"

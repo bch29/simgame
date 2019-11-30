@@ -20,25 +20,27 @@ layout(set = 0, binding = 1) buffer BlockTypes {
   int[] b_BlockTypes;
 };
 
-const uint CHUNK_SIZE_X = 16;
-const uint CHUNK_SIZE_Y = 16;
-const uint CHUNK_SIZE_Z = 16;
+/* const uint CHUNK_SIZE_X = 16; */
+/* const uint CHUNK_SIZE_Y = 16; */
+/* const uint CHUNK_SIZE_Z = 16; */
+const uint CHUNK_SIZE_XY = CHUNK_SIZE_X * CHUNK_SIZE_Y;
+const uint CHUNK_SIZE_XYZ = CHUNK_SIZE_XY * CHUNK_SIZE_Z;
 
 const float scale = 1.0;
 const float scale_over_2 = scale / 2.;
 
 ivec3 decodeBlockIndex(uint index)
 {
-  uint block_xy = index  % (CHUNK_SIZE_X * CHUNK_SIZE_Y);
+  uint block_xy = index  % CHUNK_SIZE_XY;
   uint block_x = block_xy % CHUNK_SIZE_X;
   uint block_y = block_xy / CHUNK_SIZE_Y;
-  uint block_z = index / (CHUNK_SIZE_X * CHUNK_SIZE_Y);
+  uint block_z = index / CHUNK_SIZE_XY;
   return ivec3(block_x, block_y, block_z);
 }
 
 uint encodeBlockIndex(uvec3 pos)
 {
-  return pos.x + pos.y * CHUNK_SIZE_X + pos.z * CHUNK_SIZE_X * CHUNK_SIZE_X;
+  return pos.x + pos.y * CHUNK_SIZE_X + pos.z * CHUNK_SIZE_XY;
 }
 
 int blockTypeAtIndex(uint index)

@@ -7,6 +7,7 @@ use structopt::StructOpt;
 use simgame_core::files::FileContext;
 use simgame_core::world::World;
 use simgame_core::worldgen;
+use simgame_core::block::index_utils;
 // use simgame::settings::{CoreSettings, Settings};
 
 #[derive(Debug, StructOpt)]
@@ -66,7 +67,12 @@ fn run_load_world(ctx: &FileContext, save_name: &str) -> Result<()> {
     let blocks = ctx.load_world_blocks(save_name)?;
     info!("Loaded world: {:?}", blocks.debug_summary());
 
+    let compile_params = simgame_shaders::CompileParams {
+        chunk_size: index_utils::chunk_size().into()
+    };
+
     let (vert_shader, frag_shader) = simgame_shaders::compile(
+        &compile_params,
         "shaders/shader.vert".as_ref(),
         "shaders/shader.frag".as_ref())?;
 
