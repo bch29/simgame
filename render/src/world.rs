@@ -1,20 +1,14 @@
-use std::collections::HashMap;
-
 use anyhow::Result;
-use cgmath::{Deg, ElementWise, EuclideanSpace, Matrix4, Point3, SquareMatrix, Vector3};
-use log::info;
+use cgmath::{Deg, EuclideanSpace, Matrix4, Point3, SquareMatrix, Vector3, ElementWise};
 
 use simgame_core::block;
 use simgame_core::block::index_utils;
 use simgame_core::world::{UpdatedWorldState, World};
 
-use crate::buffer_util::{BufferSyncHelperDesc, BufferSyncedData, IntoBufferSynced};
+use crate::buffer_util::{
+    BufferSyncHelper, BufferSyncHelperDesc, BufferSyncedData, IntoBufferSynced,
+};
 use crate::mesh;
-
-const BLOCK_TYPE_SIZE_BYTES: u32 = std::mem::size_of::<block::Block>() as u32;
-const CHUNK_BUFFER_SIZE_BYTES: wgpu::BufferAddress = index_utils::chunk_size_total()
-    as wgpu::BufferAddress
-    * BLOCK_TYPE_SIZE_BYTES as wgpu::BufferAddress;
 
 pub struct WorldRenderInit<RV, RF> {
     pub vert_shader_spirv_bytes: RV,
@@ -36,7 +30,7 @@ pub struct WorldRenderState {
     rotation: Matrix4<f32>,
     depth_texture: wgpu::TextureView,
 
-    per_chunk: HashMap<Point3<usize>, PerChunkRenderState>,
+    per_chunk_batch: Vec<ChunkBatchRenderState>,
     // /// Contains textures for each block type.
     // /// Dimensions are 16x16xN, where N is number of block types.
     // block_master_texture: wgpu::TextureView,
@@ -47,10 +41,6 @@ struct Uniforms {
     view: Matrix4<f32>,
     model: Matrix4<f32>,
     camera_pos: Point3<f32>,
-}
-
-struct PerChunkRenderState {
-    block_type_buf: wgpu::Buffer,
 }
 
 impl WorldRenderState {
@@ -82,19 +72,15 @@ impl WorldRenderState {
                             readonly: true,
                         },
                     },
-                    // wgpu::BindGroupLayoutBinding {
-                    //     binding: 1,
-                    //     visibility: wgpu::ShaderStage::FRAGMENT,
-                    //     ty: wgpu::BindingType::SampledTexture {
-                    //         multisampled: false,
-                    //         dimension: wgpu::TextureViewDimension::D2,
-                    //     },
-                    // },
-                    // wgpu::BindGroupLayoutBinding {
-                    //     binding: 2,
-                    //     visibility: wgpu::ShaderStage::FRAGMENT,
-                    //     ty: wgpu::BindingType::Sampler,
-                    // },
+                    // Chunk offset buffer
+                    wgpu::BindGroupLayoutBinding {
+                        binding: 2,
+                        visibility: wgpu::ShaderStage::VERTEX,
+                        ty: wgpu::BindingType::StorageBuffer {
+                            dynamic: false,
+                            readonly: true,
+                        },
+                    },
                 ],
             });
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -181,7 +167,7 @@ impl WorldRenderState {
             bind_group_layout,
             rotation: Matrix4::identity(),
             depth_texture: depth_texture.create_default_view(),
-            per_chunk: HashMap::new(),
+            per_chunk_batch: Vec::new(),
         })
     }
 
@@ -201,18 +187,9 @@ impl WorldRenderState {
         // passes to preserve existing rendering.
         let mut load_op = wgpu::LoadOp::Clear;
 
-        for (chunk_loc, per_chunk) in self.per_chunk.iter() {
+        for per_chunk_batch in &self.per_chunk_batch {
             {
-                let chunk_offset_int =
-                    (chunk_loc - Point3::origin()).mul_element_wise(index_utils::chunk_size());
-                let chunk_offset = Vector3 {
-                    x: chunk_offset_int.x as f32,
-                    y: chunk_offset_int.y as f32,
-                    z: chunk_offset_int.z as f32,
-                };
-
-                let translation = Matrix4::from_translation(chunk_offset);
-                self.uniforms.model = self.rotation * translation;
+                self.uniforms.model = self.rotation;
                 self.uniforms
                     .sync_with(device, encoder, |data| data.as_slices());
             }
@@ -221,17 +198,8 @@ impl WorldRenderState {
                 layout: &self.bind_group_layout,
                 bindings: &[
                     self.uniforms.as_binding(0),
-                    wgpu::Binding {
-                        binding: 1,
-                        resource: wgpu::BindingResource::Buffer {
-                            buffer: &per_chunk.block_type_buf,
-                            range: 0..CHUNK_BUFFER_SIZE_BYTES,
-                        },
-                    },
-                    // wgpu::Binding {
-                    //     binding: 2,
-                    //     resource: wgpu::BindingResource::Sampler(&sampler),
-                    // },
+                    per_chunk_batch.block_type_binding(1),
+                    per_chunk_batch.chunk_offset_binding(2),
                 ],
             });
 
@@ -273,86 +241,150 @@ impl WorldRenderState {
         device: &wgpu::Device,
         world: &World,
     ) {
-        for (p, chunk) in world.blocks.iter_chunks() {
-            let all_empty = chunk.blocks.iter().all(|b| b.is_empty());
-            if all_empty {
-                continue;
+        let mut chunks = world.blocks.iter_chunks().map(|(chunk_loc, chunk)| {
+            let chunk_offset_int =
+                (chunk_loc - Point3::origin()).mul_element_wise(index_utils::chunk_size());
+            let chunk_offset = Point3 {
+                x: chunk_offset_int.x as f32,
+                y: chunk_offset_int.y as f32,
+                z: chunk_offset_int.z as f32,
+            };
+            (chunk_offset, chunk)
+        }).peekable();
+
+        let mut current_chunks = Vec::new();
+
+        loop {
+            while let Some(chunk) = chunks.peek() {
+                current_chunks.push(*chunk);
+                chunks.next();
+                if current_chunks.len() == ChunkBatchRenderState::max_batch_chunks() {
+                    break;
+                }
             }
 
-            self.insert_per_chunk(encoder, device, p, chunk);
+            if current_chunks.is_empty() { break; }
 
-            info!("Inserted chunk at point {:?}", p);
+            let chunk_batch = ChunkBatchRenderState::new(device);
+            chunk_batch.update(device, encoder, current_chunks.iter().copied());
+            self.per_chunk_batch.push(chunk_batch);
         }
-    }
-
-    fn insert_per_chunk(
-        &mut self,
-        encoder: &mut wgpu::CommandEncoder,
-        device: &wgpu::Device,
-        loc: Point3<usize>,
-        chunk: &block::Chunk,
-    ) {
-        let per_chunk = PerChunkRenderState::new(&device);
-        per_chunk.update(encoder, device, chunk);
-        self.per_chunk.insert(loc, per_chunk);
     }
 
     pub fn update(
         &mut self,
-        encoder: &mut wgpu::CommandEncoder,
-        device: &wgpu::Device,
-        world: &World,
-        diff: &UpdatedWorldState,
+        _encoder: &mut wgpu::CommandEncoder,
+        _device: &wgpu::Device,
+        _world: &World,
+        _diff: &UpdatedWorldState,
     ) {
         // self.rotation = self.rotation * Matrix4::<f32>::from_angle_z(Rad::full_turn() / 1000.);
 
-        for &chunk_loc in &diff.modified_chunks {
-            let chunk = world.blocks.get_chunk(chunk_loc);
-            let chunk_empty = chunk.blocks.iter().all(|b| b.is_empty());
-            if self.per_chunk.contains_key(&chunk_loc) {
-                if chunk_empty {
-                    self.per_chunk.remove(&chunk_loc);
-                } else {
-                    self.per_chunk[&chunk_loc].update(encoder, device, &chunk);
-                }
-            } else if !chunk_empty {
-                self.insert_per_chunk(encoder, device, chunk_loc, chunk);
-            }
-        }
+            // let chunk_offset_int =
+            //     (chunk_loc - Point3::origin()).mul_element_wise(index_utils::chunk_size());
+            // let chunk_offset = Vector3 {
+            //     x: chunk_offset_int.x as f32,
+            //     y: chunk_offset_int.y as f32,
+            //     z: chunk_offset_int.z as f32,
+            // };
+
+        // for &chunk_loc in &diff.modified_chunks {
+        //     let chunk = world.blocks.get_chunk(chunk_loc);
+        //     let chunk_empty = chunk.blocks.iter().all(|b| b.is_empty());
+        //     if self.per_chunk.contains_key(&chunk_loc) {
+        //         if chunk_empty {
+        //             self.per_chunk.remove(&chunk_loc);
+        //         } else {
+        //             self.per_chunk[&chunk_loc].update(encoder, device, &chunk);
+        //         }
+        //     } else if !chunk_empty {
+        //         self.insert_per_chunk(encoder, device, chunk_loc, chunk);
+        //     }
+        // }
     }
 }
 
-impl PerChunkRenderState {
+struct ChunkBatchRenderState {
+    chunk_offset_helper: BufferSyncHelper<f32>,
+    chunk_offset_buf: wgpu::Buffer,
+    block_type_helper: BufferSyncHelper<u16>,
+    block_type_buf: wgpu::Buffer,
+}
+
+impl ChunkBatchRenderState {
+    const fn max_batch_chunks() -> usize {
+        16
+    }
+
+    const fn max_batch_blocks() -> usize {
+        Self::max_batch_chunks() * index_utils::chunk_size_total()
+    }
+
     fn new(device: &wgpu::Device) -> Self {
-        let block_type_buf = device.create_buffer(&wgpu::BufferDescriptor {
-            size: CHUNK_BUFFER_SIZE_BYTES,
-            usage: wgpu::BufferUsage::COPY_DST
-                | wgpu::BufferUsage::STORAGE
-                | wgpu::BufferUsage::STORAGE_READ,
+        let block_type_helper = BufferSyncHelper::new(BufferSyncHelperDesc {
+            buffer_len: Self::max_batch_blocks(),
+            max_chunk_len: index_utils::chunk_size_total(),
+            gpu_usage: wgpu::BufferUsage::STORAGE | wgpu::BufferUsage::STORAGE_READ,
         });
 
-        PerChunkRenderState { block_type_buf }
+        let chunk_offset_helper = BufferSyncHelper::new(BufferSyncHelperDesc {
+            buffer_len: 3 * Self::max_batch_chunks(),
+            max_chunk_len: 64,
+            gpu_usage: wgpu::BufferUsage::STORAGE | wgpu::BufferUsage::STORAGE_READ,
+        });
+
+        ChunkBatchRenderState {
+            block_type_buf: block_type_helper.make_buffer(device),
+            block_type_helper,
+            chunk_offset_buf: chunk_offset_helper.make_buffer(device),
+            chunk_offset_helper,
+        }
+    }
+
+    fn block_type_binding(&self, index: u32) -> wgpu::Binding {
+        wgpu::Binding {
+            binding: index,
+            resource: wgpu::BindingResource::Buffer {
+                buffer: &self.block_type_buf,
+                range: 0..self.block_type_helper.buffer_byte_len(),
+            },
+        }
+    }
+
+    fn chunk_offset_binding(&self, index: u32) -> wgpu::Binding {
+        wgpu::Binding {
+            binding: index,
+            resource: wgpu::BindingResource::Buffer {
+                buffer: &self.chunk_offset_buf,
+                range: 0..self.chunk_offset_helper.buffer_byte_len(),
+            },
+        }
     }
 
     #[allow(clippy::cast_lossless)]
-    fn update(
+    fn update<'a, Chunks>(
         &self,
-        encoder: &mut wgpu::CommandEncoder,
         device: &wgpu::Device,
-        chunk: &block::Chunk,
-    ) {
-        let blocks_slice = simgame_core::block::blocks_to_u16(&chunk.blocks);
-        let blocks_buf = device
-            .create_buffer_mapped(chunk.blocks.len(), wgpu::BufferUsage::COPY_SRC)
-            .fill_from_slice(blocks_slice);
-        encoder.copy_buffer_to_buffer(
-            &blocks_buf,
-            0,
-            &self.block_type_buf,
-            0,
-            index_utils::chunk_size_total() as wgpu::BufferAddress
-                * BLOCK_TYPE_SIZE_BYTES as wgpu::BufferAddress,
-        );
+        encoder: &mut wgpu::CommandEncoder,
+        chunks: Chunks,
+    ) where
+        Chunks: IntoIterator<Item = (Point3<f32>, &'a block::Chunk)>,
+    {
+        let mut fill_block_types =
+            self.block_type_helper
+                .begin_fill_buffer(device, &self.block_type_buf, 0);
+
+        let mut fill_chunk_offsets =
+            self.chunk_offset_helper
+                .begin_fill_buffer(device, &self.chunk_offset_buf, 0);
+
+        for (offset, chunk) in chunks {
+            fill_block_types.advance(encoder, block::blocks_to_u16(&chunk.blocks));
+            fill_chunk_offsets.advance(encoder, offset.as_ref() as &[f32; 3]);
+        }
+
+        fill_block_types.finish(encoder);
+        fill_chunk_offsets.finish(encoder);
     }
 }
 
