@@ -1,23 +1,20 @@
 use std::collections::HashMap;
 
 use anyhow::Result;
-use cgmath::{Deg, ElementWise, Matrix4, Point3, SquareMatrix, Vector3};
+use cgmath::{Deg, ElementWise, EuclideanSpace, Matrix4, Point3, SquareMatrix, Vector3};
 use log::info;
 
 use simgame_core::block;
 use simgame_core::block::index_utils;
 use simgame_core::world::{UpdatedWorldState, World};
 
+use crate::buffer_util::{BufferSyncHelperDesc, BufferSyncedData, IntoBufferSynced};
 use crate::mesh;
 
 const BLOCK_TYPE_SIZE_BYTES: u32 = std::mem::size_of::<block::Block>() as u32;
 const CHUNK_BUFFER_SIZE_BYTES: wgpu::BufferAddress = index_utils::chunk_size_total()
     as wgpu::BufferAddress
     * BLOCK_TYPE_SIZE_BYTES as wgpu::BufferAddress;
-const MATRIX4_SIZE: wgpu::BufferAddress = std::mem::size_of::<[f32; 16]>() as wgpu::BufferAddress;
-const POINT3_SIZE: wgpu::BufferAddress = std::mem::size_of::<[f32; 3]>() as wgpu::BufferAddress;
-const UNIFORM_BUF_LEN: wgpu::BufferAddress =
-    MATRIX4_SIZE + MATRIX4_SIZE + MATRIX4_SIZE + POINT3_SIZE;
 
 pub struct WorldRenderInit<RV, RF> {
     pub vert_shader_spirv_bytes: RV,
@@ -32,22 +29,28 @@ pub struct WorldRenderState {
     cube_vertex_buf: wgpu::Buffer,
     cube_index_buf: wgpu::Buffer,
     cube_index_count: usize,
-    base_uniform_buf: wgpu::Buffer,
+
+    uniforms: BufferSyncedData<Uniforms, f32>,
+
     bind_group_layout: wgpu::BindGroupLayout,
     rotation: Matrix4<f32>,
     depth_texture: wgpu::TextureView,
-    /// Each point is a u8, represents block type at that point
-    /// Dimensions are 16x16x16
+
     per_chunk: HashMap<Point3<usize>, PerChunkRenderState>,
-    camera_pos: Point3<f32>,
     // /// Contains textures for each block type.
     // /// Dimensions are 16x16xN, where N is number of block types.
     // block_master_texture: wgpu::TextureView,
 }
 
+struct Uniforms {
+    proj: Matrix4<f32>,
+    view: Matrix4<f32>,
+    model: Matrix4<f32>,
+    camera_pos: Point3<f32>,
+}
+
 struct PerChunkRenderState {
     block_type_buf: wgpu::Buffer,
-    uniform_buf: wgpu::Buffer,
 }
 
 impl WorldRenderState {
@@ -102,24 +105,6 @@ impl WorldRenderState {
         let cube_vertex_buf = cube_mesh.vertex_buffer(device);
         let cube_index_buf = cube_mesh.index_buffer(device);
 
-        let proj_matrix =
-            OPENGL_TO_WGPU_MATRIX * cgmath::perspective(Deg(70f32), init.aspect_ratio, 1.0, 100.0);
-        let view_matrix = Matrix4::look_at_dir(
-            Point3::new(0., 0., 0.),
-            Vector3::new(1., 1., -2.),
-            Vector3::unit_z(),
-        );
-        let model_matrix = Matrix4::<f32>::identity();
-        let mut uniform_data: Vec<f32> = Vec::new();
-        uniform_data.extend::<&[f32; 16]>(proj_matrix.as_ref());
-        uniform_data.extend::<&[f32; 16]>(view_matrix.as_ref());
-        uniform_data.extend::<&[f32; 16]>(model_matrix.as_ref());
-        uniform_data.extend::<&[f32; 3]>(Point3::new(0f32, 0f32, 0f32).as_ref());
-
-        let base_uniform_buf = device
-            .create_buffer_mapped(uniform_data.len(), wgpu::BufferUsage::COPY_SRC)
-            .fill_from_slice(uniform_data.as_ref());
-
         let depth_texture = device.create_texture(&wgpu::TextureDescriptor {
             size: wgpu::Extent3d {
                 width: init.width,
@@ -133,6 +118,19 @@ impl WorldRenderState {
             format: wgpu::TextureFormat::Depth32Float,
             usage: wgpu::TextureUsage::OUTPUT_ATTACHMENT,
         });
+
+        let uniforms = Uniforms {
+            proj: OPENGL_TO_WGPU_MATRIX
+                * cgmath::perspective(Deg(70f32), init.aspect_ratio, 1.0, 100.0),
+            view: Matrix4::look_at_dir(
+                Point3::new(0., 0., 0.),
+                Vector3::new(1., 1., -2.),
+                Vector3::unit_z(),
+            ),
+            model: Matrix4::<f32>::identity(),
+            camera_pos: Point3::new(-20f32, -20f32, 20f32),
+        }
+        .buffer_synced(device);
 
         let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             layout: &pipeline_layout,
@@ -179,17 +177,16 @@ impl WorldRenderState {
             cube_vertex_buf,
             cube_index_buf,
             cube_index_count: cube_mesh.indices.len(),
-            base_uniform_buf,
+            uniforms,
             bind_group_layout,
             rotation: Matrix4::identity(),
             depth_texture: depth_texture.create_default_view(),
             per_chunk: HashMap::new(),
-            camera_pos: Point3::new(-20f32, -20f32, 20f32),
         })
     }
 
     pub fn update_camera_pos(&mut self, delta: Vector3<f32>) {
-        self.camera_pos += delta;
+        self.uniforms.camera_pos += delta;
     }
 
     pub fn render_frame(
@@ -205,54 +202,25 @@ impl WorldRenderState {
         let mut load_op = wgpu::LoadOp::Clear;
 
         for (chunk_loc, per_chunk) in self.per_chunk.iter() {
-            let chunk_offset_int =
-                (chunk_loc - Point3::new(0, 0, 0)).mul_element_wise(index_utils::chunk_size());
-            let chunk_offset = Vector3 {
-                x: chunk_offset_int.x as f32,
-                y: chunk_offset_int.y as f32,
-                z: chunk_offset_int.z as f32,
-            };
-            let translation = Matrix4::from_translation(chunk_offset);
-            let model_matrix = self.rotation * translation;
+            {
+                let chunk_offset_int =
+                    (chunk_loc - Point3::origin()).mul_element_wise(index_utils::chunk_size());
+                let chunk_offset = Vector3 {
+                    x: chunk_offset_int.x as f32,
+                    y: chunk_offset_int.y as f32,
+                    z: chunk_offset_int.z as f32,
+                };
 
-            let model_slice: &[f32; 16] = model_matrix.as_ref();
-            let vec_slice: &[f32; 3] = self.camera_pos.as_ref();
-            let extra_uniform_buf = {
-                let buffer_mapped =
-                    device.create_buffer_mapped(16 + 3, wgpu::BufferUsage::COPY_SRC);
-                buffer_mapped.data[..16].copy_from_slice(model_slice);
-                buffer_mapped.data[16..19].copy_from_slice(vec_slice);
-                buffer_mapped.finish()
-            };
-
-            // Copy view/projection matrix from the base buffer
-            encoder.copy_buffer_to_buffer(
-                &self.base_uniform_buf,
-                0,
-                &per_chunk.uniform_buf,
-                0,
-                2 * MATRIX4_SIZE,
-            );
-
-            // Copy model matrix from the in-memory buffer
-            encoder.copy_buffer_to_buffer(
-                &extra_uniform_buf,
-                0,
-                &per_chunk.uniform_buf,
-                2 * MATRIX4_SIZE,
-                MATRIX4_SIZE + POINT3_SIZE,
-            );
+                let translation = Matrix4::from_translation(chunk_offset);
+                self.uniforms.model = self.rotation * translation;
+                self.uniforms
+                    .sync_with(device, encoder, |data| data.as_slices());
+            }
 
             let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
                 layout: &self.bind_group_layout,
                 bindings: &[
-                    wgpu::Binding {
-                        binding: 0,
-                        resource: wgpu::BindingResource::Buffer {
-                            buffer: &per_chunk.uniform_buf,
-                            range: 0..UNIFORM_BUF_LEN,
-                        },
-                    },
+                    self.uniforms.as_binding(0),
                     wgpu::Binding {
                         binding: 1,
                         resource: wgpu::BindingResource::Buffer {
@@ -363,15 +331,7 @@ impl PerChunkRenderState {
                 | wgpu::BufferUsage::STORAGE_READ,
         });
 
-        let uniform_buf = device.create_buffer(&wgpu::BufferDescriptor {
-            size: UNIFORM_BUF_LEN,
-            usage: wgpu::BufferUsage::UNIFORM | wgpu::BufferUsage::COPY_DST,
-        });
-
-        PerChunkRenderState {
-            block_type_buf,
-            uniform_buf,
-        }
+        PerChunkRenderState { block_type_buf }
     }
 
     #[allow(clippy::cast_lossless)]
@@ -403,3 +363,41 @@ pub const OPENGL_TO_WGPU_MATRIX: Matrix4<f32> = Matrix4::new(
     0.0, 0.0, 0.5, 0.0,
     0.0, 0.0, 0.5, 1.0,
 );
+
+impl Uniforms {
+    #[inline]
+    fn as_slices(&self) -> impl Iterator<Item = &[f32]> {
+        let proj: &[f32; 16] = self.proj.as_ref();
+        let view: &[f32; 16] = self.view.as_ref();
+        let model: &[f32; 16] = self.model.as_ref();
+        let camera_pos: &[f32; 3] = self.camera_pos.as_ref();
+        std::iter::once(proj as &[f32])
+            .chain(std::iter::once(view as &[f32]))
+            .chain(std::iter::once(model as &[f32]))
+            .chain(std::iter::once(camera_pos as &[f32]))
+    }
+}
+
+impl IntoBufferSynced for Uniforms {
+    type Item = f32;
+
+    fn buffer_sync_desc(&self) -> BufferSyncHelperDesc {
+        BufferSyncHelperDesc {
+            buffer_len: 16 + 16 + 16 + 3,
+            max_chunk_len: 64,
+            gpu_usage: wgpu::BufferUsage::UNIFORM,
+        }
+    }
+}
+
+impl BufferSyncedData<Uniforms, f32> {
+    fn as_binding(&self, index: u32) -> wgpu::Binding {
+        wgpu::Binding {
+            binding: index,
+            resource: wgpu::BindingResource::Buffer {
+                buffer: &self.buffer(),
+                range: 0..self.sync_helper().buffer_byte_len(),
+            },
+        }
+    }
+}

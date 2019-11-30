@@ -4,6 +4,7 @@ use raw_window_handle::HasRawWindowHandle;
 
 use simgame_core::world::{UpdatedWorldState, World};
 
+pub mod buffer_util;
 pub mod mesh;
 pub mod test;
 mod triangulate;
