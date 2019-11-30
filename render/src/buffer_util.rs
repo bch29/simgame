@@ -84,6 +84,23 @@ impl<Data, Item> BufferSyncedData<Data, Item> {
             .fill_buffer(device, encoder, &self.buffer, 0, into_iter(&self.data));
     }
 
+    // #[inline]
+    // pub fn start_sync_with<'a, Iter, F>(
+    //     &'a self,
+    //     device: &'a Device,
+    //     into_iter: F,
+    // ) -> FillBuffer<'a, Item>
+    //     where
+    //     Iter: Iterator,
+    //     Iter::Item: AsRef<[Item]>,
+    //     F: FnOnce(&'a Data) -> Iter,
+    //     Item: 'static + Copy + AsBytes + FromBytes,
+    // {
+    //     self.helper.begin_fill_buffer(device, &self.buffer, 0)
+    //     // self.helper
+    //     //     .fill_buffer(device, encoder, &self.buffer, 0, into_iter(&self.data));
+    // }
+
     #[inline]
     pub fn buffer(&self) -> &Buffer {
         &self.buffer
@@ -125,6 +142,32 @@ impl<Item> BufferSyncHelper<Item> {
         }
     }
 
+    /// Creates a `FillBuffer` object which can be used to copy chunks of data to the buffer one by
+    /// one, for example to split the copy over multiple command submissions or to copy chunks to
+    /// multiple buffers at the same time.
+    ///
+    /// Once you are done with the `FillBuffer` object, you must consume it e.g. with `finish()`.
+    /// The `Drop` impl may panic if you fail to do so.
+    pub fn begin_fill_buffer<'a>(
+        &'a self,
+        device: &'a Device,
+        target: &'a Buffer,
+        start_pos: usize,
+    ) -> FillBuffer<'a, Item>
+    where
+        Item: 'static + Copy + AsBytes + FromBytes,
+    {
+        FillBuffer {
+            device,
+            target,
+            mapped_buffer: None,
+            total_len: start_pos,
+            batch_len: 0,
+            sync_helper: self,
+        }
+    }
+
+    /// Fills the buffer with chunks of data from the given iterator.
     pub fn fill_buffer<Chunks>(
         &self,
         device: &Device,
@@ -137,48 +180,13 @@ impl<Item> BufferSyncHelper<Item> {
         Chunks::Item: AsRef<[Item]>,
         Item: 'static + Copy + AsBytes + FromBytes,
     {
-        let mut iter_chunks = chunks.into_iter().peekable();
+        let mut fill_buffer = self.begin_fill_buffer(device, target, start_pos);
 
-        let mut total_len = start_pos;
-        let item_size = std::mem::size_of::<Item>();
-
-        while iter_chunks.peek().is_some() {
-            let mut batch_len = 0;
-            let cpu_buffer = {
-                let mapped_buffer = self.make_src_buffer(device);
-
-                while let Some(chunk) = iter_chunks.peek() {
-                    let chunk_len = chunk.as_ref().len();
-                    assert!(chunk_len <= self.desc.max_chunk_len);
-
-                    if batch_len + chunk_len > self.desc.max_chunk_len {
-                        break;
-                    }
-
-                    let chunk_slice = chunk.as_ref();
-                    let chunk_len = chunk_slice.len();
-
-                    mapped_buffer.data[batch_len..batch_len + chunk_len]
-                        .copy_from_slice(chunk_slice);
-
-                    batch_len += chunk_len;
-                    iter_chunks.next();
-                }
-
-                assert!(total_len + batch_len <= self.desc.buffer_len);
-                mapped_buffer.finish()
-            };
-
-            encoder.copy_buffer_to_buffer(
-                &cpu_buffer,
-                0,
-                target,
-                (item_size * total_len) as BufferAddress,
-                (item_size * batch_len) as BufferAddress,
-            );
-
-            total_len += batch_len;
+        for chunk in chunks {
+            fill_buffer.advance(encoder, chunk);
         }
+
+        fill_buffer.finish(encoder);
     }
 
     #[inline]
@@ -197,5 +205,157 @@ impl<Item> BufferSyncHelper<Item> {
     #[inline]
     pub fn buffer_byte_len(&self) -> wgpu::BufferAddress {
         (self.desc.buffer_len * std::mem::size_of::<Item>()) as wgpu::BufferAddress
+    }
+}
+
+pub struct FillBufferWithIter<'a, Iter, Item> {
+    fill_buffer: FillBuffer<'a, Item>,
+    iter: Iter,
+}
+
+impl<'a, Iter, Item> FillBufferWithIter<'a, Iter, Item>
+where
+    Iter: Iterator,
+    Iter::Item: AsRef<[Item]>,
+    Item: 'static + Copy + AsBytes + FromBytes,
+{
+    #[inline]
+    pub fn advance(mut self, encoder: &mut CommandEncoder) -> Option<Self> {
+        match self.iter.next() {
+            Some(chunk) => {
+                self.fill_buffer.advance(encoder, chunk);
+                Some(self)
+            }
+            None => {
+                self.fill_buffer.finish(encoder);
+                None
+            }
+        }
+    }
+
+    #[inline]
+    pub fn drain(mut self, encoder: &mut CommandEncoder) {
+        loop {
+            self = match self.advance(encoder) {
+                Some(x) => x,
+                None => break,
+            }
+        }
+    }
+
+    #[inline]
+    pub fn detach(self) -> FillBuffer<'a, Item> {
+        self.fill_buffer
+    }
+}
+
+pub struct FillBuffer<'a, Item> {
+    device: &'a Device,
+    target: &'a Buffer,
+    mapped_buffer: Option<CreateBufferMapped<'a, Item>>,
+    total_len: usize,
+    batch_len: usize,
+    sync_helper: &'a BufferSyncHelper<Item>,
+}
+
+impl<'a, Item> FillBuffer<'a, Item> {
+    /// By attaching an iterator to the object, it gains the ability to `advance` by consuming from
+    /// its internal iterator instead of having the caller supply chunks directly.
+    #[inline]
+    pub fn attach_iter<Iter>(self, iter: Iter) -> FillBufferWithIter<'a, Iter::IntoIter, Item>
+    where
+        Iter: IntoIterator,
+    {
+        FillBufferWithIter {
+            fill_buffer: self,
+            iter: iter.into_iter(),
+        }
+    }
+
+    /// Copy a single chunk of data to the buffer.
+    #[inline]
+    pub fn advance<Chunk>(&mut self, encoder: &mut CommandEncoder, chunk: Chunk)
+    where
+        Chunk: AsRef<[Item]>,
+        Item: 'static + Copy + AsBytes + FromBytes,
+    {
+        let chunk_slice = chunk.as_ref();
+        let chunk_len = chunk_slice.len();
+
+        assert!(chunk_len <= self.sync_helper.desc.max_chunk_len);
+
+        if self.batch_len + chunk_len > self.sync_helper.desc.max_chunk_len {
+            self.end_batch(encoder);
+        }
+
+        let sync_helper = &self.sync_helper;
+        let device = &self.device;
+
+        let mapped_buffer = self
+            .mapped_buffer
+            .get_or_insert_with(|| sync_helper.make_src_buffer(device));
+        mapped_buffer.data[self.batch_len..self.batch_len + chunk_len]
+            .copy_from_slice(chunk_slice);
+
+        self.batch_len += chunk_len;
+    }
+
+    /// Copies each chunk from the given iterator to the buffer.
+    #[inline]
+    pub fn advance_iter<Iter>(&mut self, encoder: &mut CommandEncoder, chunks: Iter)
+    where
+        Iter::Item: AsRef<[Item]>,
+        Iter: IntoIterator,
+        Item: 'static + Copy + AsBytes + FromBytes,
+    {
+        for chunk in chunks {
+            self.advance(encoder, chunk)
+        }
+    }
+
+    /// Copies each chunk from the given iterator to the buffer, then finalizes the copy.
+    #[inline]
+    pub fn finish_with_iter<Iter>(self, encoder: &mut CommandEncoder, chunks: Iter)
+    where
+        Iter::Item: AsRef<[Item]>,
+        Iter: IntoIterator,
+        Item: 'static + Copy + AsBytes + FromBytes,
+    {
+        self.attach_iter(chunks).drain(encoder)
+    }
+
+    /// Finalizes the copy, copying any remaining chunks.
+    pub fn finish(mut self, encoder: &mut CommandEncoder)
+    where
+        Item: Copy,
+    {
+        self.end_batch(encoder)
+    }
+
+    fn end_batch(&mut self, encoder: &mut CommandEncoder)
+    where
+        Item: Copy,
+    {
+        if let Some(mapped_buffer) = self.mapped_buffer.take() {
+            let item_size = std::mem::size_of::<Item>();
+            let src = mapped_buffer.finish();
+            encoder.copy_buffer_to_buffer(
+                &src,
+                0,
+                self.target,
+                (item_size * self.total_len) as BufferAddress,
+                (item_size * self.batch_len) as BufferAddress,
+            );
+
+            self.total_len += self.batch_len;
+        }
+    }
+}
+
+impl<'a, Item> Drop for FillBuffer<'a, Item> {
+    fn drop(&mut self) {
+        if self.mapped_buffer.is_some() {
+            panic!("must call finish on FillBuffer object!");
+        }
     }
 }
