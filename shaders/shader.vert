@@ -1,13 +1,46 @@
 #version 450
 
+/* #define CHUNK_SIZE_X 16 */
+/* #define CHUNK_SIZE_Y 16 */
+/* #define CHUNK_SIZE_Z 16 */
+#define MAX_CHUNKS 1024
+const uint CHUNK_SIZE_XY = CHUNK_SIZE_X * CHUNK_SIZE_Y;
+const uint CHUNK_SIZE_XYZ = CHUNK_SIZE_XY * CHUNK_SIZE_Z;
+
+const float scale = 1.0;
+const float half_scale = scale / 2.;
+
+struct ChunkMetadata {
+  vec4 offset;
+  /*
+   * Each element of neighborIndices describes the index of the neighbor chunk in one of the 6
+   * axis-aligned directions. The value will be -1 if there is no neighbor chunk in that
+   * direction.
+   *
+   * 0 is negative x
+   * 1 is positive x
+   * 2 is negative y
+   * 3 is positive y
+   * 4 is negative z
+   * 5 is positive z
+   */
+  int[6] neighborIndices;
+
+  // Padding ensures alignment to a multiple of 16 bytes
+  int[2] padding;
+};
+
+
 layout(location = 0) in vec4 a_Pos;
 layout(location = 1) in vec3 a_Normal;
 layout(location = 2) in vec2 a_TexCoord;
+
 layout(location = 0) out vec2 v_TexCoord;
 layout(location = 1) out vec3 v_Normal;
 layout(location = 2) out vec4 v_Pos;
 layout(location = 3) out uint v_BlockType;
 layout(location = 4) out vec3 v_CameraPos;
+
 
 layout(set = 0, binding = 0) uniform Locals {
   mat4 u_Projection;
@@ -20,21 +53,14 @@ layout(set = 0, binding = 1) buffer BlockTypes {
   int[] b_BlockTypes;
 };
 
-layout(set = 0, binding = 2) buffer ChunkOffsets {
-  vec4[] b_ChunkOffsets;
+layout(set = 0, binding = 2) buffer ChunkMetadataArr {
+  ChunkMetadata[] b_ChunkMetadata;
 };
 
-/* #define CHUNK_SIZE_X 16 */
-/* #define CHUNK_SIZE_Y 16 */
-/* #define CHUNK_SIZE_Z 16 */
-#define MAX_CHUNKS 1024
-const uint CHUNK_SIZE_XY = CHUNK_SIZE_X * CHUNK_SIZE_Y;
-const uint CHUNK_SIZE_XYZ = CHUNK_SIZE_XY * CHUNK_SIZE_Z;
 
-const float scale = 1.0;
-const float half_scale = scale / 2.;
-
-// w component is chunk index
+/* 
+ * w component is chunk index
+ */
 ivec4 decodeBlockIndex(uint index)
 {
   uint insideChunk = index % CHUNK_SIZE_XYZ;
@@ -51,6 +77,40 @@ ivec4 decodeBlockIndex(uint index)
 uint encodeBlockIndex(uvec4 pos)
 {
   return pos.x + pos.y * CHUNK_SIZE_X + pos.z * CHUNK_SIZE_XY + pos.w * CHUNK_SIZE_XYZ;
+}
+
+/*
+ * Calculates the position of the neighboring block, given a block position and a direction.  It
+ * is assumed that the direction will be axis-aligned.  If the w component of the return value is
+ * -1 then there is no neighbor.
+ */
+ivec4 neighborBlockPos(ivec4 blockPos, vec3 direction)
+{
+  ivec3 idirection = ivec3(sign(direction.x), sign(direction.y), sign(direction.z));
+  ivec3 posInChunk = blockPos.xyz + idirection;
+
+  ivec3 outsideDir = ivec3(
+      int(posInChunk.x >= CHUNK_SIZE_X) - int(posInChunk.x < 0),
+      int(posInChunk.y >= CHUNK_SIZE_Y) - int(posInChunk.y < 0),
+      int(posInChunk.z >= CHUNK_SIZE_Z) - int(posInChunk.z < 0));
+
+  int outsideDirIndex = 
+    (0 * int(outsideDir.x == -1)
+     + 1 * int(outsideDir.x == 1)
+     + 2 * int(outsideDir.y == -1)
+     + 3 * int(outsideDir.y == 1)
+     + 4 * int(outsideDir.z == -1)
+     + 5 * int(outsideDir.z == 1));
+
+  bool isOutside = outsideDir != ivec3(0, 0, 0);
+
+  int neighborChunkIndex =
+    int(isOutside) * b_ChunkMetadata[blockPos.w].neighborIndices[outsideDirIndex]
+    + int(!isOutside) * blockPos.w;
+
+  posInChunk -= ivec3(CHUNK_SIZE_X, CHUNK_SIZE_Y, CHUNK_SIZE_Z) * outsideDir;
+
+  return ivec4(posInChunk.xyz, neighborChunkIndex);
 }
 
 int blockTypeAtIndex(uint index)
@@ -91,10 +151,9 @@ void main() {
   v_CameraPos = u_CameraPos;
 
   ivec4 blockPos = decodeBlockIndex(gl_InstanceIndex);
-  vec3 chunkOffset = b_ChunkOffsets[blockPos.w].xyz;
+  vec3 chunkOffset = b_ChunkMetadata[blockPos.w].offset.xyz;
 
-  ivec3 inormal = ivec3(sign(a_Normal.x), sign(a_Normal.y), sign(a_Normal.z));
-  ivec4 neighborPos = ivec4(blockPos.xyz + inormal, blockPos.w);
+  ivec4 neighborPos = neighborBlockPos(blockPos, a_Normal);
 
   int thisBlockType = blockTypeAtIndex(gl_InstanceIndex);
   int neighborBlockType = blockTypeAtPos(neighborPos);

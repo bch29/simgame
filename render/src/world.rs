@@ -1,7 +1,10 @@
+use std::collections::HashMap;
+
 use anyhow::Result;
 // use cgmath::{Angle, Rad};
 use cgmath::{Deg, ElementWise, EuclideanSpace, Matrix4, Point3, SquareMatrix, Vector3};
-use log::info;
+use log::debug;
+use zerocopy::AsBytes;
 
 use simgame_core::block;
 use simgame_core::block::index_utils;
@@ -32,7 +35,7 @@ pub struct WorldRenderState {
     rotation: Matrix4<f32>,
     depth_texture: wgpu::TextureView,
 
-    per_chunk_batch: Vec<ChunkBatchRenderState>,
+    chunk_batch: ChunkBatchRenderState,
     // /// Contains textures for each block type.
     // /// Dimensions are 16x16xN, where N is number of block types.
     // block_master_texture: wgpu::TextureView,
@@ -169,7 +172,7 @@ impl WorldRenderState {
             bind_group_layout,
             rotation: Matrix4::identity(),
             depth_texture: depth_texture.create_default_view(),
-            per_chunk_batch: Vec::new(),
+            chunk_batch: ChunkBatchRenderState::new(device),
         })
     }
 
@@ -185,21 +188,17 @@ impl WorldRenderState {
     ) {
         let background_color = wgpu::Color::BLACK;
 
-        // Clear texture and viewport on first pass (i.e. first chunk), then store it on later
-        // passes to preserve existing rendering.
-        let mut load_op = wgpu::LoadOp::Clear;
-
         self.uniforms.model = self.rotation;
         self.uniforms
             .sync_with(device, encoder, |data| data.as_slices());
 
-        for per_chunk_batch in &self.per_chunk_batch {
+        {
             let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
                 layout: &self.bind_group_layout,
                 bindings: &[
                     self.uniforms.as_binding(0),
-                    per_chunk_batch.block_type_binding(1),
-                    per_chunk_batch.chunk_offset_binding(2),
+                    self.chunk_batch.block_type_binding(1),
+                    self.chunk_batch.chunk_metadata_binding(2),
                 ],
             });
 
@@ -207,13 +206,13 @@ impl WorldRenderState {
                 color_attachments: &[wgpu::RenderPassColorAttachmentDescriptor {
                     attachment: &frame.view,
                     resolve_target: None,
-                    load_op,
+                    load_op: wgpu::LoadOp::Clear,
                     store_op: wgpu::StoreOp::Store,
                     clear_color: background_color,
                 }],
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachmentDescriptor {
                     attachment: &self.depth_texture,
-                    depth_load_op: load_op,
+                    depth_load_op: wgpu::LoadOp::Clear,
                     depth_store_op: wgpu::StoreOp::Store,
                     stencil_load_op: wgpu::LoadOp::Clear,
                     stencil_store_op: wgpu::StoreOp::Store,
@@ -228,10 +227,8 @@ impl WorldRenderState {
             rpass.draw_indexed(
                 0..self.cube_index_count as u32,
                 0,
-                0..(index_utils::chunk_size_total() * per_chunk_batch.count_chunks()) as u32,
+                0..(index_utils::chunk_size_total() * self.chunk_batch.count_chunks()) as u32,
             );
-
-            load_op = wgpu::LoadOp::Load;
         }
     }
 
@@ -241,42 +238,57 @@ impl WorldRenderState {
         device: &wgpu::Device,
         world: &World,
     ) {
-        let mut chunks = world
+        fn make_neighbor_indices(
+            by_chunk_loc: &HashMap<Point3<i32>, i32>,
+            chunk_loc: Point3<i32>,
+        ) -> [i32; 6] {
+            let directions = [
+                Vector3::new(-1, 0, 0),
+                Vector3::new(1, 0, 0),
+                Vector3::new(0, -1, 0),
+                Vector3::new(0, 1, 0),
+                Vector3::new(0, 0, -1),
+                Vector3::new(0, 0, 1),
+            ];
+
+            let mut result = [0i32; 6];
+            directions
+                .iter()
+                .map(|dir| {
+                    let neighbor_loc = chunk_loc + dir;
+                    by_chunk_loc.get(&neighbor_loc).unwrap_or(&-1)
+                })
+                .zip(&mut result)
+                .for_each(|(src, dst)| *dst = *src);
+
+            result
+        }
+
+        let indices_by_chunk_loc: HashMap<Point3<i32>, i32> = world
             .blocks
             .iter_chunks()
-            .map(|(chunk_loc, chunk)| {
-                let chunk_offset_int =
-                    (chunk_loc - Point3::origin()).mul_element_wise(index_utils::chunk_size());
-                let chunk_offset = Point3 {
-                    x: chunk_offset_int.x as f32,
-                    y: chunk_offset_int.y as f32,
-                    z: chunk_offset_int.z as f32,
-                };
-                (chunk_offset, chunk)
-            })
-            .peekable();
+            .enumerate()
+            .map(|(index, (chunk_loc, _))| (p_to_i32(chunk_loc), index as i32))
+            .collect();
 
-        let mut current_chunks = Vec::new();
+        let chunks = world.blocks.iter_chunks().map(|(chunk_loc, chunk)| {
+            let offset =
+                p_to_f32(chunk_loc.mul_element_wise(Point3::origin() + index_utils::chunk_size()));
 
-        loop {
-            current_chunks.clear();
+            let neighbor_indices =
+                make_neighbor_indices(&indices_by_chunk_loc, p_to_i32(chunk_loc));
 
-            while let Some(chunk) = chunks.peek() {
-                current_chunks.push(*chunk);
-                chunks.next();
-                if current_chunks.len() == ChunkBatchRenderState::max_batch_chunks() {
-                    break;
-                }
-            }
+            let meta = ChunkMeta {
+                offset,
+                _padding0: [0f32],
+                neighbor_indices,
+                _padding1: [0, 0],
+            };
 
-            if current_chunks.is_empty() {
-                break;
-            }
+            (meta, chunk)
+        });
 
-            let mut chunk_batch = ChunkBatchRenderState::new(device);
-            chunk_batch.update(device, encoder, current_chunks.iter().copied());
-            self.per_chunk_batch.push(chunk_batch);
-        }
+        self.chunk_batch.update(device, encoder, chunks);
     }
 
     pub fn update(
@@ -288,12 +300,12 @@ impl WorldRenderState {
     ) {
         // self.rotation = self.rotation * Matrix4::<f32>::from_angle_z(Rad::full_turn() / 1000.);
 
-        // let chunk_offset_int =
+        // let chunk_metadata_int =
         //     (chunk_loc - Point3::origin()).mul_element_wise(index_utils::chunk_size());
-        // let chunk_offset = Vector3 {
-        //     x: chunk_offset_int.x as f32,
-        //     y: chunk_offset_int.y as f32,
-        //     z: chunk_offset_int.z as f32,
+        // let chunk_metadata = Vector3 {
+        //     x: chunk_metadata_int.x as f32,
+        //     y: chunk_metadata_int.y as f32,
+        //     z: chunk_metadata_int.z as f32,
         // };
 
         // for &chunk_loc in &diff.modified_chunks {
@@ -314,10 +326,21 @@ impl WorldRenderState {
 
 struct ChunkBatchRenderState {
     count_chunks: usize,
-    chunk_offset_helper: BufferSyncHelper<f32>,
-    chunk_offset_buf: wgpu::Buffer,
+    chunk_metadata_helper: BufferSyncHelper<u8>,
+    chunk_metadata_buf: wgpu::Buffer,
     block_type_helper: BufferSyncHelper<u16>,
     block_type_buf: wgpu::Buffer,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone)]
+struct ChunkMeta {
+    offset: Point3<f32>,
+    // padding to align offset and neighbor indices to 16 bytes
+    _padding0: [f32; 1],
+    neighbor_indices: [i32; 6],
+    // padding to align struct to 16 bytes
+    _padding1: [i32; 2],
 }
 
 impl ChunkBatchRenderState {
@@ -341,9 +364,9 @@ impl ChunkBatchRenderState {
             gpu_usage: wgpu::BufferUsage::STORAGE | wgpu::BufferUsage::STORAGE_READ,
         });
 
-        let chunk_offset_helper = BufferSyncHelper::new(BufferSyncHelperDesc {
-            buffer_len: 3 * Self::max_batch_chunks(),
-            max_chunk_len: 64,
+        let chunk_metadata_helper = BufferSyncHelper::new(BufferSyncHelperDesc {
+            buffer_len: 4 * 12 * Self::max_batch_chunks(),
+            max_chunk_len: 1024,
             gpu_usage: wgpu::BufferUsage::STORAGE | wgpu::BufferUsage::STORAGE_READ,
         });
 
@@ -351,8 +374,8 @@ impl ChunkBatchRenderState {
             count_chunks: 0,
             block_type_buf: block_type_helper.make_buffer(device),
             block_type_helper,
-            chunk_offset_buf: chunk_offset_helper.make_buffer(device),
-            chunk_offset_helper,
+            chunk_metadata_buf: chunk_metadata_helper.make_buffer(device),
+            chunk_metadata_helper,
         }
     }
 
@@ -363,51 +386,43 @@ impl ChunkBatchRenderState {
         encoder: &mut wgpu::CommandEncoder,
         chunks: Chunks,
     ) where
-        Chunks: IntoIterator<Item = (Point3<f32>, &'a block::Chunk)>,
+        Chunks: IntoIterator<Item = (ChunkMeta, &'a block::Chunk)>,
     {
         let mut fill_block_types =
             self.block_type_helper
                 .begin_fill_buffer(device, &self.block_type_buf, 0);
 
-        let mut fill_chunk_offsets =
-            self.chunk_offset_helper
-                .begin_fill_buffer(device, &self.chunk_offset_buf, 0);
+        let mut fill_chunk_metadatas =
+            self.chunk_metadata_helper
+                .begin_fill_buffer(device, &self.chunk_metadata_buf, 0);
 
         self.count_chunks = 0;
-        for (offset, chunk) in chunks {
-            info!(
-                "Filling chunk idx={} offset={:?}",
-                self.count_chunks, offset
-            );
+        for (meta, chunk) in chunks {
+            debug!("Filling chunk idx={} meta={:?}", self.count_chunks, meta);
             self.count_chunks += 1;
+            assert!(self.count_chunks <= Self::max_batch_chunks());
             fill_block_types.advance(encoder, block::blocks_to_u16(&chunk.blocks));
-            fill_chunk_offsets.advance(encoder, offset.as_ref() as &[f32; 3]);
-            // padding to make alignment 16 bytes
-            fill_chunk_offsets.advance(encoder, &[0f32]);
+
+            // Offset vector
+            let offset_vec = meta.offset.as_ref() as &[f32; 3];
+            fill_chunk_metadatas.advance(encoder, offset_vec.as_bytes());
+            fill_chunk_metadatas.advance(encoder, meta._padding0.as_bytes());
+            fill_chunk_metadatas.advance(encoder, meta.neighbor_indices.as_bytes());
+            fill_chunk_metadatas.advance(encoder, meta._padding1.as_bytes());
         }
 
         fill_block_types.finish(encoder);
-        fill_chunk_offsets.finish(encoder);
+        fill_chunk_metadatas.finish(encoder);
     }
 
     fn block_type_binding(&self, index: u32) -> wgpu::Binding {
-        wgpu::Binding {
-            binding: index,
-            resource: wgpu::BindingResource::Buffer {
-                buffer: &self.block_type_buf,
-                range: 0..self.block_type_helper.buffer_byte_len(),
-            },
-        }
+        self.block_type_helper
+            .as_binding(index, &self.block_type_buf, 0)
     }
 
-    fn chunk_offset_binding(&self, index: u32) -> wgpu::Binding {
-        wgpu::Binding {
-            binding: index,
-            resource: wgpu::BindingResource::Buffer {
-                buffer: &self.chunk_offset_buf,
-                range: 0..self.chunk_offset_helper.buffer_byte_len(),
-            },
-        }
+    fn chunk_metadata_binding(&self, index: u32) -> wgpu::Binding {
+        self.chunk_metadata_helper
+            .as_binding(index, &self.chunk_metadata_buf, 0)
     }
 }
 
@@ -445,14 +460,18 @@ impl IntoBufferSynced for Uniforms {
     }
 }
 
-impl BufferSyncedData<Uniforms, f32> {
-    fn as_binding(&self, index: u32) -> wgpu::Binding {
-        wgpu::Binding {
-            binding: index,
-            resource: wgpu::BindingResource::Buffer {
-                buffer: &self.buffer(),
-                range: 0..self.sync_helper().buffer_byte_len(),
-            },
-        }
+fn p_to_i32(p: Point3<usize>) -> Point3<i32> {
+    Point3 {
+        x: p.x as i32,
+        y: p.y as i32,
+        z: p.z as i32,
+    }
+}
+
+fn p_to_f32(p: Point3<usize>) -> Point3<f32> {
+    Point3 {
+        x: p.x as f32,
+        y: p.y as f32,
+        z: p.z as f32,
     }
 }

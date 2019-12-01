@@ -2,6 +2,7 @@ pub mod cube;
 pub mod half_open_cube;
 
 #[derive(Clone, Copy, Debug)]
+#[repr(C)]
 pub struct Vertex {
     pos: [f32; 4],
     normal: [f32; 3],

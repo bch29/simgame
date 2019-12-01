@@ -110,6 +110,11 @@ impl<Data, Item> BufferSyncedData<Data, Item> {
     pub fn sync_helper(&self) -> &BufferSyncHelper<Item> {
         &self.helper
     }
+
+    #[inline]
+    pub fn as_binding(&self, index: u32) -> wgpu::Binding {
+        self.helper.as_binding(index, &self.buffer, 0)
+    }
 }
 
 impl<Data, Item> Deref for BufferSyncedData<Data, Item> {
@@ -205,6 +210,22 @@ impl<Item> BufferSyncHelper<Item> {
     #[inline]
     pub fn buffer_byte_len(&self) -> wgpu::BufferAddress {
         (self.desc.buffer_len * std::mem::size_of::<Item>()) as wgpu::BufferAddress
+    }
+
+    #[inline]
+    pub fn as_binding<'a>(
+        &self,
+        index: u32,
+        buffer: &'a Buffer,
+        start_offset: wgpu::BufferAddress,
+    ) -> wgpu::Binding<'a> {
+        wgpu::Binding {
+            binding: index,
+            resource: wgpu::BindingResource::Buffer {
+                buffer,
+                range: start_offset..start_offset + self.buffer_byte_len(),
+            },
+        }
     }
 }
 
