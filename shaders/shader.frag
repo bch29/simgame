@@ -29,10 +29,6 @@ float spot(vec2 p) {
 }
 
 void main() {
-  if (v_BlockType == 0)
-    // Air blocks are completely transparent
-    discard;
-
   vec4 ambient = ambientStrength * ambientColor;
 
   vec3 norm = normalize(v_Normal);
