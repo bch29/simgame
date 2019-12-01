@@ -33,6 +33,7 @@ impl<T> Bounds<T> {
 }
 
 impl<T: BaseNum> Bounds<T> {
+    #[inline]
     pub fn new(origin: Point3<T>, size: Vector3<T>) -> Self {
         assert!(size.x >= T::zero());
         assert!(size.y >= T::zero());
@@ -40,14 +41,25 @@ impl<T: BaseNum> Bounds<T> {
         Bounds { origin, size }
     }
 
+    #[inline]
     pub fn from_size(size: Vector3<T>) -> Self {
         Bounds::new(Point3::<T>::origin(), size)
     }
 
+    #[inline]
+    pub fn from_limit(origin: Point3<T>, limit: Point3<T>) -> Self {
+        assert!(origin.x <= limit.x);
+        assert!(origin.y <= limit.y);
+        assert!(origin.z <= limit.z);
+        Bounds::new(origin, limit - origin)
+    }
+
+    #[inline]
     pub fn limit(self) -> Point3<T> {
         self.origin + self.size
     }
 
+    #[inline]
     pub fn contains_point(self, point: Point3<T>) -> bool {
         let limit = self.limit();
         point.x >= self.origin.x
@@ -58,6 +70,9 @@ impl<T: BaseNum> Bounds<T> {
             && point.z < limit.z
     }
 
+    /// True if the given bounds is fully contained within self (including if the limits
+    /// intersect).
+    #[inline]
     pub fn contains_bounds(self, bounds: Bounds<T>) -> bool {
         let limit = self.limit();
         let a = bounds.origin();
@@ -70,6 +85,44 @@ impl<T: BaseNum> Bounds<T> {
             && b.z <= limit.z
     }
 
+    #[inline]
+    /// If the size is 0 in any dimension, the bounds object is empty.
+    pub fn is_empty(self) -> bool {
+        self.size.x == T::zero() || self.size.y == T::zero() || self.size.z == T::zero()
+    }
+
+    /// Computes a bounds object that is the intersection of self with the given bounds. If the
+    /// intersection would be empty, returns `None`.
+    #[inline]
+    pub fn intersection(self, bounds: Bounds<T>) -> Option<Self> {
+        let max = |a, b| { if a >= b { a } else { b } };
+        let min = |a, b| { if a <= b { a } else { b } };
+
+        let ao = self.origin();
+        let al = self.limit();
+        let bo = bounds.origin();
+        let bl = bounds.limit();
+
+        let origin = Point3 {
+            x: max(ao.x, bo.x),
+            y: max(ao.y, bo.y),
+            z: max(ao.z, bo.z),
+        };
+
+        let limit = Point3 {
+            x: min(al.x, bl.x),
+            y: min(al.y, bl.y),
+            z: min(al.z, bl.z),
+        };
+
+        if origin.x >= limit.x || origin.y >= limit.y || origin.z >= limit.z {
+            None
+        } else {
+            Some(Self::from_limit(origin, limit))
+        }
+    }
+
+    #[inline]
     pub fn clamp(self, point: Point3<T>) -> Point3<T> {
         let limit = self.limit();
 
@@ -93,6 +146,7 @@ impl<T: BaseNum> Bounds<T> {
     }
 
     /// Moves the origin while keeping the limit the same. Note this also changes the size.
+    #[inline]
     pub fn with_origin(self, origin: Point3<T>) -> Self {
         let limit = self.limit();
         assert!(origin.x <= limit.x);
@@ -104,6 +158,7 @@ impl<T: BaseNum> Bounds<T> {
     }
 
     /// Changes the size while keeping the origin the same. Note this also changes the limit.
+    #[inline]
     pub fn with_size(mut self, size: Vector3<T>) -> Self {
         assert!(size.x >= T::zero());
         assert!(size.y >= T::zero());
@@ -113,6 +168,7 @@ impl<T: BaseNum> Bounds<T> {
     }
 
     /// Moves the limit while keeping the origin the same. Note this also changes the size.
+    #[inline]
     pub fn with_limit(mut self, limit: Point3<T>) -> Self {
         assert!(limit.x >= self.origin.x);
         assert!(limit.y >= self.origin.y);
@@ -125,6 +181,7 @@ impl<T: BaseNum> Bounds<T> {
     /// divided into quanta of size `quantum_size`.
     ///
     /// The result is given in units of quanta.
+    #[inline]
     pub fn quantize_down(self, quantum_size: Vector3<T>) -> Self
     where
         T: DivUp + DivDown,
@@ -143,6 +200,7 @@ impl<T: BaseNum> Bounds<T> {
         }
     }
 
+    #[inline]
     pub fn scale_up(self, scale: Vector3<T>) -> Self {
         assert!(scale.x >= T::zero());
         assert!(scale.y >= T::zero());
@@ -154,6 +212,7 @@ impl<T: BaseNum> Bounds<T> {
         }
     }
 
+    #[inline]
     pub fn iter_points(self) -> impl Iterator<Item = Point3<T>>
     where
         std::ops::Range<T>: Iterator<Item = T>,
@@ -170,12 +229,14 @@ impl<T: BaseNum> Bounds<T> {
 }
 
 impl DivDown for usize {
+    #[inline]
     fn div_down(&self, divisor: &usize) -> usize {
         (*self as f64 / *divisor as f64).floor() as usize
     }
 }
 
 impl DivUp for usize {
+    #[inline]
     fn div_up(&self, divisor: &usize) -> usize {
         (*self as f64 / *divisor as f64).ceil() as usize
     }

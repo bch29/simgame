@@ -22,7 +22,9 @@ pub struct Octree<T> {
 impl<T> Octree<T> {
     /// Creates a new octree with the given height. It will have space for `2^height` distinct
     /// points.
-    pub const fn new(height: usize) -> Octree<T> {
+    pub fn new(height: usize) -> Octree<T> {
+        // heights of 64 or more would cause points within the tree to overflow their 64 bits
+        assert!(height < 64);
         Octree { height, node: None }
     }
 
@@ -31,6 +33,7 @@ impl<T> Octree<T> {
     /// To keep the set of points in the tree unchanged, grow into the zeroth octant.
     pub fn grow(&mut self, octant: usize) {
         assert!(octant < 8);
+        assert!(self.height < 63);
 
         let mut branch = Self::new_branch(self.height);
         branch[octant].node = std::mem::replace(&mut self.node, None);
@@ -214,6 +217,8 @@ impl<T> Octree<T> {
         let height = reader.read_u64::<BigEndian>()? as usize;
         let tag = reader.read_u8()?;
 
+        assert!(height < 64);
+
         match tag {
             0 => Ok(Octree { height, node: None }),
             1 => {
@@ -245,24 +250,31 @@ impl<T> Octree<T> {
         }
     }
 
+    #[inline]
     pub fn iter(&self) -> Iter<T> {
-        Iter::new(self)
+        self.iter_in_bounds(self.bounds())
     }
 
+    #[inline]
+    pub fn iter_in_bounds(&self, bounds: Bounds<usize>) -> Iter<T> {
+        Iter::new(self, bounds)
+    }
+
+    #[inline]
     pub fn iter_mut(&mut self) -> IterMut<T> {
         IterMut::new(self)
     }
 
     const fn new_branch(height: usize) -> [Self; 8] {
         [
-            Self::new(height),
-            Self::new(height),
-            Self::new(height),
-            Self::new(height),
-            Self::new(height),
-            Self::new(height),
-            Self::new(height),
-            Self::new(height),
+            Octree { height, node: None },
+            Octree { height, node: None },
+            Octree { height, node: None },
+            Octree { height, node: None },
+            Octree { height, node: None },
+            Octree { height, node: None },
+            Octree { height, node: None },
+            Octree { height, node: None },
         ]
     }
 
@@ -322,12 +334,14 @@ impl<T> Octree<T> {
         distance * direction
     }
 
+    #[inline]
     pub fn height(&self) -> usize {
         self.height
     }
 
     /// Returns a bounding box that is guaranteed to contain every point currently within the
     /// Octree. No guarantees are made about whether it is the smallest such bounding box.
+    #[inline]
     pub fn bounds(&self) -> Bounds<usize> {
         let width = 1 << self.height;
         Bounds::from_size(Vector3::new(width, width, width))
@@ -366,6 +380,7 @@ pub struct Iter<'a, T> {
     /// Traces the path currently taken through the tree. Each point along the path records the
     /// node and the index of the next branch to take.
     stack: Vec<IterNode<'a, T>>,
+    bounds: Bounds<usize>,
 }
 
 struct IterNode<'a, T> {
@@ -393,7 +408,8 @@ struct IterMutNode<'a, T> {
 }
 
 impl<'a, T> Iter<'a, T> {
-    fn new(tree: &'a Octree<T>) -> Self {
+    #[inline]
+    fn new(tree: &'a Octree<T>, bounds: Bounds<usize>) -> Self {
         let mut stack = Vec::new();
         match tree.node {
             None => {}
@@ -407,7 +423,7 @@ impl<'a, T> Iter<'a, T> {
             }
         }
 
-        Iter { stack }
+        Iter { stack, bounds }
     }
 }
 
@@ -433,7 +449,7 @@ impl<'a, T> Iterator for Iter<'a, T> {
                     None => iter_node.next_index += 1,
                     Some(boxed_node) => {
                         let height = child.height;
-                        let distance = 1 << height;
+                        let octant_size = 1 << height;
                         let dir = Vector3 {
                             x: iter_node.next_index % 2,
                             y: (iter_node.next_index % 4) / 2,
@@ -441,7 +457,18 @@ impl<'a, T> Iterator for Iter<'a, T> {
                         };
 
                         iter_node.next_index += 1;
-                        let octant_origin = iter_node.octant_origin + (distance * dir);
+                        let octant_origin = iter_node.octant_origin + (octant_size * dir);
+                        let octant_bounds =
+                            Bounds::new(octant_origin, octant_size * Vector3::new(1, 1, 1));
+
+                        // Exclude children that contain no points within the bounds we're
+                        // iterating through.  This will both prevent them from being yielded by
+                        // the iterator, and prevent subsequent iteration from searching through
+                        // this child's children.
+                        if self.bounds.intersection(octant_bounds).is_none() {
+                            continue;
+                        }
+
                         break Some((octant_origin, &**boxed_node));
                     }
                 }
@@ -463,6 +490,7 @@ impl<'a, T> Iterator for Iter<'a, T> {
 }
 
 impl<'a, T> IterMut<'a, T> {
+    #[inline]
     fn new(tree: &'a mut Octree<T>) -> Self {
         let mut stack = Vec::new();
         #[allow(unused_assignments)]

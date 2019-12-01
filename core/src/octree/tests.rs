@@ -1,7 +1,7 @@
 use super::*;
 
-use std::collections::HashSet;
 use cgmath::Point3;
+use std::collections::HashSet;
 
 fn values_vec<T: Copy>(tree: &Octree<T>) -> Vec<T> {
     tree.iter().map(|(_, &v)| v).collect()
@@ -43,7 +43,7 @@ fn test_iter_basic() {
     assert_eq!(values_vec(&tree), Vec::<i64>::new());
     tree.assert_height_invariant();
 
-    let tree: Octree<i64> = Octree::new(100);
+    let tree: Octree<i64> = Octree::new(50);
     assert_eq!(values_vec(&tree), Vec::<i64>::new());
     tree.assert_height_invariant();
 
@@ -66,6 +66,24 @@ fn test_iter_basic() {
     // Iteration after removal still yields the values that were not removed
     assert_eq!(values_vec(&tree), vec![5, 6]);
     tree.assert_height_invariant();
+
+    // Test iteration within bounds
+    tree.insert(Point3::new(34, 3, 16), 2);
+    tree.insert(Point3::new(10, 11, 12), 4);
+    tree.insert(Point3::new(16, 17, 18), 6);
+    tree.insert(Point3::new(16, 10, 18), 8);
+
+    let items: Vec<_> = tree
+        .iter_in_bounds(Bounds::new(Point3::new(9, 9, 9), Vector3::new(10, 10, 10)))
+        .collect();
+    assert_eq!(
+        items,
+        vec![
+            (Point3::new(10, 11, 12), &4),
+            (Point3::new(16, 10, 18), &8),
+            (Point3::new(16, 17, 18), &6),
+        ]
+    );
 }
 
 #[test]
