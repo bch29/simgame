@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use anyhow::Result;
-// use cgmath::{Angle, Rad};
+use cgmath::{Angle, Rad};
 use cgmath::{Deg, ElementWise, EuclideanSpace, Matrix4, Point3, SquareMatrix, Vector3};
 use log::debug;
 use zerocopy::AsBytes;
@@ -234,8 +234,8 @@ impl WorldRenderState {
 
     pub fn init(
         &mut self,
-        encoder: &mut wgpu::CommandEncoder,
         device: &wgpu::Device,
+        encoder: &mut wgpu::CommandEncoder,
         world: &World,
     ) {
         fn make_neighbor_indices(
@@ -293,34 +293,14 @@ impl WorldRenderState {
 
     pub fn update(
         &mut self,
-        _encoder: &mut wgpu::CommandEncoder,
-        _device: &wgpu::Device,
-        _world: &World,
+        device: &wgpu::Device,
+        encoder: &mut wgpu::CommandEncoder,
+        world: &World,
         _diff: &UpdatedWorldState,
     ) {
-        // self.rotation = self.rotation * Matrix4::<f32>::from_angle_z(Rad::full_turn() / 1000.);
-
-        // let chunk_metadata_int =
-        //     (chunk_loc - Point3::origin()).mul_element_wise(index_utils::chunk_size());
-        // let chunk_metadata = Vector3 {
-        //     x: chunk_metadata_int.x as f32,
-        //     y: chunk_metadata_int.y as f32,
-        //     z: chunk_metadata_int.z as f32,
-        // };
-
-        // for &chunk_loc in &diff.modified_chunks {
-        //     let chunk = world.blocks.get_chunk(chunk_loc);
-        //     let chunk_empty = chunk.blocks.iter().all(|b| b.is_empty());
-        //     if self.per_chunk.contains_key(&chunk_loc) {
-        //         if chunk_empty {
-        //             self.per_chunk.remove(&chunk_loc);
-        //         } else {
-        //             self.per_chunk[&chunk_loc].update(encoder, device, &chunk);
-        //         }
-        //     } else if !chunk_empty {
-        //         self.insert_per_chunk(encoder, device, chunk_loc, chunk);
-        //     }
-        // }
+        // TODO: make use of diff instead of doing the whole init again
+        self.init(device, encoder, world);
+        self.rotation = self.rotation * Matrix4::<f32>::from_angle_z(Rad::full_turn() / 1000.);
     }
 }
 

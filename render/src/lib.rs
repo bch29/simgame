@@ -88,7 +88,7 @@ impl RenderState {
         let mut encoder = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor { todo: 0 });
-        self.world.init(&mut encoder, &self.device, world);
+        self.world.init(&self.device, &mut encoder, world);
         self.queue.submit(&[encoder.finish()]);
     }
 
@@ -96,7 +96,7 @@ impl RenderState {
         let mut encoder = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor { todo: 0 });
-        self.world.update(&mut encoder, &self.device, world, diff);
+        self.world.update(&self.device, &mut encoder, world, diff);
         self.queue.submit(&[encoder.finish()]);
     }
 }

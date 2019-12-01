@@ -1,11 +1,15 @@
-use crate::{RenderInit, RenderState, WorldRenderInit};
 use anyhow::Result;
+use cgmath::{InnerSpace, Point3, Vector3, Zero};
+use rand::{self, Rng};
+use simgame_core::util::Bounds;
+use simgame_core::block::Block;
+use simgame_core::world::{UpdatedWorldState, World};
 use winit::{
     event,
     event_loop::{ControlFlow, EventLoop},
 };
-use simgame_core::world::{World, UpdatedWorldState};
-use cgmath::{Vector3, InnerSpace, Zero};
+
+use crate::{RenderInit, RenderState, WorldRenderInit};
 
 pub fn build_window(
     event_loop: &winit::event_loop::EventLoop<()>,
@@ -20,7 +24,7 @@ pub fn build_window(
 struct ControlState {
     forward: i32,
     right: i32,
-    up: i32
+    up: i32,
 }
 
 impl ControlState {
@@ -44,7 +48,7 @@ impl ControlState {
     }
 }
 
-pub fn test_render(world: World, vert_shader: &[u8], frag_shader: &[u8]) -> Result<()> {
+pub fn test_render(mut world: World, vert_shader: &[u8], frag_shader: &[u8]) -> Result<()> {
     let event_loop = EventLoop::new();
 
     let window = build_window(&event_loop)?;
@@ -67,7 +71,7 @@ pub fn test_render(world: World, vert_shader: &[u8], frag_shader: &[u8]) -> Resu
     let mut render_state = RenderState::new(render_init)?;
     render_state.init(&world);
 
-    use event::{Event, WindowEvent, VirtualKeyCode};
+    use event::{Event, VirtualKeyCode, WindowEvent};
 
     let mut control_state = ControlState {
         forward: 0,
@@ -81,6 +85,24 @@ pub fn test_render(world: World, vert_shader: &[u8], frag_shader: &[u8]) -> Resu
             event::ElementState::Released => 0,
         }
     }
+
+    let mut update_world = {
+        let mut rng = rand::thread_rng();
+        let bounds = Bounds::new(
+            Point3::new(32, 32, 0),
+            Vector3::new(16, 16, 128));
+
+        move |world: &mut World| {
+            for _ in 0..32 {
+                let point = bounds.origin() + Vector3 {
+                    x: rng.gen::<usize>() % bounds.size().x,
+                    y: rng.gen::<usize>() % bounds.size().y,
+                    z: rng.gen::<usize>() % bounds.size().z,
+                };
+                world.blocks.set_block(point, Block::from_u16(1));
+            }
+        }
+    };
 
     event_loop.run(move |event, _, control_flow| {
         *control_flow = if cfg!(feature = "metal-auto-capture") {
@@ -118,13 +140,14 @@ pub fn test_render(world: World, vert_shader: &[u8], frag_shader: &[u8]) -> Resu
                     VirtualKeyCode::K => control_state.up = state_to_mag(state),
                     VirtualKeyCode::J => control_state.up = -state_to_mag(state),
                     _ => {}
-                }
+                },
                 _ => {}
             },
             Event::EventsCleared => {
+                update_world(&mut world);
                 render_state.update(&world, &UpdatedWorldState::empty());
                 render_state.render_frame();
-            },
+            }
             _ => (),
         };
 

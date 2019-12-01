@@ -254,10 +254,12 @@ impl WorldBlockData {
     #[inline]
     pub fn set_block(&mut self, p: Point3<usize>, val: Block) {
         let (chunk_pos, inner_pos) = index_utils::to_chunk_pos(p);
-        let chunk = self
-            .chunks
-            .get_mut(chunk_pos)
-            .expect("requested chunk which is not present");
+
+        while !self.bounds().contains_point(p) {
+            self.chunks.grow(0);
+        }
+
+        let chunk = self.chunks.get_or_insert(chunk_pos, || Chunk::empty());
         chunk.set_block(inner_pos, val);
     }
 
