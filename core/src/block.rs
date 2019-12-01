@@ -173,6 +173,17 @@ impl WorldBlockData {
         self.chunks.iter()
     }
 
+    /// Visits every chunk containing blocks inside the given bounding box exactly once, in an
+    /// unspecified order.
+    #[inline]
+    pub fn iter_chunks_in_bounds(
+        &self,
+        block_bounds: Bounds<usize>,
+    ) -> impl Iterator<Item = (Point3<usize>, &Chunk)> + '_ {
+        let chunk_bounds = block_bounds.quantize_down(index_utils::chunk_size());
+        self.chunks.iter_in_bounds(chunk_bounds)
+    }
+
     /// Visits every block in the world exactly once, in an unspecified order.
     #[inline]
     pub fn iter_blocks(&self) -> impl Iterator<Item = (Point3<usize>, Block)> + '_ {
@@ -434,8 +445,7 @@ mod tests {
 
         assert_eq!(
             Block::from_u16(1),
-            dbg!(original
-                .get_chunk(Point3::new(24, 35, 36)))
+            dbg!(original.get_chunk(Point3::new(24, 35, 36)))
                 .get_block(dbg!(Point3::new(24, 35, 36).rem_element_wise(chunk_limit)))
         );
         assert_eq!(

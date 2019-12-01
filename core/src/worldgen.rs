@@ -59,7 +59,7 @@ pub fn generate_world(config: &GenerateWorldConfig) -> Result<WorldBlockData> {
             let block = if p.z * world_size.z > height_here {
                 Block::air()
             } else {
-                let block_val = rng.gen::<u16>() % 9;
+                let block_val = 1 + rng.gen::<u16>() % 8;
                 Block::from_u16(block_val)
             };
 

@@ -1,19 +1,28 @@
 use std::collections::HashMap;
 
 use anyhow::Result;
-use cgmath::{Angle, Rad};
+// use cgmath::{Angle, Rad};
 use cgmath::{Deg, ElementWise, EuclideanSpace, Matrix4, Point3, SquareMatrix, Vector3};
 use log::debug;
+use std::iter;
 use zerocopy::AsBytes;
 
 use simgame_core::block;
 use simgame_core::block::index_utils;
+use simgame_core::util::Bounds;
 use simgame_core::world::{UpdatedWorldState, World};
 
 use crate::buffer_util::{
     BufferSyncHelper, BufferSyncHelperDesc, BufferSyncedData, IntoBufferSynced,
 };
 use crate::mesh;
+
+const LOOK_AT_DIR: Vector3<f32> = Vector3::new(1., 1., -2.);
+
+pub struct ViewParams {
+    pub camera_pos: Point3<f32>,
+    pub z_level: i32,
+}
 
 pub struct WorldRenderInit<RV, RF> {
     pub vert_shader_spirv_bytes: RV,
@@ -36,19 +45,30 @@ pub struct WorldRenderState {
     depth_texture: wgpu::TextureView,
 
     chunk_batch: ChunkBatchRenderState,
+
+    z_level: i32,
+
     // /// Contains textures for each block type.
     // /// Dimensions are 16x16xN, where N is number of block types.
     // block_master_texture: wgpu::TextureView,
 }
 
+#[repr(C)]
 struct Uniforms {
     proj: Matrix4<f32>,
     view: Matrix4<f32>,
     model: Matrix4<f32>,
     camera_pos: Point3<f32>,
+    visible_box_origin: Point3<f32>,
+    visible_box_limit: Point3<f32>,
 }
 
 impl WorldRenderState {
+    pub fn set_view(&mut self, params: &ViewParams) {
+        self.uniforms.camera_pos = params.camera_pos;
+        self.z_level = params.z_level;
+    }
+
     pub fn new<RV, RF>(init: WorldRenderInit<RV, RF>, device: &wgpu::Device) -> Result<Self>
     where
         RV: std::io::Seek + std::io::Read,
@@ -113,13 +133,11 @@ impl WorldRenderState {
         let uniforms = Uniforms {
             proj: OPENGL_TO_WGPU_MATRIX
                 * cgmath::perspective(Deg(70f32), init.aspect_ratio, 1.0, 1000.0),
-            view: Matrix4::look_at_dir(
-                Point3::new(0., 0., 0.),
-                Vector3::new(1., 1., -2.),
-                Vector3::unit_z(),
-            ),
+            view: Matrix4::look_at_dir(Point3::new(0., 0., 0.), LOOK_AT_DIR, Vector3::unit_z()),
             model: Matrix4::<f32>::identity(),
-            camera_pos: Point3::new(-20f32, -20f32, 20f32),
+            camera_pos: Point3::origin(),
+            visible_box_origin: Point3::origin(),
+            visible_box_limit: Point3::origin(),
         }
         .buffer_synced(device);
 
@@ -173,11 +191,8 @@ impl WorldRenderState {
             rotation: Matrix4::identity(),
             depth_texture: depth_texture.create_default_view(),
             chunk_batch: ChunkBatchRenderState::new(device),
+            z_level: 0
         })
-    }
-
-    pub fn update_camera_pos(&mut self, delta: Vector3<f32>) {
-        self.uniforms.camera_pos += delta;
     }
 
     pub fn render_frame(
@@ -238,6 +253,26 @@ impl WorldRenderState {
         encoder: &mut wgpu::CommandEncoder,
         world: &World,
     ) {
+        let view_box = {
+            let mut center = self.uniforms.camera_pos + 60. * LOOK_AT_DIR;
+            center.z = self.z_level as f32 - 0.5;
+            let size = Vector3::new(128.0f32, 128., 5.);
+
+            let float_bounds = Bounds::new(center - 0.5 * size, size);
+            let positive_box =
+                Bounds::from_limit(Point3::origin(), p_to_f32(world.blocks.bounds().limit()));
+            float_bounds
+                .intersection(positive_box)
+                .map(|bounds| Bounds::new(p_from_f32(bounds.origin()), v_from_f32(bounds.size())))
+        };
+
+        if let Some(view_box) = view_box {
+            self.uniforms.visible_box_origin = p_to_f32(view_box.origin());
+            self.uniforms.visible_box_limit = p_to_f32(view_box.limit());
+        }
+
+        dbg!(self.uniforms.visible_box_limit - self.uniforms.visible_box_origin);
+
         fn make_neighbor_indices(
             by_chunk_loc: &HashMap<Point3<i32>, i32>,
             chunk_loc: Point3<i32>,
@@ -264,14 +299,18 @@ impl WorldRenderState {
             result
         }
 
-        let indices_by_chunk_loc: HashMap<Point3<i32>, i32> = world
-            .blocks
-            .iter_chunks()
+        let iter_chunks = || {
+            view_box
+                .iter()
+                .flat_map(|&view_box| world.blocks.iter_chunks_in_bounds(view_box))
+        };
+
+        let indices_by_chunk_loc: HashMap<Point3<i32>, i32> = iter_chunks()
             .enumerate()
             .map(|(index, (chunk_loc, _))| (p_to_i32(chunk_loc), index as i32))
             .collect();
 
-        let chunks = world.blocks.iter_chunks().map(|(chunk_loc, chunk)| {
+        let chunks = iter_chunks().map(|(chunk_loc, chunk)| {
             let offset =
                 p_to_f32(chunk_loc.mul_element_wise(Point3::origin() + index_utils::chunk_size()));
 
@@ -300,7 +339,7 @@ impl WorldRenderState {
     ) {
         // TODO: make use of diff instead of doing the whole init again
         self.init(device, encoder, world);
-        self.rotation = self.rotation * Matrix4::<f32>::from_angle_z(Rad::full_turn() / 1000.);
+        // self.rotation = self.rotation * Matrix4::<f32>::from_angle_z(Rad::full_turn() / 1000.);
     }
 }
 
@@ -421,10 +460,17 @@ impl Uniforms {
         let view: &[f32; 16] = self.view.as_ref();
         let model: &[f32; 16] = self.model.as_ref();
         let camera_pos: &[f32; 3] = self.camera_pos.as_ref();
-        std::iter::once(proj as &[f32])
-            .chain(std::iter::once(view as &[f32]))
-            .chain(std::iter::once(model as &[f32]))
-            .chain(std::iter::once(camera_pos as &[f32]))
+        let visible_box_origin: &[f32; 3] = self.visible_box_origin.as_ref();
+        let visible_box_limit: &[f32; 3] = self.visible_box_limit.as_ref();
+
+        iter::once(proj as &[f32])
+            .chain(iter::once(view as &[f32]))
+            .chain(iter::once(model as &[f32]))
+            .chain(iter::once(camera_pos as &[f32]))
+            .chain(iter::once(&[0f32] as &[f32]))
+            .chain(iter::once(visible_box_origin as &[f32]))
+            .chain(iter::once(&[0f32] as &[f32]))
+            .chain(iter::once(visible_box_limit as &[f32]))
     }
 }
 
@@ -433,8 +479,8 @@ impl IntoBufferSynced for Uniforms {
 
     fn buffer_sync_desc(&self) -> BufferSyncHelperDesc {
         BufferSyncHelperDesc {
-            buffer_len: 16 + 16 + 16 + 3,
-            max_chunk_len: 64,
+            buffer_len: 16 + 16 + 16 + 4 + 4 + 3,
+            max_chunk_len: 128,
             gpu_usage: wgpu::BufferUsage::UNIFORM,
         }
     }
@@ -453,5 +499,21 @@ fn p_to_f32(p: Point3<usize>) -> Point3<f32> {
         x: p.x as f32,
         y: p.y as f32,
         z: p.z as f32,
+    }
+}
+
+fn p_from_f32(p: Point3<f32>) -> Point3<usize> {
+    Point3 {
+        x: f32::max(0.0, p.x) as usize,
+        y: f32::max(0.0, p.y) as usize,
+        z: f32::max(0.0, p.z) as usize,
+    }
+}
+
+fn v_from_f32(v: Vector3<f32>) -> Vector3<usize> {
+    Vector3 {
+        x: f32::max(0.0, v.x) as usize,
+        y: f32::max(0.0, v.y) as usize,
+        z: f32::max(0.0, v.z) as usize,
     }
 }

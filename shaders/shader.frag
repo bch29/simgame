@@ -38,7 +38,12 @@ void main() {
 
   float colorScale = 0.3 + (float(v_BlockType) / 8.0) * 0.7;
   vec4 colorScaleV = vec4(colorScale * 0.7, colorScale * 0.5, colorScale, 1.);
-  vec4 texColor = vec4(v_Pos.x / 32., v_Pos.y / 32., v_Pos.z / 32., 1.) * colorScaleV;
+
+  const float period = 64.0;
+  vec3 posScaled = (mod(v_Pos.xyz, period) - period / 2.0) / (period / 2.0);
+  posScaled *= posScaled;
+
+  vec4 texColor = vec4(posScaled, 1.) * colorScaleV;
 
   o_Target = (ambient + diffuse) * texColor;
 }

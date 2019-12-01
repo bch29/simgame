@@ -1,14 +1,16 @@
 use anyhow::Result;
 use cgmath::{InnerSpace, Point3, Vector3, Zero};
 use rand::{self, Rng};
-use simgame_core::util::Bounds;
-use simgame_core::block::Block;
-use simgame_core::world::{UpdatedWorldState, World};
 use winit::{
     event,
     event_loop::{ControlFlow, EventLoop},
 };
 
+use simgame_core::block::Block;
+use simgame_core::util::Bounds;
+use simgame_core::world::{UpdatedWorldState, World};
+
+use crate::world;
 use crate::{RenderInit, RenderState, WorldRenderInit};
 
 pub fn build_window(
@@ -88,20 +90,24 @@ pub fn test_render(mut world: World, vert_shader: &[u8], frag_shader: &[u8]) -> 
 
     let mut update_world = {
         let mut rng = rand::thread_rng();
-        let bounds = Bounds::new(
-            Point3::new(32, 32, 0),
-            Vector3::new(16, 16, 128));
+        let bounds = Bounds::new(Point3::new(32, 32, 0), Vector3::new(16, 16, 128));
 
         move |world: &mut World| {
-            for _ in 0..32 {
-                let point = bounds.origin() + Vector3 {
-                    x: rng.gen::<usize>() % bounds.size().x,
-                    y: rng.gen::<usize>() % bounds.size().y,
-                    z: rng.gen::<usize>() % bounds.size().z,
-                };
+            for _ in 0..1024 {
+                let point = bounds.origin()
+                    + Vector3 {
+                        x: rng.gen::<usize>() % bounds.size().x,
+                        y: rng.gen::<usize>() % bounds.size().y,
+                        z: rng.gen::<usize>() % bounds.size().z,
+                    };
                 world.blocks.set_block(point, Block::from_u16(1));
             }
         }
+    };
+
+    let mut view_state = world::ViewParams {
+        camera_pos: Point3::new(-20f32, -20f32, 20f32),
+        z_level: 1,
     };
 
     event_loop.run(move |event, _, control_flow| {
@@ -132,13 +138,15 @@ pub fn test_render(mut world: World, vert_shader: &[u8], frag_shader: &[u8]) -> 
                             ..
                         },
                     ..
-                } => match key {
-                    VirtualKeyCode::W => control_state.forward = state_to_mag(state),
-                    VirtualKeyCode::S => control_state.forward = -state_to_mag(state),
-                    VirtualKeyCode::D => control_state.right = state_to_mag(state),
-                    VirtualKeyCode::A => control_state.right = -state_to_mag(state),
-                    VirtualKeyCode::K => control_state.up = state_to_mag(state),
-                    VirtualKeyCode::J => control_state.up = -state_to_mag(state),
+                } => match (state, key) {
+                    (_, VirtualKeyCode::W) => control_state.forward = state_to_mag(state),
+                    (_, VirtualKeyCode::S) => control_state.forward = -state_to_mag(state),
+                    (_, VirtualKeyCode::D) => control_state.right = state_to_mag(state),
+                    (_, VirtualKeyCode::A) => control_state.right = -state_to_mag(state),
+                    (_, VirtualKeyCode::K) => control_state.up = state_to_mag(state),
+                    (_, VirtualKeyCode::J) => control_state.up = -state_to_mag(state),
+                    (event::ElementState::Pressed, VirtualKeyCode::I) => view_state.z_level += 1,
+                    (event::ElementState::Pressed, VirtualKeyCode::U) => view_state.z_level -= 1,
                     _ => {}
                 },
                 _ => {}
@@ -151,6 +159,11 @@ pub fn test_render(mut world: World, vert_shader: &[u8], frag_shader: &[u8]) -> 
             _ => (),
         };
 
-        render_state.update_camera_pos(control_state.camera_delta());
+        if view_state.z_level < 0 {
+            view_state.z_level = 0;
+        }
+
+        view_state.camera_pos += control_state.camera_delta();
+        render_state.set_world_view(&view_state);
     });
 }

@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 
 /// Represents a half-open cuboid of points: the origin is inclusive and the limit is exclusive.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize, Serialize)]
+#[repr(C)]
 pub struct Bounds<T> {
     origin: Point3<T>,
     size: Vector3<T>,

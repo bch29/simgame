@@ -1,5 +1,4 @@
 use anyhow::{anyhow, Result};
-use cgmath::Vector3;
 use raw_window_handle::HasRawWindowHandle;
 
 use simgame_core::world::{UpdatedWorldState, World};
@@ -28,8 +27,8 @@ pub struct RenderState {
 }
 
 impl RenderState {
-    pub fn update_camera_pos(&mut self, delta: Vector3<f32>) {
-        self.world.update_camera_pos(delta);
+    pub fn set_world_view(&mut self, params: &world::ViewParams) {
+        self.world.set_view(params);
     }
 
     pub fn new<RV, RF, W>(init: RenderInit<RV, RF, W>) -> Result<Self>

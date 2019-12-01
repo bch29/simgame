@@ -47,6 +47,10 @@ layout(set = 0, binding = 0) uniform Locals {
   mat4 u_View;
   mat4 u_Model;
   vec3 u_CameraPos;
+  float u_Padding0;
+  vec3 u_VisibleBoxOrigin;
+  float u_Padding1;
+  vec3 u_VisibleBoxLimit;
 };
 
 layout(set = 0, binding = 1) buffer BlockTypes {
@@ -80,14 +84,17 @@ uint encodeBlockIndex(uvec4 pos)
 }
 
 /*
+ * A block address is an ivec4 where the w component is the chunk index and the xyz components are
+ * the offset relative to the chunk's origin.
+ *
  * Calculates the position of the neighboring block, given a block position and a direction.  It
  * is assumed that the direction will be axis-aligned.  If the w component of the return value is
  * -1 then there is no neighbor.
  */
-ivec4 neighborBlockPos(ivec4 blockPos, vec3 direction)
+ivec4 neighborBlockAddr(ivec4 blockAddr, vec3 direction)
 {
   ivec3 idirection = ivec3(sign(direction.x), sign(direction.y), sign(direction.z));
-  ivec3 posInChunk = blockPos.xyz + idirection;
+  ivec3 posInChunk = blockAddr.xyz + idirection;
 
   ivec3 outsideDir = ivec3(
       int(posInChunk.x >= CHUNK_SIZE_X) - int(posInChunk.x < 0),
@@ -105,8 +112,8 @@ ivec4 neighborBlockPos(ivec4 blockPos, vec3 direction)
   bool isOutside = outsideDir != ivec3(0, 0, 0);
 
   int neighborChunkIndex =
-    int(isOutside) * b_ChunkMetadata[blockPos.w].neighborIndices[outsideDirIndex]
-    + int(!isOutside) * blockPos.w;
+    int(isOutside) * b_ChunkMetadata[blockAddr.w].neighborIndices[outsideDirIndex]
+    + int(!isOutside) * blockAddr.w;
 
   posInChunk -= ivec3(CHUNK_SIZE_X, CHUNK_SIZE_Y, CHUNK_SIZE_Z) * outsideDir;
 
@@ -122,21 +129,21 @@ int blockTypeAtIndex(uint index)
   return (res >> shift) & 0xFFFF;
 }
 
-int blockTypeAtPos(ivec4 blockPos)
+int getBlockType(ivec4 blockAddr)
 {
   int mult = 1;
-  mult *= int(!(blockPos.x < 0 || blockPos.x >= CHUNK_SIZE_X));
-  mult *= int(!(blockPos.y < 0 || blockPos.y >= CHUNK_SIZE_Y));
-  mult *= int(!(blockPos.z < 0 || blockPos.z >= CHUNK_SIZE_Z));
-  mult *= int(!(blockPos.w < 0 || blockPos.w >= MAX_CHUNKS));
+  mult *= int(!(blockAddr.x < 0 || blockAddr.x >= CHUNK_SIZE_X));
+  mult *= int(!(blockAddr.y < 0 || blockAddr.y >= CHUNK_SIZE_Y));
+  mult *= int(!(blockAddr.z < 0 || blockAddr.z >= CHUNK_SIZE_Z));
+  mult *= int(!(blockAddr.w < 0 || blockAddr.w >= MAX_CHUNKS));
 
-  uvec4 blockPosU = uvec4(ivec4(
-      min(max(0, blockPos.x), CHUNK_SIZE_X),
-      min(max(0, blockPos.y), CHUNK_SIZE_Y),
-      min(max(0, blockPos.z), CHUNK_SIZE_Z),
-      min(max(0, blockPos.w), MAX_CHUNKS)));
+  uvec4 blockAddrU = uvec4(ivec4(
+      min(max(0, blockAddr.x), CHUNK_SIZE_X),
+      min(max(0, blockAddr.y), CHUNK_SIZE_Y),
+      min(max(0, blockAddr.z), CHUNK_SIZE_Z),
+      min(max(0, blockAddr.w), MAX_CHUNKS)));
 
-  return mult * blockTypeAtIndex(encodeBlockIndex(blockPosU));
+  return mult * blockTypeAtIndex(encodeBlockIndex(blockAddrU));
 }
 
 mat4 translation_matrix(vec3 offset) {
@@ -147,20 +154,34 @@ mat4 translation_matrix(vec3 offset) {
     offset.x, offset.y, offset.z, 1.0);
 }
 
+bool isBlockVisible(ivec4 blockAddr, int blockType)
+{
+  vec3 blockPos = vec3(blockAddr.xyz) + b_ChunkMetadata[blockAddr.w].offset.xyz;
+
+  bool inVisibleBox = 
+    blockPos.x >= u_VisibleBoxOrigin.x && blockPos.x <= u_VisibleBoxLimit.x
+    && blockPos.y >= u_VisibleBoxOrigin.y && blockPos.y < u_VisibleBoxLimit.y
+    && blockPos.z >= u_VisibleBoxOrigin.z && blockPos.z < u_VisibleBoxLimit.z;
+
+  return blockType != 0 && inVisibleBox;
+}
+
 void main() {
   v_CameraPos = u_CameraPos;
 
-  ivec4 blockPos = decodeBlockIndex(gl_InstanceIndex);
-  vec3 chunkOffset = b_ChunkMetadata[blockPos.w].offset.xyz;
+  ivec4 blockAddr = decodeBlockIndex(gl_InstanceIndex);
+  vec3 chunkOffset = b_ChunkMetadata[blockAddr.w].offset.xyz;
 
-  ivec4 neighborPos = neighborBlockPos(blockPos, a_Normal);
+  ivec4 neighborAddr = neighborBlockAddr(blockAddr, a_Normal);
 
   int thisBlockType = blockTypeAtIndex(gl_InstanceIndex);
-  int neighborBlockType = blockTypeAtPos(neighborPos);
+  int neighborBlockType = getBlockType(neighborAddr);
 
-  bool visible = thisBlockType != 0 && neighborBlockType == 0;
+  // No point in rendering a face if its neighbor covers it completely.
+  bool visible = isBlockVisible(blockAddr, thisBlockType)
+    && !isBlockVisible(neighborAddr, neighborBlockType);
 
-  vec3 offset = chunkOffset + scale * (vec3(.5) + blockPos.xyz);
+  vec3 offset = chunkOffset + scale * (vec3(.5) + blockAddr.xyz);
 
   mat4 rescale = mat4(
       half_scale, 0.0, 0.0, 0.0,
