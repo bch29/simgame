@@ -1,5 +1,7 @@
 use anyhow::Result;
-use cgmath::{Deg, EuclideanSpace, Matrix4, Point3, SquareMatrix, Vector3, ElementWise};
+// use cgmath::{Angle, Rad};
+use cgmath::{Deg, ElementWise, EuclideanSpace, Matrix4, Point3, SquareMatrix, Vector3};
+use log::info;
 
 use simgame_core::block;
 use simgame_core::block::index_utils;
@@ -107,7 +109,7 @@ impl WorldRenderState {
 
         let uniforms = Uniforms {
             proj: OPENGL_TO_WGPU_MATRIX
-                * cgmath::perspective(Deg(70f32), init.aspect_ratio, 1.0, 100.0),
+                * cgmath::perspective(Deg(70f32), init.aspect_ratio, 1.0, 1000.0),
             view: Matrix4::look_at_dir(
                 Point3::new(0., 0., 0.),
                 Vector3::new(1., 1., -2.),
@@ -187,13 +189,11 @@ impl WorldRenderState {
         // passes to preserve existing rendering.
         let mut load_op = wgpu::LoadOp::Clear;
 
-        for per_chunk_batch in &self.per_chunk_batch {
-            {
-                self.uniforms.model = self.rotation;
-                self.uniforms
-                    .sync_with(device, encoder, |data| data.as_slices());
-            }
+        self.uniforms.model = self.rotation;
+        self.uniforms
+            .sync_with(device, encoder, |data| data.as_slices());
 
+        for per_chunk_batch in &self.per_chunk_batch {
             let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
                 layout: &self.bind_group_layout,
                 bindings: &[
@@ -228,7 +228,7 @@ impl WorldRenderState {
             rpass.draw_indexed(
                 0..self.cube_index_count as u32,
                 0,
-                0..(index_utils::chunk_size_total() as u32),
+                0..(index_utils::chunk_size_total() * per_chunk_batch.count_chunks()) as u32,
             );
 
             load_op = wgpu::LoadOp::Load;
@@ -241,20 +241,26 @@ impl WorldRenderState {
         device: &wgpu::Device,
         world: &World,
     ) {
-        let mut chunks = world.blocks.iter_chunks().map(|(chunk_loc, chunk)| {
-            let chunk_offset_int =
-                (chunk_loc - Point3::origin()).mul_element_wise(index_utils::chunk_size());
-            let chunk_offset = Point3 {
-                x: chunk_offset_int.x as f32,
-                y: chunk_offset_int.y as f32,
-                z: chunk_offset_int.z as f32,
-            };
-            (chunk_offset, chunk)
-        }).peekable();
+        let mut chunks = world
+            .blocks
+            .iter_chunks()
+            .map(|(chunk_loc, chunk)| {
+                let chunk_offset_int =
+                    (chunk_loc - Point3::origin()).mul_element_wise(index_utils::chunk_size());
+                let chunk_offset = Point3 {
+                    x: chunk_offset_int.x as f32,
+                    y: chunk_offset_int.y as f32,
+                    z: chunk_offset_int.z as f32,
+                };
+                (chunk_offset, chunk)
+            })
+            .peekable();
 
         let mut current_chunks = Vec::new();
 
         loop {
+            current_chunks.clear();
+
             while let Some(chunk) = chunks.peek() {
                 current_chunks.push(*chunk);
                 chunks.next();
@@ -263,9 +269,11 @@ impl WorldRenderState {
                 }
             }
 
-            if current_chunks.is_empty() { break; }
+            if current_chunks.is_empty() {
+                break;
+            }
 
-            let chunk_batch = ChunkBatchRenderState::new(device);
+            let mut chunk_batch = ChunkBatchRenderState::new(device);
             chunk_batch.update(device, encoder, current_chunks.iter().copied());
             self.per_chunk_batch.push(chunk_batch);
         }
@@ -280,13 +288,13 @@ impl WorldRenderState {
     ) {
         // self.rotation = self.rotation * Matrix4::<f32>::from_angle_z(Rad::full_turn() / 1000.);
 
-            // let chunk_offset_int =
-            //     (chunk_loc - Point3::origin()).mul_element_wise(index_utils::chunk_size());
-            // let chunk_offset = Vector3 {
-            //     x: chunk_offset_int.x as f32,
-            //     y: chunk_offset_int.y as f32,
-            //     z: chunk_offset_int.z as f32,
-            // };
+        // let chunk_offset_int =
+        //     (chunk_loc - Point3::origin()).mul_element_wise(index_utils::chunk_size());
+        // let chunk_offset = Vector3 {
+        //     x: chunk_offset_int.x as f32,
+        //     y: chunk_offset_int.y as f32,
+        //     z: chunk_offset_int.z as f32,
+        // };
 
         // for &chunk_loc in &diff.modified_chunks {
         //     let chunk = world.blocks.get_chunk(chunk_loc);
@@ -305,6 +313,7 @@ impl WorldRenderState {
 }
 
 struct ChunkBatchRenderState {
+    count_chunks: usize,
     chunk_offset_helper: BufferSyncHelper<f32>,
     chunk_offset_buf: wgpu::Buffer,
     block_type_helper: BufferSyncHelper<u16>,
@@ -313,11 +322,16 @@ struct ChunkBatchRenderState {
 
 impl ChunkBatchRenderState {
     const fn max_batch_chunks() -> usize {
-        16
+        // 16 MB of video memory holds a batch
+        (1024 * 1024 * 8) / index_utils::chunk_size_total()
     }
 
     const fn max_batch_blocks() -> usize {
         Self::max_batch_chunks() * index_utils::chunk_size_total()
+    }
+
+    fn count_chunks(&self) -> usize {
+        self.count_chunks
     }
 
     fn new(device: &wgpu::Device) -> Self {
@@ -334,11 +348,46 @@ impl ChunkBatchRenderState {
         });
 
         ChunkBatchRenderState {
+            count_chunks: 0,
             block_type_buf: block_type_helper.make_buffer(device),
             block_type_helper,
             chunk_offset_buf: chunk_offset_helper.make_buffer(device),
             chunk_offset_helper,
         }
+    }
+
+    #[allow(clippy::cast_lossless)]
+    fn update<'a, Chunks>(
+        &mut self,
+        device: &wgpu::Device,
+        encoder: &mut wgpu::CommandEncoder,
+        chunks: Chunks,
+    ) where
+        Chunks: IntoIterator<Item = (Point3<f32>, &'a block::Chunk)>,
+    {
+        let mut fill_block_types =
+            self.block_type_helper
+                .begin_fill_buffer(device, &self.block_type_buf, 0);
+
+        let mut fill_chunk_offsets =
+            self.chunk_offset_helper
+                .begin_fill_buffer(device, &self.chunk_offset_buf, 0);
+
+        self.count_chunks = 0;
+        for (offset, chunk) in chunks {
+            info!(
+                "Filling chunk idx={} offset={:?}",
+                self.count_chunks, offset
+            );
+            self.count_chunks += 1;
+            fill_block_types.advance(encoder, block::blocks_to_u16(&chunk.blocks));
+            fill_chunk_offsets.advance(encoder, offset.as_ref() as &[f32; 3]);
+            // padding to make alignment 16 bytes
+            fill_chunk_offsets.advance(encoder, &[0f32]);
+        }
+
+        fill_block_types.finish(encoder);
+        fill_chunk_offsets.finish(encoder);
     }
 
     fn block_type_binding(&self, index: u32) -> wgpu::Binding {
@@ -359,32 +408,6 @@ impl ChunkBatchRenderState {
                 range: 0..self.chunk_offset_helper.buffer_byte_len(),
             },
         }
-    }
-
-    #[allow(clippy::cast_lossless)]
-    fn update<'a, Chunks>(
-        &self,
-        device: &wgpu::Device,
-        encoder: &mut wgpu::CommandEncoder,
-        chunks: Chunks,
-    ) where
-        Chunks: IntoIterator<Item = (Point3<f32>, &'a block::Chunk)>,
-    {
-        let mut fill_block_types =
-            self.block_type_helper
-                .begin_fill_buffer(device, &self.block_type_buf, 0);
-
-        let mut fill_chunk_offsets =
-            self.chunk_offset_helper
-                .begin_fill_buffer(device, &self.chunk_offset_buf, 0);
-
-        for (offset, chunk) in chunks {
-            fill_block_types.advance(encoder, block::blocks_to_u16(&chunk.blocks));
-            fill_chunk_offsets.advance(encoder, offset.as_ref() as &[f32; 3]);
-        }
-
-        fill_block_types.finish(encoder);
-        fill_chunk_offsets.finish(encoder);
     }
 }
 

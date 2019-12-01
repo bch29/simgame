@@ -316,6 +316,7 @@ impl WorldBlockData {
         WorldBlockDataSummary {
             count_total,
             count_nonempty,
+            count_chunks: self.iter_chunks().count(),
             pct_nonempty,
             byte_size,
             mb_size,
@@ -328,6 +329,7 @@ impl WorldBlockData {
 pub struct WorldBlockDataSummary {
     count_total: usize,
     count_nonempty: usize,
+    count_chunks: usize,
     pct_nonempty: f64,
     byte_size: usize,
     mb_size: usize,

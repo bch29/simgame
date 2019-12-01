@@ -20,6 +20,10 @@ layout(set = 0, binding = 1) buffer BlockTypes {
   int[] b_BlockTypes;
 };
 
+layout(set = 0, binding = 2) buffer ChunkOffsets {
+  vec4[] b_ChunkOffsets;
+};
+
 /* const uint CHUNK_SIZE_X = 16; */
 /* const uint CHUNK_SIZE_Y = 16; */
 /* const uint CHUNK_SIZE_Z = 16; */
@@ -58,18 +62,18 @@ int blockTypeAtIndex(uint index)
   }
 }
 
-int blockTypeAtPos(ivec3 block_pos)
+int blockTypeAtPos(ivec3 blockPos)
 {
-  if (block_pos.x < 0 || block_pos.x >= CHUNK_SIZE_X)
+  if (blockPos.x < 0 || blockPos.x >= CHUNK_SIZE_X)
     return 0;
 
-  if (block_pos.y < 0 || block_pos.y >= CHUNK_SIZE_Y)
+  if (blockPos.y < 0 || blockPos.y >= CHUNK_SIZE_Y)
     return 0;
 
-  if (block_pos.z < 0 || block_pos.z >= CHUNK_SIZE_Z)
+  if (blockPos.z < 0 || blockPos.z >= CHUNK_SIZE_Z)
     return 0;
 
-  return blockTypeAtIndex(encodeBlockIndex(uvec3(block_pos)));
+  return blockTypeAtIndex(encodeBlockIndex(uvec3(blockPos)));
 }
 
 mat4 translation_matrix(vec3 offset) {
@@ -83,18 +87,24 @@ mat4 translation_matrix(vec3 offset) {
 void main() {
   v_CameraPos = u_CameraPos;
 
-  ivec3 block_pos = decodeBlockIndex(gl_InstanceIndex);
+  vec3 chunkOffset = b_ChunkOffsets[gl_InstanceIndex / CHUNK_SIZE_XYZ].xyz;
+
+  ivec3 blockPos = decodeBlockIndex(gl_InstanceIndex);
   ivec3 inormal = ivec3(sign(a_Normal.x), sign(a_Normal.y), sign(a_Normal.z));
-  ivec3 neighbour_pos = block_pos + inormal;
+  ivec3 neighborPos = blockPos + inormal;
 
   int thisBlockType = blockTypeAtIndex(gl_InstanceIndex);
-  int neighborBlockType = blockTypeAtPos(neighbour_pos);
+  int neighborBlockType = blockTypeAtPos(neighborPos);
 
   bool visible = thisBlockType != 0 && neighborBlockType == 0;
 
   if (visible)
   {
-    vec3 offset = scale * (vec3(.5) + block_pos);
+    blockPos.x = blockPos.x % CHUNK_SIZE_X;
+    blockPos.y = blockPos.y % CHUNK_SIZE_Y;
+    blockPos.z = blockPos.z % CHUNK_SIZE_Z;
+
+    vec3 offset = chunkOffset + scale * (vec3(.5) + blockPos);
 
     mat4 rescale = mat4(
         scale_over_2, 0.0, 0.0, 0.0,
