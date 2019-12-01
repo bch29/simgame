@@ -208,47 +208,6 @@ impl<Item> BufferSyncHelper<Item> {
     }
 }
 
-pub struct FillBufferWithIter<'a, Iter, Item> {
-    fill_buffer: FillBuffer<'a, Item>,
-    iter: Iter,
-}
-
-impl<'a, Iter, Item> FillBufferWithIter<'a, Iter, Item>
-where
-    Iter: Iterator,
-    Iter::Item: AsRef<[Item]>,
-    Item: 'static + Copy + AsBytes + FromBytes,
-{
-    #[inline]
-    pub fn advance(mut self, encoder: &mut CommandEncoder) -> Option<Self> {
-        match self.iter.next() {
-            Some(chunk) => {
-                self.fill_buffer.advance(encoder, chunk);
-                Some(self)
-            }
-            None => {
-                self.fill_buffer.finish(encoder);
-                None
-            }
-        }
-    }
-
-    #[inline]
-    pub fn drain(mut self, encoder: &mut CommandEncoder) {
-        loop {
-            self = match self.advance(encoder) {
-                Some(x) => x,
-                None => break,
-            }
-        }
-    }
-
-    #[inline]
-    pub fn detach(self) -> FillBuffer<'a, Item> {
-        self.fill_buffer
-    }
-}
-
 pub struct FillBuffer<'a, Item> {
     device: &'a Device,
     target: &'a Buffer,
@@ -256,6 +215,11 @@ pub struct FillBuffer<'a, Item> {
     total_len: usize,
     batch_len: usize,
     sync_helper: &'a BufferSyncHelper<Item>,
+}
+
+pub struct FillBufferWithIter<'a, Iter, Item> {
+    fill_buffer: FillBuffer<'a, Item>,
+    iter: Iter,
 }
 
 impl<'a, Item> FillBuffer<'a, Item> {
@@ -349,13 +313,51 @@ impl<'a, Item> FillBuffer<'a, Item> {
 
             self.total_len += self.batch_len;
         }
+
+        self.batch_len = 0;
     }
 }
 
 impl<'a, Item> Drop for FillBuffer<'a, Item> {
     fn drop(&mut self) {
-        if self.mapped_buffer.is_some() {
+        if self.mapped_buffer.is_some() && !std::thread::panicking() {
             panic!("must call finish on FillBuffer object!");
         }
+    }
+}
+
+impl<'a, Iter, Item> FillBufferWithIter<'a, Iter, Item>
+where
+    Iter: Iterator,
+    Iter::Item: AsRef<[Item]>,
+    Item: 'static + Copy + AsBytes + FromBytes,
+{
+    #[inline]
+    pub fn advance(mut self, encoder: &mut CommandEncoder) -> Option<Self> {
+        match self.iter.next() {
+            Some(chunk) => {
+                self.fill_buffer.advance(encoder, chunk);
+                Some(self)
+            }
+            None => {
+                self.fill_buffer.finish(encoder);
+                None
+            }
+        }
+    }
+
+    #[inline]
+    pub fn drain(mut self, encoder: &mut CommandEncoder) {
+        loop {
+            self = match self.advance(encoder) {
+                Some(x) => x,
+                None => break,
+            }
+        }
+    }
+
+    #[inline]
+    pub fn detach(self) -> FillBuffer<'a, Item> {
+        self.fill_buffer
     }
 }
