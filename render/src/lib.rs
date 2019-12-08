@@ -6,6 +6,7 @@ use simgame_core::world::{UpdatedWorldState, World};
 pub mod buffer_util;
 pub mod mesh;
 pub mod test;
+pub mod stable_map;
 mod triangulate;
 mod world;
 
