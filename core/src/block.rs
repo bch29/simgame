@@ -270,7 +270,7 @@ impl WorldBlockData {
             self.chunks.grow(0);
         }
 
-        let chunk = self.chunks.get_or_insert(chunk_pos, || Chunk::empty());
+        let chunk = self.chunks.get_or_insert(chunk_pos, Chunk::empty);
         chunk.set_block(inner_pos, val);
     }
 
@@ -408,7 +408,6 @@ mod tests {
             y: 48,
             z: 64,
         });
-        let mut buf = Vec::new();
 
         let mut original = WorldBlockData::empty(bounds);
 
@@ -429,6 +428,7 @@ mod tests {
             .unwrap();
         assert!(original.chunks.check_height_invariant());
 
+        let mut buf = Vec::new();
         original.serialize_blocks(&mut buf).unwrap();
 
         let mut reserialized = WorldBlockData::empty(bounds);
@@ -474,5 +474,96 @@ mod tests {
         assert_eq!(original.chunks.height(), reserialized.chunks.height());
 
         assert_eq!(original, reserialized);
+    }
+
+    #[test]
+    fn test_iter_chunks_in_bounds() {
+        let bounds = Bounds::from_size(8 * index_utils::chunk_size());
+
+        let mut blocks = WorldBlockData::empty(bounds);
+        blocks
+            .replace_blocks::<(), _>(bounds, |_, _| Ok(Block::from_u16(1)))
+            .unwrap();
+
+        let cs = index_utils::chunk_size();
+
+        assert_eq!(
+            point_range(
+                blocks
+                    .iter_chunks_in_bounds(Bounds::new(Point3::origin() + 2 * cs, 3 * cs,))
+                    .map(|(pos, _)| pos)
+            ),
+            Some((Point3::new(2, 2, 2), Point3::new(4, 4, 4)))
+        );
+
+        assert_eq!(
+            point_range(
+                blocks
+                    .iter_chunks_in_bounds(Bounds::new(
+                        Point3::origin() + 2 * cs,
+                        3 * cs - Vector3::new(1, 1, 1),
+                    ))
+                    .map(|(pos, _)| pos)
+            ),
+            Some((Point3::new(2, 2, 2), Point3::new(4, 4, 4)))
+        );
+
+        assert_eq!(
+            point_range(
+                blocks
+                    .iter_chunks_in_bounds(Bounds::from_limit(
+                        Point3::new(6, 6, 6),
+                        Point3::new(38, 38, 26),
+                    ))
+                    .map(|(pos, _)| pos)
+            ),
+            Some((Point3::new(0, 0, 1), Point3::new(2, 2, 6)))
+        );
+
+        assert_eq!(
+            point_range(
+                blocks
+                    .iter_chunks_in_bounds(Bounds::new(
+                        Point3::origin() + 3 * cs - cs / 2,
+                        3 * cs - cs / 2 + Vector3::new(1, 0, 0),
+                    ))
+                    .map(|(pos, _)| pos)
+            ),
+            Some((Point3::new(2, 2, 2), Point3::new(5, 4, 4)))
+        );
+
+        assert_eq!(
+            point_range(
+                blocks
+                    .iter_chunks_in_bounds(Bounds::new(
+                        Point3::origin() + 3 * cs - cs / 2,
+                        2 * cs + Vector3::new(1, 1, 1),
+                    ))
+                    .map(|(pos, _)| pos)
+            ),
+            Some((Point3::new(2, 2, 2), Point3::new(4, 4, 4)))
+        );
+    }
+
+    fn point_range<Points>(points: Points) -> Option<(Point3<usize>, Point3<usize>)>
+    where
+        Points: IntoIterator<Item = Point3<usize>>,
+    {
+        let points: Vec<_> = points.into_iter().collect();
+        let x = || points.iter().map(|p| p.x);
+        let y = || points.iter().map(|p| p.y);
+        let z = || points.iter().map(|p| p.z);
+
+        let l = x().min().and_then(|lx| {
+            y().min()
+                .and_then(|ly| z().min().map(|lz| Point3::new(lx, ly, lz)))
+        });
+
+        let h = x().max().and_then(|hx| {
+            y().max()
+                .and_then(|hy| z().max().map(|hz| Point3::new(hx, hy, hz)))
+        });
+
+        l.and_then(|l| h.map(|h| (l, h)))
     }
 }

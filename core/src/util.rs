@@ -96,8 +96,20 @@ impl<T: BaseNum> Bounds<T> {
     /// intersection would be empty, returns `None`.
     #[inline]
     pub fn intersection(self, bounds: Bounds<T>) -> Option<Self> {
-        let max = |a, b| { if a >= b { a } else { b } };
-        let min = |a, b| { if a <= b { a } else { b } };
+        let max = |a, b| {
+            if a >= b {
+                a
+            } else {
+                b
+            }
+        };
+        let min = |a, b| {
+            if a <= b {
+                a
+            } else {
+                b
+            }
+        };
 
         let ao = self.origin();
         let al = self.limit();
@@ -187,18 +199,19 @@ impl<T: BaseNum> Bounds<T> {
     where
         T: DivUp + DivDown,
     {
-        Bounds {
-            origin: Point3 {
+        let limit = self.limit();
+        Bounds::from_limit(
+            Point3 {
                 x: self.origin.x.div_down(&quantum_size.x),
                 y: self.origin.y.div_down(&quantum_size.y),
                 z: self.origin.z.div_down(&quantum_size.z),
             },
-            size: Vector3 {
-                x: self.size.x.div_up(&quantum_size.x),
-                y: self.size.y.div_up(&quantum_size.y),
-                z: self.size.z.div_up(&quantum_size.z),
+            Point3 {
+                x: limit.x.div_up(&quantum_size.x),
+                y: limit.y.div_up(&quantum_size.y),
+                z: limit.z.div_up(&quantum_size.z),
             },
-        }
+        )
     }
 
     #[inline]
@@ -232,13 +245,30 @@ impl<T: BaseNum> Bounds<T> {
 impl DivDown for usize {
     #[inline]
     fn div_down(&self, divisor: &usize) -> usize {
-        (*self as f64 / *divisor as f64).floor() as usize
+        self / divisor
     }
 }
 
 impl DivUp for usize {
     #[inline]
     fn div_up(&self, divisor: &usize) -> usize {
-        (*self as f64 / *divisor as f64).ceil() as usize
+        let d = self / divisor;
+        let r = self % divisor;
+        if r > 0 {
+            1 + d
+        } else {
+            d
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_div_up() {
+        assert_eq!(38.div_up(&16), 3);
+        assert_eq!(38.div_up(&4), 10);
     }
 }

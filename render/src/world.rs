@@ -47,7 +47,6 @@ pub struct WorldRenderState {
     chunk_batch: ChunkBatchRenderState,
 
     z_level: i32,
-
     // /// Contains textures for each block type.
     // /// Dimensions are 16x16xN, where N is number of block types.
     // block_master_texture: wgpu::TextureView,
@@ -191,7 +190,7 @@ impl WorldRenderState {
             rotation: Matrix4::identity(),
             depth_texture: depth_texture.create_default_view(),
             chunk_batch: ChunkBatchRenderState::new(device),
-            z_level: 0
+            z_level: 0,
         })
     }
 
@@ -270,8 +269,6 @@ impl WorldRenderState {
             self.uniforms.visible_box_origin = p_to_f32(view_box.origin());
             self.uniforms.visible_box_limit = p_to_f32(view_box.limit());
         }
-
-        dbg!(self.uniforms.visible_box_limit - self.uniforms.visible_box_origin);
 
         fn make_neighbor_indices(
             by_chunk_loc: &HashMap<Point3<i32>, i32>,
