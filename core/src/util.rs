@@ -199,18 +199,9 @@ impl<T: BaseNum> Bounds<T> {
     where
         T: DivUp + DivDown,
     {
-        let limit = self.limit();
         Bounds::from_limit(
-            Point3 {
-                x: self.origin.x.div_down(&quantum_size.x),
-                y: self.origin.y.div_down(&quantum_size.y),
-                z: self.origin.z.div_down(&quantum_size.z),
-            },
-            Point3 {
-                x: limit.x.div_up(&quantum_size.x),
-                y: limit.y.div_up(&quantum_size.y),
-                z: limit.z.div_up(&quantum_size.z),
-            },
+            self.origin.div_down(&(Point3::origin() + quantum_size)),
+            self.limit().div_up(&(Point3::origin() + quantum_size)),
         )
     }
 
@@ -242,25 +233,85 @@ impl<T: BaseNum> Bounds<T> {
     }
 }
 
-impl DivDown for usize {
-    #[inline]
-    fn div_down(&self, divisor: &usize) -> usize {
-        self / divisor
-    }
-}
-
-impl DivUp for usize {
-    #[inline]
-    fn div_up(&self, divisor: &usize) -> usize {
-        let d = self / divisor;
-        let r = self % divisor;
-        if r > 0 {
-            1 + d
-        } else {
-            d
+#[macro_export]
+macro_rules! convert_point {
+    ($val:expr, $type:ty) => {
+        Point3 {
+            x: $val.x as $type,
+            y: $val.y as $type,
+            z: $val.z as $type,
         }
     }
 }
+
+#[macro_export]
+macro_rules! convert_vec {
+    ($val:expr, $type:ty) => {
+        Vector3 {
+            x: $val.x as $type,
+            y: $val.y as $type,
+            z: $val.z as $type,
+        }
+    }
+}
+
+macro_rules! impl_div_traits_int {
+    ($type:ty) => {
+        impl DivDown for $type {
+            #[inline]
+            fn div_down(&self, divisor: &$type) -> $type {
+                self / divisor
+            }
+        }
+
+        impl DivUp for $type {
+            #[inline]
+            fn div_up(&self, divisor: &$type) -> $type {
+                let d = self / divisor;
+                let r = self % divisor;
+                if r > 0 {
+                    1 + d
+                } else {
+                    d
+                }
+            }
+        }
+    };
+}
+
+macro_rules! impl_div_trait_pv {
+    ($pv:tt, $trait:path, $method:tt) => {
+        impl<T> $trait for $pv<T>
+        where
+            T: $trait,
+        {
+            #[inline]
+            fn $method(&self, divisor: &$pv<T>) -> Self {
+                $pv {
+                    x: self.x.$method(&divisor.x),
+                    y: self.y.$method(&divisor.y),
+                    z: self.z.$method(&divisor.z),
+                }
+            }
+        }
+    };
+}
+
+impl_div_traits_int!(u8);
+impl_div_traits_int!(u16);
+impl_div_traits_int!(u32);
+impl_div_traits_int!(u64);
+impl_div_traits_int!(i8);
+impl_div_traits_int!(i16);
+impl_div_traits_int!(i32);
+impl_div_traits_int!(i64);
+impl_div_traits_int!(usize);
+impl_div_traits_int!(isize);
+
+impl_div_trait_pv!(Vector3, DivDown, div_down);
+impl_div_trait_pv!(Vector3, DivUp, div_up);
+impl_div_trait_pv!(Point3, DivDown, div_down);
+impl_div_trait_pv!(Point3, DivUp, div_up);
 
 #[cfg(test)]
 mod tests {

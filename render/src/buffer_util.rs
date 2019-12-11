@@ -166,7 +166,7 @@ impl<Item> BufferSyncHelper<Item> {
             device,
             target,
             mapped_buffer: None,
-            total_len: start_pos,
+            pos: start_pos,
             batch_len: 0,
             sync_helper: self,
         }
@@ -233,7 +233,7 @@ pub struct FillBuffer<'a, Item> {
     device: &'a Device,
     target: &'a Buffer,
     mapped_buffer: Option<CreateBufferMapped<'a, Item>>,
-    total_len: usize,
+    pos: usize,
     batch_len: usize,
     sync_helper: &'a BufferSyncHelper<Item>,
 }
@@ -328,14 +328,25 @@ impl<'a, Item> FillBuffer<'a, Item> {
                 &src,
                 0,
                 self.target,
-                (item_size * self.total_len) as BufferAddress,
+                (item_size * self.pos) as BufferAddress,
                 (item_size * self.batch_len) as BufferAddress,
             );
 
-            self.total_len += self.batch_len;
+            self.pos += self.batch_len;
         }
 
         self.batch_len = 0;
+    }
+
+    /// Subsequent writes will begin at the given position. May end the current batch.
+    #[inline]
+    pub fn seek(&mut self, encoder: &mut CommandEncoder, new_pos: usize)
+        where Item: Copy
+    {
+        if self.pos + self.batch_len != new_pos {
+            self.end_batch(encoder);
+            self.pos = new_pos;
+        }
     }
 }
 

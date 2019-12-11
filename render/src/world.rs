@@ -1,21 +1,21 @@
-use std::collections::HashMap;
-
 use anyhow::Result;
 // use cgmath::{Angle, Rad};
 use cgmath::{Deg, ElementWise, EuclideanSpace, Matrix4, Point3, SquareMatrix, Vector3};
-use log::debug;
 use std::iter;
 use zerocopy::AsBytes;
 
-use simgame_core::block;
-use simgame_core::block::index_utils;
-use simgame_core::util::Bounds;
-use simgame_core::world::{UpdatedWorldState, World};
+use simgame_core::{
+    block::{self, index_utils},
+    convert_point, convert_vec,
+    util::{Bounds, DivUp},
+    world::{UpdatedWorldState, World},
+};
 
 use crate::buffer_util::{
     BufferSyncHelper, BufferSyncHelperDesc, BufferSyncedData, IntoBufferSynced,
 };
 use crate::mesh;
+use crate::stable_map::StableMap;
 
 const LOOK_AT_DIR: Vector3<f32> = Vector3::new(1., 1., -2.);
 
@@ -246,82 +246,47 @@ impl WorldRenderState {
         }
     }
 
+    fn update_view_box(&mut self, world: &World) -> Option<Bounds<usize>> {
+        let mut center = self.uniforms.camera_pos + 60. * LOOK_AT_DIR;
+        center.z = self.z_level as f32 - 0.5;
+        let size = Vector3::new(128.0f32, 128., 5.);
+
+        let float_bounds = Bounds::new(center - 0.5 * size, size);
+        let world_bounds_limit = world.blocks.bounds().limit();
+        let positive_box =
+            Bounds::from_limit(Point3::origin(), convert_point!(world_bounds_limit, f32));
+        let view_box = float_bounds.intersection(positive_box).map(|bounds| {
+            Bounds::new(
+                convert_point!(bounds.origin(), usize),
+                convert_vec!(bounds.size(), usize),
+            )
+        });
+
+        if let Some(view_box) = view_box {
+            self.uniforms.visible_box_origin = convert_point!(view_box.origin(), f32);
+            self.uniforms.visible_box_limit = convert_point!(view_box.limit(), f32);
+        }
+
+        view_box
+    }
+
     pub fn init(
         &mut self,
         device: &wgpu::Device,
         encoder: &mut wgpu::CommandEncoder,
         world: &World,
     ) {
-        let view_box = {
-            let mut center = self.uniforms.camera_pos + 60. * LOOK_AT_DIR;
-            center.z = self.z_level as f32 - 0.5;
-            let size = Vector3::new(128.0f32, 128., 5.);
+        let view_box = self.update_view_box(world);
 
-            let float_bounds = Bounds::new(center - 0.5 * size, size);
-            let positive_box =
-                Bounds::from_limit(Point3::origin(), p_to_f32(world.blocks.bounds().limit()));
-            float_bounds
-                .intersection(positive_box)
-                .map(|bounds| Bounds::new(p_from_f32(bounds.origin()), v_from_f32(bounds.size())))
-        };
-
-        if let Some(view_box) = view_box {
-            self.uniforms.visible_box_origin = p_to_f32(view_box.origin());
-            self.uniforms.visible_box_limit = p_to_f32(view_box.limit());
-        }
-
-        fn make_neighbor_indices(
-            by_chunk_loc: &HashMap<Point3<i32>, i32>,
-            chunk_loc: Point3<i32>,
-        ) -> [i32; 6] {
-            let directions = [
-                Vector3::new(-1, 0, 0),
-                Vector3::new(1, 0, 0),
-                Vector3::new(0, -1, 0),
-                Vector3::new(0, 1, 0),
-                Vector3::new(0, 0, -1),
-                Vector3::new(0, 0, 1),
-            ];
-
-            let mut result = [0i32; 6];
-            directions
-                .iter()
-                .map(|dir| {
-                    let neighbor_loc = chunk_loc + dir;
-                    by_chunk_loc.get(&neighbor_loc).unwrap_or(&-1)
-                })
-                .zip(&mut result)
-                .for_each(|(src, dst)| *dst = *src);
-
-            result
-        }
-
-        let iter_chunks = || {
-            view_box
-                .iter()
-                .flat_map(|&view_box| world.blocks.iter_chunks_in_bounds(view_box))
-        };
-
-        let indices_by_chunk_loc: HashMap<Point3<i32>, i32> = iter_chunks()
-            .enumerate()
-            .map(|(index, (chunk_loc, _))| (p_to_i32(chunk_loc), index as i32))
-            .collect();
-
-        let chunks = iter_chunks().map(|(chunk_loc, chunk)| {
-            let offset =
-                p_to_f32(chunk_loc.mul_element_wise(Point3::origin() + index_utils::chunk_size()));
-
-            let neighbor_indices =
-                make_neighbor_indices(&indices_by_chunk_loc, p_to_i32(chunk_loc));
-
-            let meta = ChunkMeta {
-                offset,
-                _padding0: [0f32],
-                neighbor_indices,
-                _padding1: [0, 0],
-            };
-
-            (meta, chunk)
+        let chunks = view_box.iter().flat_map(|view_box| {
+            let bounds = Bounds::new(
+                convert_point!(view_box.origin(), usize),
+                convert_vec!(view_box.size(), usize),
+            );
+            world
+                .blocks
+                .iter_chunks_in_bounds(bounds)
+                .map(|(p, chunk)| (convert_point!(p, i32), chunk))
         });
 
         self.chunk_batch.update(device, encoder, chunks);
@@ -341,7 +306,7 @@ impl WorldRenderState {
 }
 
 struct ChunkBatchRenderState {
-    count_chunks: usize,
+    active_chunks: StableMap<Point3<i32>, ()>,
     chunk_metadata_helper: BufferSyncHelper<u8>,
     chunk_metadata_buf: wgpu::Buffer,
     block_type_helper: BufferSyncHelper<u16>,
@@ -369,11 +334,26 @@ impl ChunkBatchRenderState {
         Self::max_batch_chunks() * index_utils::chunk_size_total()
     }
 
+    const fn metadata_size() -> usize {
+        4 * 12
+    }
+
     fn count_chunks(&self) -> usize {
-        self.count_chunks
+        self.active_chunks.len()
     }
 
     fn new(device: &wgpu::Device) -> Self {
+        let visible_size: Vector3<i32> = Vector3::new(128, 128, 5);
+        let visible_chunk_size = visible_size
+            .div_up(&convert_vec!(index_utils::chunk_size(), i32))
+            + Vector3::new(1, 1, 1);
+        let max_visible_chunks =
+            visible_chunk_size.x * visible_chunk_size.y * visible_chunk_size.z;
+
+        assert!(max_visible_chunks <= Self::max_batch_chunks() as i32);
+
+        let active_chunks = StableMap::new(max_visible_chunks as usize);
+
         let block_type_helper = BufferSyncHelper::new(BufferSyncHelperDesc {
             buffer_len: Self::max_batch_blocks(),
             max_chunk_len: index_utils::chunk_size_total(),
@@ -381,13 +361,13 @@ impl ChunkBatchRenderState {
         });
 
         let chunk_metadata_helper = BufferSyncHelper::new(BufferSyncHelperDesc {
-            buffer_len: 4 * 12 * Self::max_batch_chunks(),
+            buffer_len: Self::metadata_size() * Self::max_batch_chunks(),
             max_chunk_len: 1024,
             gpu_usage: wgpu::BufferUsage::STORAGE | wgpu::BufferUsage::STORAGE_READ,
         });
 
         ChunkBatchRenderState {
-            count_chunks: 0,
+            active_chunks,
             block_type_buf: block_type_helper.make_buffer(device),
             block_type_helper,
             chunk_metadata_buf: chunk_metadata_helper.make_buffer(device),
@@ -395,14 +375,26 @@ impl ChunkBatchRenderState {
         }
     }
 
-    #[allow(clippy::cast_lossless)]
-    fn update<'a, Chunks>(
+    fn clear_active_chunks(&mut self) {
+        self.active_chunks.clear();
+    }
+
+    fn delete_chunks<Deleted>(&mut self, deleted: Deleted)
+    where
+        Deleted: IntoIterator<Item = Point3<i32>>,
+    {
+        for p in deleted.into_iter() {
+            self.active_chunks.remove(&p);
+        }
+    }
+
+    fn update<'a, Deleted, Chunks>(
         &mut self,
         device: &wgpu::Device,
         encoder: &mut wgpu::CommandEncoder,
-        chunks: Chunks,
+        updated_chunks: Chunks,
     ) where
-        Chunks: IntoIterator<Item = (ChunkMeta, &'a block::Chunk)>,
+        Chunks: IntoIterator<Item = (Point3<i32>, &'a block::Chunk)>,
     {
         let mut fill_block_types =
             self.block_type_helper
@@ -412,14 +404,15 @@ impl ChunkBatchRenderState {
             self.chunk_metadata_helper
                 .begin_fill_buffer(device, &self.chunk_metadata_buf, 0);
 
-        self.count_chunks = 0;
-        for (meta, chunk) in chunks {
-            debug!("Filling chunk idx={} meta={:?}", self.count_chunks, meta);
-            self.count_chunks += 1;
-            assert!(self.count_chunks <= Self::max_batch_chunks());
+        for (p, chunk) in updated_chunks.into_iter() {
+            let (index, _) = self.active_chunks.update(p, ());
+
+            fill_block_types.seek(encoder, index * index_utils::chunk_size_total());
+            fill_chunk_metadatas.seek(encoder, index * Self::metadata_size());
+
             fill_block_types.advance(encoder, block::blocks_to_u16(&chunk.blocks));
 
-            // Offset vector
+            let meta = Self::make_chunk_meta(&self.active_chunks, p);
             let offset_vec = meta.offset.as_ref() as &[f32; 3];
             fill_chunk_metadatas.advance(encoder, offset_vec.as_bytes());
             fill_chunk_metadatas.advance(encoder, meta._padding0.as_bytes());
@@ -439,6 +432,46 @@ impl ChunkBatchRenderState {
     fn chunk_metadata_binding(&self, index: u32) -> wgpu::Binding {
         self.chunk_metadata_helper
             .as_binding(index, &self.chunk_metadata_buf, 0)
+    }
+
+    fn make_chunk_meta(active_chunks: &StableMap<Point3<i32>, ()>, p: Point3<i32>) -> ChunkMeta {
+        fn make_neighbor_indices(
+            map: &StableMap<Point3<i32>, ()>,
+            chunk_loc: Point3<i32>,
+        ) -> [i32; 6] {
+            let directions = [
+                Vector3::new(-1, 0, 0),
+                Vector3::new(1, 0, 0),
+                Vector3::new(0, -1, 0),
+                Vector3::new(0, 1, 0),
+                Vector3::new(0, 0, -1),
+                Vector3::new(0, 0, 1),
+            ];
+
+            let mut result = [0i32; 6];
+            directions
+                .iter()
+                .map(|dir| {
+                    let neighbor_loc = chunk_loc + dir;
+                    map.get(&neighbor_loc).map_or(-1, |(index, _)| index as i32)
+                })
+                .zip(&mut result)
+                .for_each(|(src, dst)| *dst = src);
+
+            result
+        }
+
+        let offset = convert_point!(p, f32)
+            .mul_element_wise(Point3::origin() + convert_vec!(index_utils::chunk_size(), f32));
+
+        let neighbor_indices = make_neighbor_indices(&active_chunks, p);
+
+        ChunkMeta {
+            offset,
+            _padding0: [0f32],
+            neighbor_indices,
+            _padding1: [0, 0],
+        }
     }
 }
 
@@ -480,37 +513,5 @@ impl IntoBufferSynced for Uniforms {
             max_chunk_len: 128,
             gpu_usage: wgpu::BufferUsage::UNIFORM,
         }
-    }
-}
-
-fn p_to_i32(p: Point3<usize>) -> Point3<i32> {
-    Point3 {
-        x: p.x as i32,
-        y: p.y as i32,
-        z: p.z as i32,
-    }
-}
-
-fn p_to_f32(p: Point3<usize>) -> Point3<f32> {
-    Point3 {
-        x: p.x as f32,
-        y: p.y as f32,
-        z: p.z as f32,
-    }
-}
-
-fn p_from_f32(p: Point3<f32>) -> Point3<usize> {
-    Point3 {
-        x: f32::max(0.0, p.x) as usize,
-        y: f32::max(0.0, p.y) as usize,
-        z: f32::max(0.0, p.z) as usize,
-    }
-}
-
-fn v_from_f32(v: Vector3<f32>) -> Vector3<usize> {
-    Vector3 {
-        x: f32::max(0.0, v.x) as usize,
-        y: f32::max(0.0, v.y) as usize,
-        z: f32::max(0.0, v.z) as usize,
     }
 }

@@ -66,9 +66,10 @@ where
         DiffHandle { parent: self }
     }
 
-    /// Inserts or updates a value in the map. Returns the old value, if one existed.
+    /// Inserts or updates a value in the map. Returns the index assigned along with the old value,
+    /// if one existed.
     #[inline]
-    pub fn update(&mut self, key: K, value: V) -> Option<V>
+    pub fn update(&mut self, key: K, value: V) -> (usize, Option<V>)
     where
         K: Clone,
     {
@@ -91,7 +92,7 @@ where
         };
 
         self.current_diff.changed_indices[index] = true;
-        old
+        (index, old)
     }
 
     /// Removes a value in the map. Returns it, if it existed.
@@ -116,6 +117,37 @@ where
         self.entries[index]
             .as_ref()
             .map(|info| (&info.key, &info.value))
+    }
+
+    /// Returns the index and value of the given key, if it exists.
+    pub fn get(&self, key: &K) -> Option<(usize, &V)> {
+        self.index_map
+            .get(key)
+            .and_then(move |&index| self.entries[index].as_ref().map(|info| (index, &info.value)))
+    }
+
+    pub fn clear(&mut self) {
+        self.free_list.clear();
+
+        for (index, (entry, changed)) in self
+            .entries
+            .iter_mut()
+            .zip(self.current_diff.changed_indices.iter_mut())
+            .enumerate()
+        {
+            if entry.is_some() {
+                *entry = None;
+                *changed = true;
+            }
+            
+            self.free_list.push_back(index);
+        }
+
+        self.index_map.clear();
+    }
+
+    pub fn len(&self) -> usize {
+        self.index_map.len()
     }
 }
 
