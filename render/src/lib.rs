@@ -41,7 +41,7 @@ impl RenderState {
         let surface = wgpu::Surface::create(init.window);
 
         let adapter = wgpu::Adapter::request(&wgpu::RequestAdapterOptions {
-            power_preference: wgpu::PowerPreference::Default,
+            power_preference: wgpu::PowerPreference::HighPerformance,
             backends: wgpu::BackendBit::PRIMARY,
         })
         .ok_or_else(|| anyhow!("Failed to request wgpu::Adaptor"))?;
