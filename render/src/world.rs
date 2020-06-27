@@ -4,6 +4,8 @@ use cgmath::{Deg, ElementWise, EuclideanSpace, Matrix4, Point3, SquareMatrix, Ve
 use std::iter;
 use zerocopy::AsBytes;
 
+const VISIBLE_SIZE: Vector3<i32> = Vector3::new(512, 512, 5);
+
 use simgame_core::{
     block::{self, index_utils},
     convert_point, convert_vec,
@@ -15,9 +17,8 @@ use crate::buffer_util::{
     BufferSyncHelper, BufferSyncHelperDesc, BufferSyncedData, IntoBufferSynced,
 };
 use crate::mesh;
-use crate::stable_map::StableMap;
 
-const LOOK_AT_DIR: Vector3<f32> = Vector3::new(1., 1., -2.);
+const LOOK_AT_DIR: Vector3<f32> = Vector3::new(1., 1., -1.5);
 
 pub struct ViewParams {
     pub camera_pos: Point3<f32>,
@@ -246,28 +247,21 @@ impl WorldRenderState {
         }
     }
 
-    fn update_view_box(&mut self, world: &World) -> Option<Bounds<usize>> {
+    /// Calculates the box containing chunks that will be rendered according to current view.
+    fn calculate_view_box(&self, world: &World) -> Option<Bounds<usize>> {
         let mut center = self.uniforms.camera_pos + 60. * LOOK_AT_DIR;
         center.z = self.z_level as f32 - 0.5;
-        let size = Vector3::new(128.0f32, 128., 5.);
-
+        let size = convert_vec!(VISIBLE_SIZE, f32);
         let float_bounds = Bounds::new(center - 0.5 * size, size);
         let world_bounds_limit = world.blocks.bounds().limit();
         let positive_box =
             Bounds::from_limit(Point3::origin(), convert_point!(world_bounds_limit, f32));
-        let view_box = float_bounds.intersection(positive_box).map(|bounds| {
+        float_bounds.intersection(positive_box).map(|bounds| {
             Bounds::new(
                 convert_point!(bounds.origin(), usize),
                 convert_vec!(bounds.size(), usize),
             )
-        });
-
-        if let Some(view_box) = view_box {
-            self.uniforms.visible_box_origin = convert_point!(view_box.origin(), f32);
-            self.uniforms.visible_box_limit = convert_point!(view_box.limit(), f32);
-        }
-
-        view_box
+        })
     }
 
     pub fn init(
@@ -276,20 +270,13 @@ impl WorldRenderState {
         encoder: &mut wgpu::CommandEncoder,
         world: &World,
     ) {
-        let view_box = self.update_view_box(world);
+        let active_view_box = self.calculate_view_box(world);
+        if let Some(active_view_box) = active_view_box {
+            self.uniforms.update_view_box(active_view_box);
+        }
 
-        let chunks = view_box.iter().flat_map(|view_box| {
-            let bounds = Bounds::new(
-                convert_point!(view_box.origin(), usize),
-                convert_vec!(view_box.size(), usize),
-            );
-            world
-                .blocks
-                .iter_chunks_in_bounds(bounds)
-                .map(|(p, chunk)| (convert_point!(p, i32), chunk))
-        });
-
-        self.chunk_batch.update(device, encoder, chunks);
+        self.chunk_batch.update_view_box(active_view_box, world);
+        self.chunk_batch.update_buffers(device, encoder, world);
     }
 
     pub fn update(
@@ -297,20 +284,28 @@ impl WorldRenderState {
         device: &wgpu::Device,
         encoder: &mut wgpu::CommandEncoder,
         world: &World,
-        _diff: &UpdatedWorldState,
+        diff: &UpdatedWorldState,
     ) {
-        // TODO: make use of diff instead of doing the whole init again
-        self.init(device, encoder, world);
-        // self.rotation = self.rotation * Matrix4::<f32>::from_angle_z(Rad::full_turn() / 1000.);
+        let active_view_box = self.calculate_view_box(world);
+        if let Some(active_view_box) = active_view_box {
+            self.uniforms.update_view_box(active_view_box);
+        }
+
+        self.chunk_batch.update_view_box(active_view_box, world);
+        self.chunk_batch.apply_chunk_diff(world, diff);
+        self.chunk_batch.update_buffers(device, encoder, world);
     }
 }
 
+type ActiveChunks = crate::stable_map::StableMap<Point3<i32>, ()>;
+
 struct ChunkBatchRenderState {
-    active_chunks: StableMap<Point3<i32>, ()>,
+    active_chunks: ActiveChunks,
     chunk_metadata_helper: BufferSyncHelper<u8>,
     chunk_metadata_buf: wgpu::Buffer,
     block_type_helper: BufferSyncHelper<u16>,
     block_type_buf: wgpu::Buffer,
+    active_view_box: Option<Bounds<usize>>,
 }
 
 #[repr(C)]
@@ -335,16 +330,15 @@ impl ChunkBatchRenderState {
     }
 
     const fn metadata_size() -> usize {
-        4 * 12
+        std::mem::size_of::<ChunkMeta>()
     }
 
     fn count_chunks(&self) -> usize {
-        self.active_chunks.len()
+        self.active_chunks.capacity()
     }
 
     fn new(device: &wgpu::Device) -> Self {
-        let visible_size: Vector3<i32> = Vector3::new(128, 128, 5);
-        let visible_chunk_size = visible_size
+        let visible_chunk_size = VISIBLE_SIZE
             .div_up(&convert_vec!(index_utils::chunk_size(), i32))
             + Vector3::new(1, 1, 1);
         let max_visible_chunks =
@@ -352,7 +346,7 @@ impl ChunkBatchRenderState {
 
         assert!(max_visible_chunks <= Self::max_batch_chunks() as i32);
 
-        let active_chunks = StableMap::new(max_visible_chunks as usize);
+        let active_chunks = ActiveChunks::new(max_visible_chunks as usize);
 
         let block_type_helper = BufferSyncHelper::new(BufferSyncHelperDesc {
             buffer_len: Self::max_batch_blocks(),
@@ -372,30 +366,87 @@ impl ChunkBatchRenderState {
             block_type_helper,
             chunk_metadata_buf: chunk_metadata_helper.make_buffer(device),
             chunk_metadata_helper,
+            active_view_box: None,
         }
     }
 
-    fn clear_active_chunks(&mut self) {
-        self.active_chunks.clear();
-    }
-
-    fn delete_chunks<Deleted>(&mut self, deleted: Deleted)
-    where
-        Deleted: IntoIterator<Item = Point3<i32>>,
-    {
-        for p in deleted.into_iter() {
-            self.active_chunks.remove(&p);
+    fn update_box_chunks(&mut self, view_box: Bounds<usize>, world: &World) {
+        let bounds = Bounds::new(
+            convert_point!(view_box.origin(), usize),
+            convert_vec!(view_box.size(), usize),
+        );
+        for (p, _chunk) in world
+            .blocks
+            .iter_chunks_in_bounds(bounds)
+            .map(|(p, chunk)| (convert_point!(p, i32), chunk))
+        {
+            self.active_chunks.update(p, ());
         }
     }
 
-    fn update<'a, Deleted, Chunks>(
+    pub fn update_view_box(&mut self, active_view_box: Option<Bounds<usize>>, world: &World) {
+        if let Some(active_view_box) = active_view_box {
+            let new_chunk_box = active_view_box.quantize_down(index_utils::chunk_size());
+            let box_size =
+                new_chunk_box.size().x * new_chunk_box.size().y * new_chunk_box.size().z;
+            assert!(
+                box_size <= self.active_chunks.capacity(),
+                "{} <= {}",
+                box_size,
+                self.active_chunks.capacity()
+            );
+
+            if let Some(old_view_box) = self.active_view_box {
+                let old_chunk_box = old_view_box.quantize_down(index_utils::chunk_size());
+                if new_chunk_box != old_chunk_box {
+                    // 1. delete chunks that have left the view
+                    for pos in old_chunk_box.iter_diff(new_chunk_box) {
+                        self.active_chunks.remove(&convert_point!(pos, i32));
+                    }
+
+                    // 2. insert chunks that are newly in the view
+                    for pos in new_chunk_box.iter_diff(old_chunk_box) {
+                        let pos_i32 = convert_point!(pos, i32);
+                        if let Some(_chunk) = world.blocks.chunks().get(pos) {
+                            self.active_chunks.update(pos_i32, ());
+                        }
+                    }
+                }
+            } else {
+                // no chunks in previous view; insert all
+                self.update_box_chunks(active_view_box, world);
+            }
+        } else {
+            // no chunks in view; clear all
+            self.active_chunks.clear();
+        }
+        self.active_view_box = active_view_box;
+    }
+
+    pub fn apply_chunk_diff(&mut self, world: &World, diff: &UpdatedWorldState) {
+        let active_view_box = match self.active_view_box {
+            Some(x) => x,
+            None => return,
+        };
+
+        for &pos in &diff.modified_chunks {
+            if active_view_box.contains_point(pos) {
+                let pos_i32 = convert_point!(pos, i32);
+                if let Some(_chunk) = world.blocks.chunks().get(pos) {
+                    self.active_chunks.update(pos_i32, ());
+                } else {
+                    self.active_chunks.remove(&pos_i32);
+                }
+            }
+        }
+    }
+
+    fn update_buffers(
         &mut self,
         device: &wgpu::Device,
         encoder: &mut wgpu::CommandEncoder,
-        updated_chunks: Chunks,
-    ) where
-        Chunks: IntoIterator<Item = (Point3<i32>, &'a block::Chunk)>,
-    {
+        world: &World,
+    ) {
         let mut fill_block_types =
             self.block_type_helper
                 .begin_fill_buffer(device, &self.block_type_buf, 0);
@@ -404,15 +455,29 @@ impl ChunkBatchRenderState {
             self.chunk_metadata_helper
                 .begin_fill_buffer(device, &self.chunk_metadata_buf, 0);
 
-        for (p, chunk) in updated_chunks.into_iter() {
-            let (index, _) = self.active_chunks.update(p, ());
+        let chunks_diff = self.active_chunks.take_diff();
+
+        for (index, opt_point) in chunks_diff.changed_entries().into_iter() {
+            let active_chunks = chunks_diff.inner();
+
+            let zeroes: [u16; index_utils::chunk_size_total()];
+            let chunk_data: &[u16];
+            let meta: ChunkMeta;
+
+            if let Some((&p, _)) = opt_point {
+                let chunk = world.blocks.chunks().get(convert_point!(p, usize)).unwrap();
+                chunk_data = block::blocks_to_u16(&chunk.blocks);
+                meta = Self::make_chunk_meta(active_chunks, p);
+            } else {
+                zeroes = [0; index_utils::chunk_size_total()];
+                chunk_data = &zeroes;
+                meta = ChunkMeta::empty();
+            }
 
             fill_block_types.seek(encoder, index * index_utils::chunk_size_total());
+            fill_block_types.advance(encoder, chunk_data);
+
             fill_chunk_metadatas.seek(encoder, index * Self::metadata_size());
-
-            fill_block_types.advance(encoder, block::blocks_to_u16(&chunk.blocks));
-
-            let meta = Self::make_chunk_meta(&self.active_chunks, p);
             let offset_vec = meta.offset.as_ref() as &[f32; 3];
             fill_chunk_metadatas.advance(encoder, offset_vec.as_bytes());
             fill_chunk_metadatas.advance(encoder, meta._padding0.as_bytes());
@@ -434,11 +499,8 @@ impl ChunkBatchRenderState {
             .as_binding(index, &self.chunk_metadata_buf, 0)
     }
 
-    fn make_chunk_meta(active_chunks: &StableMap<Point3<i32>, ()>, p: Point3<i32>) -> ChunkMeta {
-        fn make_neighbor_indices(
-            map: &StableMap<Point3<i32>, ()>,
-            chunk_loc: Point3<i32>,
-        ) -> [i32; 6] {
+    fn make_chunk_meta(active_chunks: &ActiveChunks, p: Point3<i32>) -> ChunkMeta {
+        fn make_neighbor_indices(map: &ActiveChunks, chunk_loc: Point3<i32>) -> [i32; 6] {
             let directions = [
                 Vector3::new(-1, 0, 0),
                 Vector3::new(1, 0, 0),
@@ -473,6 +535,28 @@ impl ChunkBatchRenderState {
             _padding1: [0, 0],
         }
     }
+
+    #[allow(dead_code)]
+    fn debug_get_active_key_ixes(&self) -> Vec<(usize, Point3<i32>)> {
+        let mut active_keys: Vec<_> = self
+            .active_chunks
+            .keys_ixes()
+            .map(|(&p, i)| (i, p))
+            .collect();
+        active_keys.sort_by_key(|&(i, p)| (i, p.x, p.y, p.z));
+        active_keys
+    }
+}
+
+impl ChunkMeta {
+    fn empty() -> Self {
+        Self {
+            offset: Point3::new(0f32, 0f32, 0f32),
+            _padding0: [0f32],
+            neighbor_indices: [-1, -1, -1, -1, -1, -1],
+            _padding1: [0, 0],
+        }
+    }
 }
 
 #[rustfmt::skip]
@@ -501,6 +585,11 @@ impl Uniforms {
             .chain(iter::once(visible_box_origin as &[f32]))
             .chain(iter::once(&[0f32] as &[f32]))
             .chain(iter::once(visible_box_limit as &[f32]))
+    }
+
+    fn update_view_box(&mut self, view_box: Bounds<usize>) {
+        self.visible_box_origin = convert_point!(view_box.origin(), f32);
+        self.visible_box_limit = convert_point!(view_box.limit(), f32);
     }
 }
 

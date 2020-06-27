@@ -157,6 +157,10 @@ impl WorldBlockData {
             .expect("requested chunk which is not present")
     }
 
+    pub fn chunks(&self) -> &Octree<Chunk> {
+        &self.chunks
+    }
+
     #[inline]
     pub fn get_block(&self, p: Point3<usize>) -> Block {
         let (chunk_pos, inner_pos) = index_utils::to_chunk_pos(p);

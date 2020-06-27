@@ -3,7 +3,8 @@ use std::hash::Hash;
 
 /// A fixed size key-value map that implements stable indices and supports a diff operation which
 /// iterates over the keys that have changed since the last diff. Guarantees no allocation for any
-/// operation except `new` (as long as K::clone, K::eq and K::hash do not allocate).
+/// operation except construction of new maps (as long as K::clone, K::eq and K::hash do not
+/// allocate).
 #[derive(Debug, Clone)]
 pub struct StableMap<K, V>
 where
@@ -81,13 +82,16 @@ where
                 (index, Some(old))
             }
             hash_map::Entry::Vacant(vacant) => {
-                let index = self
-                    .free_list
-                    .pop_front()
-                    .expect("Too many keys in stable map at one time.");
-                self.entries[index] = Some(EntryInfo { index, key, value });
-                vacant.insert(index);
-                (index, None)
+                if let Some(index) = self.free_list.pop_front() {
+                    self.entries[index] = Some(EntryInfo { index, key, value });
+                    vacant.insert(index);
+                    (index, None)
+                } else {
+                    panic!(
+                        "Too many keys in stable map at one time: max is {}",
+                        self.capacity()
+                    );
+                }
             }
         };
 
@@ -101,8 +105,11 @@ where
         self.index_map.remove(key).map(|index| {
             self.free_list.push_back(index);
             self.current_diff.changed_indices[index] = true;
-            let old = self.entries[index].take().unwrap();
-            old.value
+            if let Some(old) = self.entries[index].take() {
+                old.value
+            } else {
+                panic!("entries value at index {} was None", index);
+            }
         })
     }
 
@@ -120,10 +127,13 @@ where
     }
 
     /// Returns the index and value of the given key, if it exists.
+    #[inline]
     pub fn get(&self, key: &K) -> Option<(usize, &V)> {
-        self.index_map
-            .get(key)
-            .and_then(move |&index| self.entries[index].as_ref().map(|info| (index, &info.value)))
+        self.index_map.get(key).and_then(move |&index| {
+            self.entries[index]
+                .as_ref()
+                .map(|info| (index, &info.value))
+        })
     }
 
     pub fn clear(&mut self) {
@@ -139,15 +149,74 @@ where
                 *entry = None;
                 *changed = true;
             }
-            
+
             self.free_list.push_back(index);
         }
 
         self.index_map.clear();
     }
 
+    #[inline]
     pub fn len(&self) -> usize {
         self.index_map.len()
+    }
+
+    #[inline]
+    pub fn keys(&self) -> impl Iterator<Item=&K> {
+        self.index_map.keys()
+    }
+
+    #[inline]
+    pub fn keys_ixes(&self) -> impl Iterator<Item=(&K, usize)> {
+        self.index_map.iter().map(|(k, &i)| (k, i))
+    }
+
+    /// Verify that
+    /// 1. every entry in `index_map` corresponds with a `Some` entry in `entries`
+    /// 2. every `None` entry in `entries` corresponds with a missing key in `index_map` and an
+    ///    entry in `free_list`
+    /// 3. Let I be length of `index_map`. Let `E` be length of part of `entries` with is `Some` and
+    ///    `M` be length of part of `entries` which is `None`. Let `F` be length of `free_list. Let
+    ///    `C` be value of `capacity`.
+    ///    Then:
+    ///    - I = E
+    ///    - E + M = C
+    ///    - F = M
+    pub fn check_invariant(&self) {
+        // 1
+        for (k, &i) in self.index_map.iter() {
+            assert!(self.entries[i].is_some());
+            assert!(&self.entries[i].as_ref().unwrap().key == k);
+        }
+
+        // 2
+        for (i, entry) in self.entries.iter().enumerate() {
+            match entry {
+                None => {
+                    for (_, &j) in self.index_map.iter() {
+                        assert!(i != j);
+                    }
+
+                    let mut has_free = false;
+                    for &j in &self.free_list {
+                        if i == j {
+                            has_free = true;
+                        }
+                    }
+                    assert!(has_free);
+                }
+                Some(entry) => {
+                    assert!(self.index_map[&entry.key] == i);
+                }
+            }
+        }
+
+        // 3
+        let count_none = self.entries.iter().filter(|x| x.is_none()).count();
+        let count_some = self.entries.iter().filter(|x| x.is_some()).count();
+        assert!(self.index_map.len() == count_some);
+        assert!(self.free_list.len() == count_none);
+        assert!(count_none + count_some == self.capacity);
     }
 }
 
@@ -187,6 +256,7 @@ impl<'a, K, V> Drop for DiffHandle<'a, K, V>
 where
     K: Eq + Hash,
 {
+    #[inline]
     fn drop(&mut self) {
         for changed in self
             .parent

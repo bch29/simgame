@@ -1,5 +1,9 @@
+use std::time::{Duration, Instant};
+use std::collections::VecDeque;
+
 use anyhow::Result;
 use cgmath::{InnerSpace, Point3, Vector3, Zero};
+use log::info;
 use rand::{self, Rng};
 use winit::{
     event,
@@ -71,6 +75,11 @@ pub fn test_render(mut world: World, vert_shader: &[u8], frag_shader: &[u8]) -> 
     };
 
     let mut render_state = RenderState::new(render_init)?;
+    let mut view_state = world::ViewParams {
+        camera_pos: Point3::new(-20f32, -20f32, 20f32),
+        z_level: 1,
+    };
+    render_state.set_world_view(&view_state);
     render_state.init(&world);
 
     use event::{Event, VirtualKeyCode, WindowEvent};
@@ -90,9 +99,10 @@ pub fn test_render(mut world: World, vert_shader: &[u8], frag_shader: &[u8]) -> 
 
     let mut update_world = {
         let mut rng = rand::thread_rng();
-        let bounds = Bounds::new(Point3::new(32, 32, 0), Vector3::new(16, 16, 128));
+        let bounds = Bounds::new(Point3::new(32, 32, 0), Vector3::new(16, 16, 1024));
 
         move |world: &mut World| {
+            let mut diff = UpdatedWorldState::empty();
             for _ in 0..1024 {
                 let point = bounds.origin()
                     + Vector3 {
@@ -101,14 +111,14 @@ pub fn test_render(mut world: World, vert_shader: &[u8], frag_shader: &[u8]) -> 
                         z: rng.gen::<usize>() % bounds.size().z,
                     };
                 world.blocks.set_block(point, Block::from_u16(1));
+                let (chunk_pos, _) = simgame_core::block::index_utils::to_chunk_pos(point);
+                diff.modified_chunks.insert(chunk_pos);
             }
+            diff
         }
     };
 
-    let mut view_state = world::ViewParams {
-        camera_pos: Point3::new(-20f32, -20f32, 20f32),
-        z_level: 1,
-    };
+    let mut fps_counter = FpsCounter::new(60, Instant::now());
 
     event_loop.run(move |event, _, control_flow| {
         *control_flow = if cfg!(feature = "metal-auto-capture") {
@@ -152,8 +162,8 @@ pub fn test_render(mut world: World, vert_shader: &[u8], frag_shader: &[u8]) -> 
                 _ => {}
             },
             Event::EventsCleared => {
-                update_world(&mut world);
-                render_state.update(&world, &UpdatedWorldState::empty());
+                let diff = update_world(&mut world);
+                render_state.update(&world, &diff);
                 render_state.render_frame();
             }
             _ => (),
@@ -165,5 +175,44 @@ pub fn test_render(mut world: World, vert_shader: &[u8], frag_shader: &[u8]) -> 
 
         view_state.camera_pos += control_state.camera_delta();
         render_state.set_world_view(&view_state);
+
+        fps_counter.sample(Instant::now());
+        info!("Frame rate: {}/{}", fps_counter.min(), fps_counter.mean());
     });
+}
+
+struct FpsCounter {
+    window_len: usize,
+    samples: VecDeque<Duration>,
+    prev_sample_time: Instant
+}
+
+impl FpsCounter {
+    pub fn new(window_len: usize, now: Instant) -> Self {
+        Self {
+            window_len,
+            samples: VecDeque::with_capacity(window_len),
+            prev_sample_time: now
+        }
+    }
+
+    pub fn sample(&mut self, now: Instant) {
+        let elapsed = now.duration_since(self.prev_sample_time);
+        while self.samples.len() >= self.window_len {
+            self.samples.pop_front();
+        }
+        self.samples.push_back(elapsed);
+        self.prev_sample_time = now;
+    }
+
+    pub fn mean(&self) -> f64 {
+        let elapsed_total: f64 = self.samples.iter().map(|d| d.as_secs_f64()).sum();
+        let elapsed_mean = elapsed_total / self.samples.len() as f64;
+        1. / elapsed_mean
+    }
+
+    pub fn min(&self) -> f64 {
+        let elapsed_max: f64 = self.samples.iter().max().unwrap().as_secs_f64();
+        1. / elapsed_max
+    }
 }
