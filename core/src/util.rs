@@ -575,5 +575,9 @@ mod tests {
         check_diff(
             Bounds::new(Point3::new(124, 340, 11), size),
             Bounds::new(Point3::new(70, 365, 6), size));
+
+        check_diff(
+            Bounds::new(Point3::new(0, 0, 0), Vector3::new(8, 8, 5)),
+            Bounds::new(Point3::new(0, 0, 0), Vector3::new(8, 8, 4)));
     }
 }

@@ -1,29 +1,27 @@
-use std::time::{Duration, Instant};
 use std::collections::VecDeque;
+use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use cgmath::{InnerSpace, Point3, Vector3, Zero};
 use log::info;
-use rand::{self, Rng};
 use winit::{
     event,
     event_loop::{ControlFlow, EventLoop},
 };
 
-use simgame_core::block::Block;
-use simgame_core::util::Bounds;
 use simgame_core::world::{UpdatedWorldState, World};
 
 use crate::world;
 use crate::{RenderInit, RenderState, WorldRenderInit};
 
+const GAME_STEP_MILLIS: u64 = 10;
+
 pub fn build_window(
     event_loop: &winit::event_loop::EventLoop<()>,
 ) -> Result<winit::window::Window> {
-    // let monitor = event_loop.primary_monitor();
-    let builder = winit::window::WindowBuilder::new();
-    // .with_fullscreen(Some(winit::window::Fullscreen::Borderless(monitor)))
-    // .with_decorations(true);
+    let builder = winit::window::WindowBuilder::new()
+        .with_inner_size(winit::dpi::LogicalSize { width: 1920.0, height: 1080.0 })
+        .with_decorations(true);
     Ok(builder.build(event_loop)?)
 }
 
@@ -31,9 +29,22 @@ struct ControlState {
     forward: i32,
     right: i32,
     up: i32,
+
+    z_level_delta: i32,
+    visible_height_delta: i32,
 }
 
 impl ControlState {
+    fn new() -> Self {
+        ControlState {
+            forward: 0,
+            right: 0,
+            up: 0,
+            z_level_delta: 0,
+            visible_height_delta: 0,
+        }
+    }
+
     fn camera_delta(&self) -> Vector3<f32> {
         let speed = 0.4;
         let forward_step = Vector3::new(1., 1., 0.).normalize();
@@ -50,6 +61,49 @@ impl ControlState {
             dir.normalize() * speed
         } else {
             Vector3::zero()
+        }
+    }
+
+    fn update_from_keyboard_event(&mut self, event: event::KeyboardInput) {
+        use event::VirtualKeyCode;
+        match event {
+            event::KeyboardInput {
+                virtual_keycode: Some(key),
+                state,
+                ..
+            } => match key {
+                VirtualKeyCode::W => self.forward = self.state_to_mag(state),
+                VirtualKeyCode::S => self.forward = -self.state_to_mag(state),
+                VirtualKeyCode::D => self.right = self.state_to_mag(state),
+                VirtualKeyCode::A => self.right = -self.state_to_mag(state),
+                VirtualKeyCode::K => self.up = self.state_to_mag(state),
+                VirtualKeyCode::J => self.up = -self.state_to_mag(state),
+                VirtualKeyCode::I => self.z_level_delta = self.state_to_mag(state),
+                VirtualKeyCode::U => self.z_level_delta = -self.state_to_mag(state),
+                VirtualKeyCode::M => self.visible_height_delta = self.state_to_mag(state),
+                VirtualKeyCode::N => self.visible_height_delta = -self.state_to_mag(state),
+                _ => {}
+            },
+            _ => {}
+        }
+    }
+
+    fn state_to_mag(&self, state: event::ElementState) -> i32 {
+        match state {
+            event::ElementState::Pressed => 1,
+            event::ElementState::Released => 0,
+        }
+    }
+
+    fn update_view(&mut self, view_state: &mut world::ViewParams) {
+        view_state.camera_pos += self.camera_delta();
+        view_state.z_level += self.z_level_delta;
+        self.z_level_delta = 0;
+        view_state.visible_size.z += self.visible_height_delta;
+        self.visible_height_delta = 0;
+
+        if view_state.z_level < 0 {
+            view_state.z_level = 0;
         }
     }
 }
@@ -76,49 +130,21 @@ pub fn test_render(mut world: World, vert_shader: &[u8], frag_shader: &[u8]) -> 
 
     let mut render_state = RenderState::new(render_init)?;
     let mut view_state = world::ViewParams {
-        camera_pos: Point3::new(-20f32, -20f32, 20f32),
+        camera_pos: Point3::new(0f32, 0f32, 20f32),
         z_level: 1,
+        visible_size: Vector3::new(128, 128, 32),
     };
-    render_state.set_world_view(&view_state);
+    render_state.set_world_view(view_state.clone());
     render_state.init(&world);
 
     use event::{Event, VirtualKeyCode, WindowEvent};
 
-    let mut control_state = ControlState {
-        forward: 0,
-        right: 0,
-        up: 0,
-    };
+    let mut control_state = ControlState::new();
 
-    fn state_to_mag(state: event::ElementState) -> i32 {
-        match state {
-            event::ElementState::Pressed => 1,
-            event::ElementState::Released => 0,
-        }
-    }
+    let mut time_tracker =
+        TimeTracker::new(60, Duration::from_millis(GAME_STEP_MILLIS), Instant::now());
 
-    let mut update_world = {
-        let mut rng = rand::thread_rng();
-        let bounds = Bounds::new(Point3::new(32, 32, 0), Vector3::new(16, 16, 1024));
-
-        move |world: &mut World| {
-            let mut diff = UpdatedWorldState::empty();
-            for _ in 0..1024 {
-                let point = bounds.origin()
-                    + Vector3 {
-                        x: rng.gen::<usize>() % bounds.size().x,
-                        y: rng.gen::<usize>() % bounds.size().y,
-                        z: rng.gen::<usize>() % bounds.size().z,
-                    };
-                world.blocks.set_block(point, Block::from_u16(1));
-                let (chunk_pos, _) = simgame_core::block::index_utils::to_chunk_pos(point);
-                diff.modified_chunks.insert(chunk_pos);
-            }
-            diff
-        }
-    };
-
-    let mut fps_counter = FpsCounter::new(60, Instant::now());
+    let mut world_diff = UpdatedWorldState::empty();
 
     event_loop.run(move |event, _, control_flow| {
         *control_flow = if cfg!(feature = "metal-auto-capture") {
@@ -126,6 +152,7 @@ pub fn test_render(mut world: World, vert_shader: &[u8], frag_shader: &[u8]) -> 
         } else {
             ControlFlow::Poll
         };
+
         match event {
             Event::WindowEvent { event, .. } => match event {
                 WindowEvent::KeyboardInput {
@@ -140,78 +167,83 @@ pub fn test_render(mut world: World, vert_shader: &[u8], frag_shader: &[u8]) -> 
                 | WindowEvent::CloseRequested => {
                     *control_flow = ControlFlow::Exit;
                 }
-                WindowEvent::KeyboardInput {
-                    input:
-                        event::KeyboardInput {
-                            virtual_keycode: Some(key),
-                            state,
-                            ..
-                        },
-                    ..
-                } => match (state, key) {
-                    (_, VirtualKeyCode::W) => control_state.forward = state_to_mag(state),
-                    (_, VirtualKeyCode::S) => control_state.forward = -state_to_mag(state),
-                    (_, VirtualKeyCode::D) => control_state.right = state_to_mag(state),
-                    (_, VirtualKeyCode::A) => control_state.right = -state_to_mag(state),
-                    (_, VirtualKeyCode::K) => control_state.up = state_to_mag(state),
-                    (_, VirtualKeyCode::J) => control_state.up = -state_to_mag(state),
-                    (event::ElementState::Pressed, VirtualKeyCode::I) => view_state.z_level += 1,
-                    (event::ElementState::Pressed, VirtualKeyCode::U) => view_state.z_level -= 1,
-                    _ => {}
-                },
+                WindowEvent::KeyboardInput { input, .. } => {
+                    control_state.update_from_keyboard_event(input)
+                }
                 _ => {}
             },
             Event::EventsCleared => {
-                let diff = update_world(&mut world);
-                render_state.update(&world, &diff);
+                render_state.update(&world, &world_diff);
                 render_state.render_frame();
+                world_diff.clear();
             }
             _ => (),
         };
 
-        if view_state.z_level < 0 {
-            view_state.z_level = 0;
+        for _tick_time in time_tracker.tick(Instant::now()) {
+            world.tick(&mut world_diff);
+            control_state.update_view(&mut view_state);
         }
 
-        view_state.camera_pos += control_state.camera_delta();
-        render_state.set_world_view(&view_state);
+        render_state.set_world_view(view_state.clone());
 
-        fps_counter.sample(Instant::now());
-        info!("Frame rate: {}/{}", fps_counter.min(), fps_counter.mean());
+        info!(
+            "Frame rate: {}/{}",
+            time_tracker.min_fps(),
+            time_tracker.mean_fps()
+        );
     });
 }
 
-struct FpsCounter {
+struct TimeTracker {
     window_len: usize,
     samples: VecDeque<Duration>,
-    prev_sample_time: Instant
+    start_time: Instant,
+    prev_sample_time: Instant,
+    tick_size: Duration,
+    total_ticks: i64,
 }
 
-impl FpsCounter {
-    pub fn new(window_len: usize, now: Instant) -> Self {
+impl TimeTracker {
+    pub fn new(window_len: usize, tick_size: Duration, now: Instant) -> Self {
         Self {
             window_len,
             samples: VecDeque::with_capacity(window_len),
-            prev_sample_time: now
+            start_time: now,
+            prev_sample_time: now,
+            tick_size,
+            total_ticks: 0,
         }
     }
 
-    pub fn sample(&mut self, now: Instant) {
+    /// Advance the TimeTracker forward to a new instant. Returns an iterator over each tick since
+    /// the previous call to tick().
+    pub fn tick(&mut self, now: Instant) -> impl Iterator<Item = Instant> {
         let elapsed = now.duration_since(self.prev_sample_time);
         while self.samples.len() >= self.window_len {
             self.samples.pop_front();
         }
         self.samples.push_back(elapsed);
         self.prev_sample_time = now;
+
+        let old_total_ticks = self.total_ticks;
+        self.total_ticks = (now.duration_since(self.start_time).as_secs_f64()
+            / self.tick_size.as_secs_f64())
+        .floor() as i64;
+
+        let start_time = self.start_time;
+        let tick_size = self.tick_size;
+        (old_total_ticks..self.total_ticks)
+            .map(move |tick_ix| start_time + tick_size * (tick_ix as u32))
     }
 
-    pub fn mean(&self) -> f64 {
+    pub fn mean_fps(&self) -> f64 {
         let elapsed_total: f64 = self.samples.iter().map(|d| d.as_secs_f64()).sum();
         let elapsed_mean = elapsed_total / self.samples.len() as f64;
         1. / elapsed_mean
     }
 
-    pub fn min(&self) -> f64 {
+    pub fn min_fps(&self) -> f64 {
         let elapsed_max: f64 = self.samples.iter().max().unwrap().as_secs_f64();
         1. / elapsed_max
     }

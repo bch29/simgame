@@ -28,7 +28,7 @@ pub struct RenderState {
 }
 
 impl RenderState {
-    pub fn set_world_view(&mut self, params: &world::ViewParams) {
+    pub fn set_world_view(&mut self, params: world::ViewParams) {
         self.world.set_view(params);
     }
 

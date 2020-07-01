@@ -76,7 +76,7 @@ fn run_load_world(ctx: &FileContext, save_name: &str) -> Result<()> {
         "shaders/shader.vert".as_ref(),
         "shaders/shader.frag".as_ref())?;
 
-    let world = World { blocks };
+    let world = World::from_blocks(blocks);
 
     simgame_render::test::test_render(world, vert_shader.as_ref(), frag_shader.as_ref())
 }

@@ -60,6 +60,39 @@ where
         }
     }
 
+    pub fn set_capacity(&mut self, capacity: usize)
+    where
+        K: Clone,
+    {
+        if capacity > self.capacity {
+            let additional = capacity - self.capacity;
+
+            self.index_map.reserve(additional);
+
+            self.free_list.reserve_exact(additional);
+            self.free_list.extend(self.capacity..capacity);
+
+            self.entries.reserve_exact(additional);
+            self.entries
+                .extend(std::iter::repeat_with(|| None).take(additional));
+
+            self.current_diff.changed_indices.reserve_exact(additional);
+            self.current_diff
+                .changed_indices
+                .extend(std::iter::repeat(false).take(additional));
+        } else {
+            let old = std::mem::replace(self, Self::new(capacity));
+
+            for (k, i, v) in old.into_iter() {
+                if i < capacity {
+                    self.update(k, v);
+                }
+            }
+        }
+
+        self.capacity = capacity;
+    }
+
     /// Take a handle that allows iteration over entries that have changed since last time
     /// take_diff() was called.
     #[inline]
@@ -162,12 +195,28 @@ where
     }
 
     #[inline]
-    pub fn keys(&self) -> impl Iterator<Item=&K> {
+    pub fn iter(&self) -> impl Iterator<Item = (&K, usize, &V)> {
+        self.entries.iter().flat_map(|entry| {
+            entry
+                .as_ref()
+                .map(|entry| (&entry.key, entry.index, &entry.value))
+        })
+    }
+
+    #[inline]
+    pub fn into_iter(self) -> impl Iterator<Item = (K, usize, V)> {
+        self.entries
+            .into_iter()
+            .flat_map(|entry| entry.map(|entry| (entry.key, entry.index, entry.value)))
+    }
+
+    #[inline]
+    pub fn keys(&self) -> impl Iterator<Item = &K> {
         self.index_map.keys()
     }
 
     #[inline]
-    pub fn keys_ixes(&self) -> impl Iterator<Item=(&K, usize)> {
+    pub fn keys_ixes(&self) -> impl Iterator<Item = (&K, usize)> {
         self.index_map.iter().map(|(k, &i)| (k, i))
     }
 
