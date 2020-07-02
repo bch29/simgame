@@ -11,7 +11,7 @@ simgame_core = { path = "../core/" }
 simgame_render = { path = "../render/" }
 simgame_shaders = { path = "../shaders/" }
 cgmath = "*"
-structopt = "0.3"
-env_logger = "0.7"
+structopt = "*"
+env_logger = "*"
 log = "*"
-anyhow = "1.0"
+anyhow = "*"

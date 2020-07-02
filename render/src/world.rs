@@ -37,7 +37,7 @@ pub struct WorldRenderState {
     render_pipeline: wgpu::RenderPipeline,
     cube_vertex_buf: wgpu::Buffer,
     cube_index_buf: wgpu::Buffer,
-    cube_index_count: usize,
+    cube_mesh: mesh::Mesh,
 
     view_params: ViewParams,
     uniforms: BufferSyncedData<Uniforms, f32>,
@@ -83,15 +83,16 @@ impl WorldRenderState {
 
         let bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("simgame_render::world::WorldRenderState"),
                 bindings: &[
                     // Uniforms
-                    wgpu::BindGroupLayoutBinding {
+                    wgpu::BindGroupLayoutEntry {
                         binding: 0,
                         visibility: wgpu::ShaderStage::VERTEX,
                         ty: wgpu::BindingType::UniformBuffer { dynamic: false },
                     },
                     // Block type buffer
-                    wgpu::BindGroupLayoutBinding {
+                    wgpu::BindGroupLayoutEntry {
                         binding: 1,
                         visibility: wgpu::ShaderStage::VERTEX,
                         ty: wgpu::BindingType::StorageBuffer {
@@ -100,7 +101,7 @@ impl WorldRenderState {
                         },
                     },
                     // Chunk offset buffer
-                    wgpu::BindGroupLayoutBinding {
+                    wgpu::BindGroupLayoutEntry {
                         binding: 2,
                         visibility: wgpu::ShaderStage::VERTEX,
                         ty: wgpu::BindingType::StorageBuffer {
@@ -119,6 +120,7 @@ impl WorldRenderState {
         let cube_index_buf = cube_mesh.index_buffer(device);
 
         let depth_texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("simgame_render::world::WorldRenderState/depth"),
             size: wgpu::Extent3d {
                 width: init.width,
                 height: init.height,
@@ -179,8 +181,10 @@ impl WorldRenderState {
                 stencil_read_mask: 0u32,
                 stencil_write_mask: 0u32,
             }),
-            index_format: cube_mesh.index_format(),
-            vertex_buffers: &[cube_mesh.vertex_buffer_descriptor()],
+            vertex_state: wgpu::VertexStateDescriptor {
+                index_format: cube_mesh.index_format(),
+                vertex_buffers: &[cube_mesh.vertex_buffer_descriptor()],
+            },
             sample_count: 1,
             sample_mask: !0,
             alpha_to_coverage_enabled: false,
@@ -188,9 +192,9 @@ impl WorldRenderState {
 
         Ok(WorldRenderState {
             render_pipeline,
+            cube_mesh,
             cube_vertex_buf,
             cube_index_buf,
-            cube_index_count: cube_mesh.indices.len(),
             uniforms,
             bind_group_layout,
             rotation: Matrix4::identity(),
@@ -214,6 +218,7 @@ impl WorldRenderState {
 
         {
             let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: None,
                 layout: &self.bind_group_layout,
                 bindings: &[
                     self.uniforms.as_binding(0),
@@ -242,10 +247,17 @@ impl WorldRenderState {
             });
             rpass.set_pipeline(&self.render_pipeline);
             rpass.set_bind_group(0, &bind_group, &[]);
-            rpass.set_index_buffer(&self.cube_index_buf, 0);
-            rpass.set_vertex_buffers(0, &[(&self.cube_vertex_buf, 0)]);
+            rpass.set_index_buffer(&self.cube_index_buf, 0, self.cube_mesh.index_buffer_size());
+
+            rpass.set_vertex_buffer(
+                0,
+                &self.cube_vertex_buf,
+                0,
+                self.cube_mesh.vertex_buffer_size(),
+            );
+
             rpass.draw_indexed(
-                0..self.cube_index_count as u32,
+                0..self.cube_mesh.indices.len() as u32,
                 0,
                 0..(index_utils::chunk_size_total() * self.chunk_batch.count_chunks()) as u32,
             );
@@ -620,7 +632,7 @@ impl ChunkMeta {
 #[rustfmt::skip]
 pub const OPENGL_TO_WGPU_MATRIX: Matrix4<f32> = Matrix4::new(
     1.0, 0.0, 0.0, 0.0,
-    0.0, -1.0, 0.0, 0.0,
+    0.0, 1.0, 0.0, 0.0,
     0.0, 0.0, 0.5, 0.0,
     0.0, 0.0, 0.5, 1.0,
 );
@@ -661,7 +673,7 @@ impl IntoBufferSynced for Uniforms {
     fn buffer_sync_desc(&self) -> BufferSyncHelperDesc {
         BufferSyncHelperDesc {
             buffer_len: 16 + 16 + 16 + 4 + 4 + 3,
-            max_chunk_len: 128,
+            max_chunk_len: std::mem::size_of::<Matrix4<f32>>(),
             gpu_usage: wgpu::BufferUsage::UNIFORM,
         }
     }

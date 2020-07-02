@@ -229,7 +229,8 @@ pub fn test_render(mut world: World, vert_shader: &[u8], frag_shader: &[u8]) -> 
 
     let window = build_window(&event_loop)?;
 
-    let physical_win_size = window.inner_size().to_physical(window.hidpi_factor());
+    // let physical_win_size = window.inner_size().to_physical(window.hidpi_factor());
+    let physical_win_size = window.inner_size();
     let win_size: (u32, u32) = physical_win_size.into();
 
     let render_init = RenderInit {
@@ -244,7 +245,7 @@ pub fn test_render(mut world: World, vert_shader: &[u8], frag_shader: &[u8]) -> 
         },
     };
 
-    let mut render_state = RenderState::new(render_init)?;
+    let mut render_state = smol::run(RenderState::new(render_init))?;
     let mut view_state = world::ViewParams {
         camera_pos: Point3::new(0f32, 0f32, 20f32),
         z_level: 1,
@@ -289,7 +290,7 @@ pub fn test_render(mut world: World, vert_shader: &[u8], frag_shader: &[u8]) -> 
                 WindowEvent::Focused(false) => control_state.clear_key_states(),
                 _ => {}
             },
-            Event::EventsCleared => {
+            Event::MainEventsCleared => {
                 render_state.update(&world, &world_diff);
                 render_state.render_frame();
                 world_diff.clear();

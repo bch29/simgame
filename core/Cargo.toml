@@ -5,13 +5,13 @@ authors = ["Bradley Hardy"]
 edition = "2018"
 
 [dependencies]
-cgmath = { version = "0.17", features = ["serde"] }
-byteorder = "1"
-serde = { version = "1", features = ["derive"] }
-serde_cbor = "0.10.2"
-serde_yaml = "0.8"
-directories = "2.0"
-anyhow = "1.0"
-lz4 = "1.23"
-rand = "0.6"
-log = "0.4"
+cgmath = { version = "*", features = ["serde"] }
+byteorder = "*"
+serde = { version = "*", features = ["derive"] }
+serde_cbor = "*"
+serde_yaml = "*"
+directories = "*"
+anyhow = "*"
+lz4 = "*"
+rand = "*"
+log = "*"

@@ -5,8 +5,8 @@ use simgame_core::world::{UpdatedWorldState, World};
 
 pub mod buffer_util;
 pub mod mesh;
-pub mod test;
 pub mod stable_map;
+pub mod test;
 mod triangulate;
 mod world;
 
@@ -32,7 +32,7 @@ impl RenderState {
         self.world.set_view(params);
     }
 
-    pub fn new<RV, RF, W>(init: RenderInit<RV, RF, W>) -> Result<Self>
+    pub async fn new<'a, RV, RF, W>(init: RenderInit<'a, RV, RF, W>) -> Result<Self>
     where
         RV: std::io::Seek + std::io::Read,
         RF: std::io::Seek + std::io::Read,
@@ -40,10 +40,14 @@ impl RenderState {
     {
         let surface = wgpu::Surface::create(init.window);
 
-        let adapter = wgpu::Adapter::request(&wgpu::RequestAdapterOptions {
-            power_preference: wgpu::PowerPreference::HighPerformance,
-            backends: wgpu::BackendBit::PRIMARY,
-        })
+        let adapter = wgpu::Adapter::request(
+            &wgpu::RequestAdapterOptions {
+                power_preference: wgpu::PowerPreference::HighPerformance,
+                compatible_surface: None,
+            },
+            wgpu::BackendBit::PRIMARY,
+        )
+        .await
         .ok_or_else(|| anyhow!("Failed to request wgpu::Adaptor"))?;
 
         let (device, queue) = adapter.request_device(&wgpu::DeviceDescriptor {
@@ -51,7 +55,7 @@ impl RenderState {
                 anisotropic_filtering: false,
             },
             limits: wgpu::Limits::default(),
-        });
+        }).await;
 
         let swap_chain = device.create_swap_chain(
             &surface,
@@ -60,7 +64,7 @@ impl RenderState {
                 format: wgpu::TextureFormat::Bgra8UnormSrgb,
                 width: init.physical_win_size.0,
                 height: init.physical_win_size.1,
-                present_mode: wgpu::PresentMode::Vsync,
+                present_mode: wgpu::PresentMode::Fifo,
             },
         );
 
@@ -75,10 +79,10 @@ impl RenderState {
     }
 
     pub fn render_frame(&mut self) {
-        let frame = self.swap_chain.get_next_texture();
+        let frame = self.swap_chain.get_next_texture().expect("failed to get next texture");
         let mut encoder = self
             .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor { todo: 0 });
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
 
         self.world.render_frame(&self.device, &frame, &mut encoder);
         self.queue.submit(&[encoder.finish()]);
@@ -87,7 +91,7 @@ impl RenderState {
     pub fn init(&mut self, world: &World) {
         let mut encoder = self
             .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor { todo: 0 });
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
         self.world.init(&self.device, &mut encoder, world);
         self.queue.submit(&[encoder.finish()]);
     }
@@ -95,7 +99,7 @@ impl RenderState {
     pub fn update(&mut self, world: &World, diff: &UpdatedWorldState) {
         let mut encoder = self
             .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor { todo: 0 });
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
         self.world.update(&self.device, &mut encoder, world, diff);
         self.queue.submit(&[encoder.finish()]);
     }

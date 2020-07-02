@@ -6,13 +6,14 @@ edition = "2018"
 
 [dependencies]
 simgame_core = { path = "../core" }
-cgmath = "0.17"
-directories = "2.0"
-anyhow = "1.0"
-log = "0.4"
+cgmath = "*"
+directories = "*"
+anyhow = "*"
+log = "*"
 # graphics
-winit = "0.20.0-alpha4"
-raw-window-handle = "0.3"
-wgpu = "0.4"
+winit = "*"
+raw-window-handle = "*"
+wgpu = "*"
 zerocopy = "*"
-rand = "0.7.3"
+rand = "*"
+smol = "*"

@@ -135,6 +135,7 @@ impl<Data, Item> DerefMut for BufferSyncedData<Data, Item> {
 impl<Item> BufferSyncHelper<Item> {
     pub fn make_buffer(&self, device: &Device) -> Buffer {
         device.create_buffer(&BufferDescriptor {
+            label: None,
             size: (self.desc.buffer_len * std::mem::size_of::<Item>()) as u64,
             usage: BufferUsage::COPY_DST | self.desc.gpu_usage,
         })
@@ -195,11 +196,15 @@ impl<Item> BufferSyncHelper<Item> {
     }
 
     #[inline]
-    fn make_src_buffer<'a>(&self, device: &'a Device) -> CreateBufferMapped<'a, Item>
+    fn make_src_buffer<'a>(&self, device: &'a Device) -> CreateBufferMapped<'a>
     where
         Item: Copy + 'static,
     {
-        device.create_buffer_mapped(self.desc.max_chunk_len, BufferUsage::COPY_SRC)
+        device.create_buffer_mapped(&wgpu::BufferDescriptor {
+            label: None,
+            size: (std::mem::size_of::<Item>() * self.desc.max_chunk_len) as u64,
+            usage: BufferUsage::COPY_SRC,
+        })
     }
 
     #[inline]
@@ -232,7 +237,7 @@ impl<Item> BufferSyncHelper<Item> {
 pub struct FillBuffer<'a, Item> {
     device: &'a Device,
     target: &'a Buffer,
-    mapped_buffer: Option<CreateBufferMapped<'a, Item>>,
+    mapped_buffer: Option<CreateBufferMapped<'a>>,
     pos: usize,
     batch_len: usize,
     sync_helper: &'a BufferSyncHelper<Item>,
@@ -279,8 +284,11 @@ impl<'a, Item> FillBuffer<'a, Item> {
         let mapped_buffer = self
             .mapped_buffer
             .get_or_insert_with(|| sync_helper.make_src_buffer(device));
-        mapped_buffer.data[self.batch_len..self.batch_len + chunk_len]
-            .copy_from_slice(chunk_slice);
+
+        let item_size = std::mem::size_of::<Item>();
+        let begin = item_size * self.batch_len;
+        let end = begin + item_size * chunk_len;
+        mapped_buffer.data[begin..end].copy_from_slice(chunk_slice.as_bytes());
 
         self.batch_len += chunk_len;
     }
@@ -341,7 +349,8 @@ impl<'a, Item> FillBuffer<'a, Item> {
     /// Subsequent writes will begin at the given position. May end the current batch.
     #[inline]
     pub fn seek(&mut self, encoder: &mut CommandEncoder, new_pos: usize)
-        where Item: Copy
+    where
+        Item: Copy,
     {
         if self.pos + self.batch_len != new_pos {
             self.end_batch(encoder);

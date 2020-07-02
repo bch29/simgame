@@ -1,7 +1,9 @@
 pub mod cube;
 pub mod half_open_cube;
 
-#[derive(Clone, Copy, Debug)]
+use zerocopy::AsBytes;
+
+#[derive(Clone, Copy, Debug, AsBytes)]
 #[repr(C)]
 pub struct Vertex {
     pos: [f32; 4],
@@ -24,16 +26,36 @@ pub fn vertex(pos: [f64; 3], tex_coord: [f64; 2], normal: [f64; 3]) -> Vertex {
 }
 
 impl Mesh {
+    pub fn vertex_buffer_size(&self) -> wgpu::BufferAddress {
+        (std::mem::size_of::<Vertex>() * self.vertices.len()) as u64
+    }
+
+    pub fn index_buffer_size(&self) -> wgpu::BufferAddress {
+        (std::mem::size_of::<u16>() * self.indices.len()) as u64
+    }
+
     pub fn vertex_buffer(&self, device: &wgpu::Device) -> wgpu::Buffer {
-        device
-            .create_buffer_mapped(self.vertices.len(), wgpu::BufferUsage::VERTEX)
-            .fill_from_slice(&self.vertices)
+        let mapped_buffer = device
+            .create_buffer_mapped(&wgpu::BufferDescriptor {
+                label: None,
+                size: self.vertex_buffer_size(),
+                usage: wgpu::BufferUsage::VERTEX,
+            });
+
+        mapped_buffer.data.copy_from_slice(self.vertices.as_bytes());
+        mapped_buffer.finish()
     }
 
     pub fn index_buffer(&self, device: &wgpu::Device) -> wgpu::Buffer {
-        device
-            .create_buffer_mapped(self.indices.len(), wgpu::BufferUsage::INDEX)
-            .fill_from_slice(&self.indices)
+        let mapped_buffer = device
+            .create_buffer_mapped(&wgpu::BufferDescriptor {
+                label: None,
+                size: self.index_buffer_size(),
+                usage: wgpu::BufferUsage::INDEX,
+            });
+
+        mapped_buffer.data.copy_from_slice(self.indices.as_bytes());
+        mapped_buffer.finish()
     }
 
     pub fn vertex_buffer_descriptor(&self) -> wgpu::VertexBufferDescriptor {
