@@ -20,9 +20,99 @@ pub fn build_window(
     event_loop: &winit::event_loop::EventLoop<()>,
 ) -> Result<winit::window::Window> {
     let builder = winit::window::WindowBuilder::new()
-        .with_inner_size(winit::dpi::LogicalSize { width: 1920.0, height: 1080.0 })
+        .with_inner_size(winit::dpi::LogicalSize {
+            width: 1920.0,
+            height: 1080.0,
+        })
         .with_decorations(true);
     Ok(builder.build(event_loop)?)
+}
+
+#[derive(Debug, Clone)]
+pub struct AccelControlParams {
+    pub initial_step: f64,
+    pub delay_ticks: u64,
+    pub acceleration_per_tick: f64,
+    pub max_speed: Option<f64>,
+    pub max_value: Option<f64>,
+    pub min_value: Option<f64>,
+}
+
+struct AccelControlState {
+    // parameters
+    params: AccelControlParams,
+
+    // state
+    direction: i32,
+    initial_step_required: bool,
+    delay_ticks_remaining: u64,
+    current_speed: f64,
+    current_value: f64,
+}
+
+impl AccelControlState {
+    fn new(initial_value: f64, params: AccelControlParams) -> Self {
+        Self {
+            params,
+
+            direction: 0,
+            initial_step_required: false,
+            delay_ticks_remaining: 0,
+            current_speed: 0.0,
+            current_value: initial_value,
+        }
+    }
+
+    fn tick(&mut self) {
+        let mut offset = 0.0;
+        if self.initial_step_required {
+            offset += self.params.initial_step;
+            self.initial_step_required = false;
+        }
+
+        if self.delay_ticks_remaining > 0 {
+            self.delay_ticks_remaining -= 1;
+        } else {
+            self.current_speed += self.params.acceleration_per_tick;
+        }
+
+        if let Some(max_speed) = self.params.max_speed {
+            if self.current_speed > max_speed {
+                self.current_speed = max_speed
+            }
+        }
+
+        offset += self.current_speed;
+        offset *= self.direction as f64;
+        self.current_value += offset;
+
+        if let Some(max_value) = self.params.max_value {
+            if self.current_value > max_value {
+                self.current_value = max_value;
+            }
+        }
+
+        if let Some(min_value) = self.params.min_value {
+            if self.current_value < min_value {
+                self.current_value = min_value;
+            }
+        }
+    }
+
+    fn value(&self) -> f64 {
+        self.current_value
+    }
+
+    fn set_direction(&mut self, direction: i32) {
+        if direction == self.direction {
+            return;
+        }
+
+        self.direction = direction;
+        self.initial_step_required = true;
+        self.delay_ticks_remaining = self.params.delay_ticks;
+        self.current_speed = 0.0;
+    }
 }
 
 struct ControlState {
@@ -30,18 +120,78 @@ struct ControlState {
     right: i32,
     up: i32,
 
-    z_level_delta: i32,
-    visible_height_delta: i32,
+    z_level_state: AccelControlState,
+    visible_height_state: AccelControlState,
 }
 
 impl ControlState {
     fn new() -> Self {
+        let base_accel_params = AccelControlParams {
+            initial_step: 1.0,
+            delay_ticks: 50,
+            acceleration_per_tick: 0.01,
+            max_speed: Some(2.0),
+            max_value: None,
+            min_value: None,
+        };
+
         ControlState {
             forward: 0,
             right: 0,
             up: 0,
-            z_level_delta: 0,
-            visible_height_delta: 0,
+            z_level_state: AccelControlState::new(
+                0.0,
+                AccelControlParams {
+                    min_value: Some(0.0),
+                    ..base_accel_params
+                },
+            ),
+            visible_height_state: AccelControlState::new(
+                5.0,
+                AccelControlParams {
+                    min_value: Some(1.0),
+                    ..base_accel_params
+                },
+            ),
+        }
+    }
+
+    fn update_from_keyboard_event(&mut self, event: event::KeyboardInput) {
+        use event::VirtualKeyCode;
+        match event {
+            event::KeyboardInput {
+                virtual_keycode: Some(key),
+                state,
+                ..
+            } => {
+                let mag = self.state_to_mag(state);
+                match key {
+                    VirtualKeyCode::W => self.forward = mag,
+                    VirtualKeyCode::S => self.forward = -mag,
+                    VirtualKeyCode::D => self.right = mag,
+                    VirtualKeyCode::A => self.right = -mag,
+                    VirtualKeyCode::K => self.up = mag,
+                    VirtualKeyCode::J => self.up = -mag,
+                    VirtualKeyCode::I => self.z_level_state.set_direction(mag),
+                    VirtualKeyCode::U => self.z_level_state.set_direction(-mag),
+                    VirtualKeyCode::M => self.visible_height_state.set_direction(mag),
+                    VirtualKeyCode::N => self.visible_height_state.set_direction(-mag),
+                    _ => {}
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn clear_key_states(&mut self) {
+        self.z_level_state.set_direction(0);
+        self.visible_height_state.set_direction(0);
+    }
+
+    fn state_to_mag(&self, state: event::ElementState) -> i32 {
+        match state {
+            event::ElementState::Pressed => 1,
+            event::ElementState::Released => 0,
         }
     }
 
@@ -64,47 +214,13 @@ impl ControlState {
         }
     }
 
-    fn update_from_keyboard_event(&mut self, event: event::KeyboardInput) {
-        use event::VirtualKeyCode;
-        match event {
-            event::KeyboardInput {
-                virtual_keycode: Some(key),
-                state,
-                ..
-            } => match key {
-                VirtualKeyCode::W => self.forward = self.state_to_mag(state),
-                VirtualKeyCode::S => self.forward = -self.state_to_mag(state),
-                VirtualKeyCode::D => self.right = self.state_to_mag(state),
-                VirtualKeyCode::A => self.right = -self.state_to_mag(state),
-                VirtualKeyCode::K => self.up = self.state_to_mag(state),
-                VirtualKeyCode::J => self.up = -self.state_to_mag(state),
-                VirtualKeyCode::I => self.z_level_delta = self.state_to_mag(state),
-                VirtualKeyCode::U => self.z_level_delta = -self.state_to_mag(state),
-                VirtualKeyCode::M => self.visible_height_delta = self.state_to_mag(state),
-                VirtualKeyCode::N => self.visible_height_delta = -self.state_to_mag(state),
-                _ => {}
-            },
-            _ => {}
-        }
-    }
+    pub fn tick(&mut self, view_state: &mut world::ViewParams) {
+        self.z_level_state.tick();
+        self.visible_height_state.tick();
 
-    fn state_to_mag(&self, state: event::ElementState) -> i32 {
-        match state {
-            event::ElementState::Pressed => 1,
-            event::ElementState::Released => 0,
-        }
-    }
-
-    fn update_view(&mut self, view_state: &mut world::ViewParams) {
         view_state.camera_pos += self.camera_delta();
-        view_state.z_level += self.z_level_delta;
-        self.z_level_delta = 0;
-        view_state.visible_size.z += self.visible_height_delta;
-        self.visible_height_delta = 0;
-
-        if view_state.z_level < 0 {
-            view_state.z_level = 0;
-        }
+        view_state.z_level = self.z_level_state.value().round() as i32;
+        view_state.visible_size.z = self.visible_height_state.value().round() as i32;
     }
 }
 
@@ -170,6 +286,7 @@ pub fn test_render(mut world: World, vert_shader: &[u8], frag_shader: &[u8]) -> 
                 WindowEvent::KeyboardInput { input, .. } => {
                     control_state.update_from_keyboard_event(input)
                 }
+                WindowEvent::Focused(false) => control_state.clear_key_states(),
                 _ => {}
             },
             Event::EventsCleared => {
@@ -182,7 +299,7 @@ pub fn test_render(mut world: World, vert_shader: &[u8], frag_shader: &[u8]) -> 
 
         for _tick_time in time_tracker.tick(Instant::now()) {
             world.tick(&mut world_diff);
-            control_state.update_view(&mut view_state);
+            control_state.tick(&mut view_state);
         }
 
         render_state.set_world_view(view_state.clone());
