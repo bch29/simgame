@@ -59,26 +59,29 @@ fn run(opt: Opts) -> Result<()> {
 
     match &opt.action {
         Action::GenerateWorld { options } => run_generate(&ctx, options),
-        Action::LoadWorld { save_name } => run_load_world(&ctx, save_name),
+        Action::LoadWorld { save_name } => smol::run(run_load_world(&ctx, save_name)),
     }
 }
 
-fn run_load_world(ctx: &FileContext, save_name: &str) -> Result<()> {
+async fn run_load_world(ctx: &FileContext, save_name: &str) -> Result<()> {
     let blocks = ctx.load_world_blocks(save_name)?;
     info!("Loaded world: {:?}", blocks.debug_summary());
 
-    let compile_params = simgame_shaders::CompileParams {
+    let mut shader_compiler = simgame_shaders::Compiler::new(simgame_shaders::CompileParams {
         chunk_size: index_utils::chunk_size().into()
-    };
+    })?;
 
-    let (vert_shader, frag_shader) = simgame_shaders::compile(
-        &compile_params,
-        "shaders/shader.vert".as_ref(),
-        "shaders/shader.frag".as_ref())?;
+    let vert_shader = shader_compiler.compile_vert("shaders/vert_full.glsl".as_ref())?;
+    let frag_shader = shader_compiler.compile_frag("shaders/frag.glsl".as_ref())?;
+
+    let shaders = simgame_render::WorldShaders {
+        vert: vert_shader.as_ref(),
+        frag: frag_shader.as_ref()
+    };
 
     let world = World::from_blocks(blocks);
 
-    simgame_render::test::test_render(world, vert_shader.as_ref(), frag_shader.as_ref())
+    simgame_render::test::test_render(world, shaders).await
 }
 
 fn run_generate(ctx: &FileContext, options: &GenerateWorldOptions) -> Result<()> {

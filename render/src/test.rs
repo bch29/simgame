@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use cgmath::{InnerSpace, Point3, Vector3, Zero};
-use log::warn;
+use log::info;
 use winit::{
     event,
     event_loop::{ControlFlow, EventLoop},
@@ -225,7 +225,7 @@ impl ControlState {
     }
 }
 
-pub fn test_render(mut world: World, vert_shader: &[u8], frag_shader: &[u8]) -> Result<()> {
+pub async fn test_render(mut world: World, shaders: crate::WorldShaders<&[u8]>) -> Result<()> {
     let event_loop = EventLoop::new();
 
     let window = build_window(&event_loop)?;
@@ -238,15 +238,14 @@ pub fn test_render(mut world: World, vert_shader: &[u8], frag_shader: &[u8]) -> 
         window: &window,
         physical_win_size: win_size,
         world: WorldRenderInit {
-            vert_shader_spirv_bytes: std::io::Cursor::new(vert_shader),
-            frag_shader_spirv_bytes: std::io::Cursor::new(frag_shader),
+            shaders: shaders.map(|bytes| std::io::Cursor::new(bytes)),
             aspect_ratio: (physical_win_size.width / physical_win_size.height) as f32,
             width: win_size.0,
             height: win_size.1,
         },
     };
 
-    let mut render_state = smol::run(RenderState::new(render_init))?;
+    let mut render_state = RenderState::new(render_init).await?;
     let mut view_state = world::ViewParams {
         camera_pos: Point3::new(0f32, 0f32, 20f32),
         z_level: 1,
@@ -304,7 +303,7 @@ pub fn test_render(mut world: World, vert_shader: &[u8], frag_shader: &[u8]) -> 
                     world_diff.clear();
                     time_tracker.sample(Instant::now());
 
-                    warn!(
+                    info!(
                         "Frame rate: {}/{}",
                         time_tracker.min_fps(),
                         time_tracker.mean_fps()

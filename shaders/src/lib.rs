@@ -8,6 +8,11 @@ pub struct CompileParams {
     pub chunk_size: (usize, usize, usize),
 }
 
+pub struct Compiler {
+    params: CompileParams,
+    compiler: shaderc::Compiler,
+}
+
 impl CompileParams {
     fn set_options(&self, options: &mut shaderc::CompileOptions) {
         let mut define_chunk_size = |dim, val| {
@@ -23,62 +28,55 @@ impl CompileParams {
     }
 }
 
-fn compile_shader(
-    params: &CompileParams,
-    path: &Path,
-    compiler: &mut shaderc::Compiler,
-    kind: shaderc::ShaderKind,
-) -> Result<Vec<u8>> {
-    // let mut compiler = shaderc::Compiler::new().unwrap();
-    // options.add_macro_definition("EP", Some("main"));
+impl Compiler {
+    pub fn new(params: CompileParams) -> Result<Self> {
+        Ok(Self {
+            params,
+            compiler: shaderc::Compiler::new().context("Instantiating shaderc compiler")?,
+        })
+    }
 
-    let fname = path
-        .file_name()
-        .ok_or_else(|| anyhow!("Expected file path, got directory path"))?;
+    pub fn compile_vert(&mut self, path: &Path) -> Result<Vec<u8>> {
+        info!("Compiling vertex shader {:?}", path);
+        self.compile_impl(path, shaderc::ShaderKind::Vertex)
+    }
 
-    let mut source = String::new();
-    File::open(path)
-        .context("Opening shader file")?
-        .read_to_string(&mut source)
-        .context("Reading shader file")?;
+    pub fn compile_frag(&mut self, path: &Path) -> Result<Vec<u8>> {
+        info!("Compiling fragment shader {:?}", path);
+        self.compile_impl(path, shaderc::ShaderKind::Fragment)
+    }
 
-    let mut options = shaderc::CompileOptions::new()
-        .ok_or_else(|| anyhow!("Creating shaderc compile options"))?;
-    params.set_options(&mut options);
+    pub fn compile_compute(&mut self, path: &Path) -> Result<Vec<u8>> {
+        info!("Compiling compute shader {:?}", path);
+        self.compile_impl(path, shaderc::ShaderKind::Compute)
+    }
 
-    let compiled = compiler
-        .compile_into_spirv(
-            &source,
-            kind,
-            fname.to_string_lossy().as_ref(),
-            "main",
-            Some(&options),
-        )
-        .context("Compiling shader")?;
+    fn compile_impl(&mut self, path: &Path, kind: shaderc::ShaderKind) -> Result<Vec<u8>> {
+        let fname = path
+            .file_name()
+            .ok_or_else(|| anyhow!("Expected file path, got directory path"))?;
 
-    Ok(compiled.as_binary_u8().into())
-}
+        let mut source = String::new();
+        File::open(path)
+            .context("Opening shader file")?
+            .read_to_string(&mut source)
+            .context("Reading shader file")?;
 
-pub fn compile(
-    params: &CompileParams,
-    vertex_path: &Path,
-    fragment_path: &Path,
-) -> Result<(Vec<u8>, Vec<u8>)> {
-    let mut compiler = shaderc::Compiler::new().context("Instantiating shaderc compiler")?;
+        let mut options = shaderc::CompileOptions::new()
+            .ok_or_else(|| anyhow!("Creating shaderc compile options"))?;
+        self.params.set_options(&mut options);
 
-    info!("Compiling vertex shader");
-    let vertex_bytes = compile_shader(
-        params,
-        vertex_path,
-        &mut compiler,
-        shaderc::ShaderKind::Vertex,
-    )?;
-    info!("Compiling fragment shader");
-    let fragment_bytes = compile_shader(
-        params,
-        fragment_path,
-        &mut compiler,
-        shaderc::ShaderKind::Fragment,
-    )?;
-    Ok((vertex_bytes, fragment_bytes))
+        let compiled = self
+            .compiler
+            .compile_into_spirv(
+                &source,
+                kind,
+                fname.to_string_lossy().as_ref(),
+                "main",
+                Some(&options),
+            )
+            .context("Compiling shader")?;
+
+        Ok(compiled.as_binary_u8().into())
+    }
 }

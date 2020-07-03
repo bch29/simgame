@@ -1551,6 +1551,7 @@ dependencies = [
  "simgame_core",
  "simgame_render",
  "simgame_shaders",
+ "smol",
  "structopt",
 ]
 
@@ -1581,7 +1582,6 @@ dependencies = [
  "rand 0.7.3",
  "raw-window-handle",
  "simgame_core",
- "smol",
  "wgpu",
  "winit",
  "zerocopy",

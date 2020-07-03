@@ -25,9 +25,13 @@ pub struct ViewParams {
     pub visible_size: Vector3<i32>,
 }
 
-pub struct WorldRenderInit<RV, RF> {
-    pub vert_shader_spirv_bytes: RV,
-    pub frag_shader_spirv_bytes: RF,
+pub struct Shaders<R> {
+    pub vert: R,
+    pub frag: R,
+}
+
+pub struct WorldRenderInit<R> {
+    pub shaders: Shaders<R>,
     pub aspect_ratio: f32,
     pub width: u32,
     pub height: u32,
@@ -71,15 +75,13 @@ impl WorldRenderState {
         self.view_params = params;
     }
 
-    pub fn new<RV, RF>(init: WorldRenderInit<RV, RF>, device: &wgpu::Device) -> Result<Self>
+    pub fn new<R>(init: WorldRenderInit<R>, device: &wgpu::Device) -> Result<Self>
     where
-        RV: std::io::Seek + std::io::Read,
-        RF: std::io::Seek + std::io::Read,
+        R: std::io::Seek + std::io::Read,
     {
-        let vs_module =
-            device.create_shader_module(&wgpu::read_spirv(init.vert_shader_spirv_bytes)?);
-        let fs_module =
-            device.create_shader_module(&wgpu::read_spirv(init.frag_shader_spirv_bytes)?);
+        let shaders = init.shaders.map_result::<std::io::Error, _, _>(|stream| {
+            Ok(device.create_shader_module(&wgpu::read_spirv(stream)?))
+        })?;
 
         let bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -151,11 +153,11 @@ impl WorldRenderState {
         let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             layout: &pipeline_layout,
             vertex_stage: wgpu::ProgrammableStageDescriptor {
-                module: &vs_module,
+                module: &shaders.vert,
                 entry_point: "main",
             },
             fragment_stage: Some(wgpu::ProgrammableStageDescriptor {
-                module: &fs_module,
+                module: &shaders.frag,
                 entry_point: "main",
             }),
             rasterization_state: Some(wgpu::RasterizationStateDescriptor {
@@ -686,5 +688,27 @@ impl Default for ViewParams {
             z_level: 0,
             visible_size: Vector3::new(1, 1, 1),
         }
+    }
+}
+
+impl<R> Shaders<R> {
+    pub fn map<R2, F>(self, mut f: F) -> Shaders<R2>
+    where
+        F: FnMut(R) -> R2,
+    {
+        Shaders {
+            vert: f(self.vert),
+            frag: f(self.frag),
+        }
+    }
+
+    pub fn map_result<E, R2, F>(self, mut f: F) -> std::result::Result<Shaders<R2>, E>
+    where
+        F: FnMut(R) -> std::result::Result<R2, E>,
+    {
+        Ok(Shaders {
+            vert: f(self.vert)?,
+            frag: f(self.frag)?,
+        })
     }
 }

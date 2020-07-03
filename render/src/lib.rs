@@ -11,12 +11,13 @@ mod triangulate;
 mod world;
 
 pub use world::WorldRenderInit;
+pub use world::Shaders as WorldShaders;
 
 // TODO: UI rendering pipeline
 
-pub struct RenderInit<'a, RV, RF, W> {
+pub struct RenderInit<'a, R, W> {
     pub window: &'a W,
-    pub world: WorldRenderInit<RV, RF>,
+    pub world: WorldRenderInit<R>,
     pub physical_win_size: (u32, u32),
 }
 
@@ -32,10 +33,9 @@ impl RenderState {
         self.world.set_view(params);
     }
 
-    pub async fn new<'a, RV, RF, W>(init: RenderInit<'a, RV, RF, W>) -> Result<Self>
+    pub async fn new<'a, R, W>(init: RenderInit<'a, R, W>) -> Result<Self>
     where
-        RV: std::io::Seek + std::io::Read,
-        RF: std::io::Seek + std::io::Read,
+        R: std::io::Seek + std::io::Read,
         W: HasRawWindowHandle,
     {
         let surface = wgpu::Surface::create(init.window);
