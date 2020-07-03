@@ -375,7 +375,7 @@ impl ChunkBatchRenderState {
 
         let chunk_metadata_helper = BufferSyncHelper::new(BufferSyncHelperDesc {
             buffer_len: Self::metadata_size() * Self::max_batch_chunks(),
-            max_chunk_len: 1024,
+            max_chunk_len: index_utils::chunk_size_total(),
             gpu_usage: wgpu::BufferUsage::STORAGE | wgpu::BufferUsage::STORAGE_READ,
         });
 
@@ -618,16 +618,16 @@ impl ChunkBatchRenderState {
     }
 }
 
-impl ChunkMeta {
-    fn empty() -> Self {
-        Self {
-            offset: Point3::new(0f32, 0f32, 0f32),
-            _padding0: [0f32],
-            neighbor_indices: [-1, -1, -1, -1, -1, -1],
-            _padding1: [0, 0],
-        }
-    }
-}
+// impl ChunkMeta {
+//     fn empty() -> Self {
+//         Self {
+//             offset: Point3::new(0f32, 0f32, 0f32),
+//             _padding0: [0f32],
+//             neighbor_indices: [-1, -1, -1, -1, -1, -1],
+//             _padding1: [0, 0],
+//         }
+//     }
+// }
 
 #[rustfmt::skip]
 pub const OPENGL_TO_WGPU_MATRIX: Matrix4<f32> = Matrix4::new(

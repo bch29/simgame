@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use cgmath::{InnerSpace, Point3, Vector3, Zero};
-use log::info;
+use log::warn;
 use winit::{
     event,
     event_loop::{ControlFlow, EventLoop},
@@ -15,6 +15,7 @@ use crate::world;
 use crate::{RenderInit, RenderState, WorldRenderInit};
 
 const GAME_STEP_MILLIS: u64 = 10;
+const RENDER_INTERVAL_MILLIS: u64 = 1000 / 60;
 
 pub fn build_window(
     event_loop: &winit::event_loop::EventLoop<()>,
@@ -249,7 +250,7 @@ pub fn test_render(mut world: World, vert_shader: &[u8], frag_shader: &[u8]) -> 
     let mut view_state = world::ViewParams {
         camera_pos: Point3::new(0f32, 0f32, 20f32),
         z_level: 1,
-        visible_size: Vector3::new(128, 128, 32),
+        visible_size: Vector3::new(128, 128, 5),
     };
     render_state.set_world_view(view_state.clone());
     render_state.init(&world);
@@ -258,8 +259,14 @@ pub fn test_render(mut world: World, vert_shader: &[u8], frag_shader: &[u8]) -> 
 
     let mut control_state = ControlState::new();
 
-    let mut time_tracker =
-        TimeTracker::new(60, Duration::from_millis(GAME_STEP_MILLIS), Instant::now());
+    let mut time_tracker = TimeTracker::new(
+        TimingParams {
+            window_len: 30,
+            tick_size: Duration::from_millis(GAME_STEP_MILLIS),
+            render_interval: Duration::from_millis(RENDER_INTERVAL_MILLIS),
+        },
+        Instant::now(),
+    );
 
     let mut world_diff = UpdatedWorldState::empty();
 
@@ -291,9 +298,18 @@ pub fn test_render(mut world: World, vert_shader: &[u8], frag_shader: &[u8]) -> 
                 _ => {}
             },
             Event::MainEventsCleared => {
-                render_state.update(&world, &world_diff);
-                render_state.render_frame();
-                world_diff.clear();
+                if time_tracker.check_render(Instant::now()) {
+                    render_state.update(&world, &world_diff);
+                    render_state.render_frame();
+                    world_diff.clear();
+                    time_tracker.sample(Instant::now());
+
+                    warn!(
+                        "Frame rate: {}/{}",
+                        time_tracker.min_fps(),
+                        time_tracker.mean_fps()
+                    );
+                }
             }
             _ => (),
         };
@@ -304,55 +320,66 @@ pub fn test_render(mut world: World, vert_shader: &[u8], frag_shader: &[u8]) -> 
         }
 
         render_state.set_world_view(view_state.clone());
-
-        info!(
-            "Frame rate: {}/{}",
-            time_tracker.min_fps(),
-            time_tracker.mean_fps()
-        );
     });
 }
 
-struct TimeTracker {
+struct TimingParams {
     window_len: usize,
+    tick_size: Duration,
+    render_interval: Duration,
+}
+
+struct TimeTracker {
+    params: TimingParams,
     samples: VecDeque<Duration>,
     start_time: Instant,
     prev_sample_time: Instant,
-    tick_size: Duration,
     total_ticks: i64,
+    prev_render_time: Instant,
 }
 
 impl TimeTracker {
-    pub fn new(window_len: usize, tick_size: Duration, now: Instant) -> Self {
+    pub fn new(params: TimingParams, now: Instant) -> Self {
         Self {
-            window_len,
-            samples: VecDeque::with_capacity(window_len),
+            samples: VecDeque::with_capacity(params.window_len),
             start_time: now,
             prev_sample_time: now,
-            tick_size,
             total_ticks: 0,
+            prev_render_time: now,
+            params,
         }
     }
 
     /// Advance the TimeTracker forward to a new instant. Returns an iterator over each tick since
     /// the previous call to tick().
     pub fn tick(&mut self, now: Instant) -> impl Iterator<Item = Instant> {
+        let old_total_ticks = self.total_ticks;
+        self.total_ticks = (now.duration_since(self.start_time).as_secs_f64()
+            / self.params.tick_size.as_secs_f64())
+        .floor() as i64;
+
+        let start_time = self.start_time;
+        let tick_size = self.params.tick_size;
+        (old_total_ticks..self.total_ticks)
+            .map(move |tick_ix| start_time + tick_size * (tick_ix as u32))
+    }
+
+    fn sample(&mut self, now: Instant) {
         let elapsed = now.duration_since(self.prev_sample_time);
-        while self.samples.len() >= self.window_len {
+        while self.samples.len() >= self.params.window_len {
             self.samples.pop_front();
         }
         self.samples.push_back(elapsed);
         self.prev_sample_time = now;
+    }
 
-        let old_total_ticks = self.total_ticks;
-        self.total_ticks = (now.duration_since(self.start_time).as_secs_f64()
-            / self.tick_size.as_secs_f64())
-        .floor() as i64;
+    pub fn check_render(&mut self, now: Instant) -> bool {
+        if now.duration_since(self.prev_render_time) > self.params.render_interval {
+            self.prev_render_time = now;
+            return true;
+        }
 
-        let start_time = self.start_time;
-        let tick_size = self.tick_size;
-        (old_total_ticks..self.total_ticks)
-            .map(move |tick_ix| start_time + tick_size * (tick_ix as u32))
+        return false;
     }
 
     pub fn mean_fps(&self) -> f64 {
