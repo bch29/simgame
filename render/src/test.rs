@@ -3,7 +3,6 @@ use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use cgmath::{InnerSpace, Point3, Vector3, Zero};
-use log::info;
 use winit::{
     event,
     event_loop::{ControlFlow, EventLoop},
@@ -15,9 +14,9 @@ use crate::world;
 use crate::{RenderInit, RenderState, WorldRenderInit};
 
 const GAME_STEP_MILLIS: u64 = 10;
-const RENDER_INTERVAL_MILLIS: u64 = 1000 / 60;
+const RENDER_INTERVAL_MILLIS: u64 = 1000 / 120;
 
-const INITIAL_VISIBLE_SIZE: Vector3<i32> = Vector3::new(5, 5, 5);
+const INITIAL_VISIBLE_SIZE: Vector3<i32> = Vector3::new(128, 128, 32);
 
 pub fn build_window(
     event_loop: &winit::event_loop::EventLoop<()>,
@@ -305,7 +304,7 @@ pub async fn test_render(mut world: World, shaders: crate::WorldShaders<&[u8]>) 
                     world_diff.clear();
                     time_tracker.sample(Instant::now());
 
-                    info!(
+                    log::info!(
                         "Frame rate: {}/{}",
                         time_tracker.min_fps(),
                         time_tracker.mean_fps()

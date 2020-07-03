@@ -62,7 +62,6 @@ pub struct WorldRenderState {
 
     chunk_batch: ChunkBatchRenderState,
     needs_compute_pass: bool,
-
     // /// Contains textures for each block type.
     // /// Dimensions are 16x16xN, where N is number of block types.
     // block_master_texture: wgpu::TextureView,
@@ -141,13 +140,16 @@ impl WorldRenderState {
 
             let bind_group_layout =
                 device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                    label: Some("simgame_render::world::WorldRenderState/compute/layout"),
+                    label: Some("simgame_render::world::WorldRenderState/compute/input_layout"),
                     bindings: &[
                         // Uniforms
                         wgpu::BindGroupLayoutEntry {
                             binding: 0,
                             visibility: wgpu::ShaderStage::COMPUTE,
-                            ty: wgpu::BindingType::UniformBuffer { dynamic: false },
+                            ty: wgpu::BindingType::StorageBuffer {
+                                dynamic: false,
+                                readonly: true,
+                            },
                         },
                         // Block type buffer
                         wgpu::BindGroupLayoutEntry {
@@ -355,6 +357,7 @@ impl WorldRenderState {
         encoder: &mut wgpu::CommandEncoder,
     ) {
         if self.needs_compute_pass {
+            // log::info!("Running compute pass");
             self.compute_pass(device, encoder);
         }
         self.render_pass(device, frame, encoder);
@@ -428,13 +431,11 @@ impl WorldRenderState {
         rpass.set_pipeline(&self.render_data.pipeline);
         rpass.set_bind_group(0, &bind_group, &[]);
 
-        // One draw call per visible chunk. The compute stage has populated our index, vertex
-        // and indirect buffers.
         for (_, chunk_index, _) in self.chunk_batch.active_chunks.iter() {
             let chunk_index = chunk_index as u64;
 
-            let chunk_index_size = 4 * index_utils::chunk_size_total() as u64;
-            let chunk_vert_size = CUBE_VERTEX_STRIDE * index_utils::chunk_size_total() as u64;
+            let chunk_index_size = 6 * 4 * index_utils::chunk_size_total() as u64;
+            let chunk_vert_size = 4 * CUBE_VERTEX_STRIDE * index_utils::chunk_size_total() as u64;
 
             rpass.set_index_buffer(
                 &self.chunk_batch.cube_index_buf.buffer(),
@@ -510,8 +511,8 @@ impl WorldRenderState {
 
 impl ChunkBatchRenderState {
     const fn max_batch_chunks() -> usize {
-        // 16 MB of video memory holds a batch
-        (1024 * 1024 * 8) / index_utils::chunk_size_total()
+        let mb_allowed = 16;
+        (1024 * 1024 * mb_allowed) / index_utils::chunk_size_total()
     }
 
     const fn max_batch_blocks() -> usize {
@@ -540,23 +541,19 @@ impl ChunkBatchRenderState {
         let block_type_helper = BufferSyncHelper::new(BufferSyncHelperDesc {
             buffer_len: Self::max_batch_blocks(),
             max_chunk_len: index_utils::chunk_size_total(),
-            usage: wgpu::BufferUsage::STORAGE
-                | wgpu::BufferUsage::STORAGE_READ
-                | wgpu::BufferUsage::COPY_DST,
+            usage: wgpu::BufferUsage::STORAGE_READ | wgpu::BufferUsage::COPY_DST,
         });
 
         let chunk_metadata_helper = BufferSyncHelper::new(BufferSyncHelperDesc {
             buffer_len: Self::metadata_size() * Self::max_batch_chunks(),
             max_chunk_len: index_utils::chunk_size_total(),
-            usage: wgpu::BufferUsage::STORAGE
-                | wgpu::BufferUsage::STORAGE_READ
-                | wgpu::BufferUsage::COPY_DST,
+            usage: wgpu::BufferUsage::STORAGE_READ | wgpu::BufferUsage::COPY_DST,
         });
 
         let cube_index_buf = OpaqueBuffer::new(
             device,
             BufferSyncHelperDesc {
-                buffer_len: 4 * Self::max_batch_blocks(),
+                buffer_len: 6 * 4 * Self::max_batch_blocks(),
                 max_chunk_len: 0,
                 usage: wgpu::BufferUsage::STORAGE | wgpu::BufferUsage::INDEX,
             },
@@ -565,7 +562,7 @@ impl ChunkBatchRenderState {
         let cube_vertex_buf = OpaqueBuffer::new(
             device,
             BufferSyncHelperDesc {
-                buffer_len: CUBE_VERTEX_STRIDE as usize * Self::max_batch_blocks(),
+                buffer_len: 4 * CUBE_VERTEX_STRIDE as usize * Self::max_batch_blocks(),
                 max_chunk_len: 0,
                 usage: wgpu::BufferUsage::STORAGE | wgpu::BufferUsage::VERTEX,
             },
@@ -574,7 +571,7 @@ impl ChunkBatchRenderState {
         let cube_indirect_buf = OpaqueBuffer::new(
             device,
             BufferSyncHelperDesc {
-                buffer_len: CUBE_VERTEX_STRIDE as usize * Self::max_batch_blocks(),
+                buffer_len: 4 * 8 * Self::max_batch_chunks(),
                 max_chunk_len: 0,
                 usage: wgpu::BufferUsage::STORAGE | wgpu::BufferUsage::INDIRECT,
             },
@@ -823,14 +820,6 @@ impl ChunkBatchRenderState {
     }
 }
 
-#[rustfmt::skip]
-pub const OPENGL_TO_WGPU_MATRIX: Matrix4<f32> = Matrix4::new(
-    1.0, 0.0, 0.0, 0.0,
-    0.0, 1.0, 0.0, 0.0,
-    0.0, 0.0, 0.5, 0.0,
-    0.0, 0.0, 0.5, 1.0,
-);
-
 impl RenderUniforms {
     #[inline]
     fn as_slices(&self) -> impl Iterator<Item = &[f32]> {
@@ -869,9 +858,9 @@ impl ComputeUniforms {
         let visible_box_limit = self.visible_box_limit.as_ref() as &[f32; 3];
         [
             visible_box_origin.as_bytes(),
-            &[0f32].as_bytes(),
+            [0f32].as_bytes(),
             visible_box_limit.as_bytes(),
-            &[0f32].as_bytes(),
+            [0f32].as_bytes(),
             self.cube.faces.as_bytes(),
         ]
     }
@@ -887,10 +876,12 @@ impl IntoBufferSynced for ComputeUniforms {
 
     fn buffer_sync_desc(&self) -> BufferSyncHelperDesc {
         let face_len = 6 * std::mem::size_of::<mesh::cube::Face>();
+        let full_len = (4 + 4) * 4 + face_len;
+
         BufferSyncHelperDesc {
-            buffer_len: (4 + 4) * 4 + face_len,
-            max_chunk_len: face_len,
-            usage: wgpu::BufferUsage::UNIFORM | wgpu::BufferUsage::COPY_DST,
+            buffer_len: full_len,
+            max_chunk_len: full_len,
+            usage: wgpu::BufferUsage::STORAGE_READ | wgpu::BufferUsage::COPY_DST,
         }
     }
 }
@@ -952,3 +943,11 @@ impl<R> Shaders<R> {
         })
     }
 }
+
+#[rustfmt::skip]
+pub const OPENGL_TO_WGPU_MATRIX: Matrix4<f32> = Matrix4::new(
+    1.0, 0.0, 0.0, 0.0,
+    0.0, 1.0, 0.0, 0.0,
+    0.0, 0.0, 0.5, 0.0,
+    0.0, 0.0, 0.5, 1.0,
+);

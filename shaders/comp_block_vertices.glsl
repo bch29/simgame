@@ -44,8 +44,7 @@ struct Vertex {
 
 struct CubeFace {
   vec4 normal;
-  uint[6] indices;
-  uint[2] _padding;
+  uint[8] indices;
   vec4[4] vertexLocs;
   vec2[4] vertexTexCoords;
 };
@@ -59,10 +58,10 @@ struct IndirectCommand {
   uint[3] _padding;
 };
 
-layout(set = 0, binding = 0) uniform Locals {
-  vec4 u_VisibleBoxOrigin;
-  vec4 u_VisibleBoxLimit;
-  CubeFace[6] u_CubeFaces;
+layout(set = 0, binding = 0) buffer Locals {
+  readonly vec4 u_VisibleBoxOrigin;
+  readonly vec4 u_VisibleBoxLimit;
+  readonly CubeFace[6] u_CubeFaces;
 };
 
 layout(set = 0, binding = 1) buffer BlockTypes {
@@ -85,8 +84,8 @@ layout(set = 0, binding = 5) buffer IndirectCommands {
   writeonly coherent IndirectCommand[] c_IndirectCommands;
 };
 
-shared uint s_OutFaceIndex;
-
+// keeps track of the number of faces produced by this work group so far
+shared uint s_GroupFaceCount;
 
 /* 
  * w component is chunk index
@@ -192,14 +191,8 @@ bool isBlockVisible(ivec4 blockAddr, int blockType)
   return blockType != 0 && inVisibleBox;
 }
 
-void pushVertices() {
-  // gl_LocalInvocationID is block pos within chunk, gl_WorkGroupID.x is chunk index
-  ivec4 blockAddr = ivec4(gl_LocalInvocationID, gl_WorkGroupID.x);
+void pushVertices(ivec4 blockAddr) {
   ChunkMetadata chunkMeta = b_ChunkMetadata[blockAddr.w];
-
-  // do not push any vertices to the buffer for inactive chunks
-  if (!chunkMeta.isActive)
-    return;
 
   int thisBlockType = getBlockType(blockAddr);
   vec3 chunkOffset = chunkMeta.offset.xyz;
@@ -215,7 +208,9 @@ void pushVertices() {
       0.0, 0.0, half_scale, 0.0,
       0.0, 0.0, 0.0, 1.0);
 
-  mat4 model = translation_matrix(offset) * rescale;
+  mat4 model = translation_matrix(offset.xyz) * rescale;
+
+  uint chunkIndexStart = blockAddr.w * CHUNK_SIZE_XYZ;
 
   for (uint faceIx = 0; faceIx < 6; faceIx++) {
     CubeFace face = u_CubeFaces[faceIx];
@@ -226,9 +221,9 @@ void pushVertices() {
     bool faceVisible = !isBlockVisible(neighborAddr, neighborBlockType);
     if (!faceVisible) continue;
 
-    uint outFaceIx = atomicAdd(s_OutFaceIndex, 1);
+    uint groupFaceIx = atomicAdd(s_GroupFaceCount, 1);
+    uint outFaceIx = chunkIndexStart + groupFaceIx;
     uint outVertexStart = 4 * outFaceIx;
-    uint outIndexStart = 6 * outFaceIx;
 
     for (uint faceVertIx = 0; faceVertIx < 4; faceVertIx++) {
       vec4 vertPos = face.vertexLocs[faceVertIx];
@@ -239,31 +234,45 @@ void pushVertices() {
       vert.normal = model * face.normal;
       vert.texCoord = texCoord;
       vert.blockType = thisBlockType;
+      vert._padding = 0.0;
 
       c_OutputVertices[outVertexStart + faceVertIx] = vert;
     }
 
+    uint firstIndex = 4 * groupFaceIx;
+    uint outIndexStart = 6 * outFaceIx;
+
     for (uint faceIndexIx = 0; faceIndexIx < 6; faceIndexIx++) {
       uint localIndex = face.indices[faceIndexIx];
-      c_OutputIndices[outIndexStart + faceIndexIx] = outVertexStart + localIndex;
+      c_OutputIndices[outIndexStart + faceIndexIx] = firstIndex + localIndex;
     }
   }
 }
 
 void main() {
-  pushVertices();
+  // gl_LocalInvocationID is block pos within chunk, gl_WorkGroupID.x is chunk index
+  ivec4 blockAddr = ivec4(gl_LocalInvocationID, gl_WorkGroupID.x);
+  ChunkMetadata chunkMeta = b_ChunkMetadata[blockAddr.w];
+
+  // Do not push any vertices to the buffer for inactive chunks. N.B. this applies across the
+  // entire work group so we don't have to worry about hitting subsequent memory barriers.
+  if (!chunkMeta.isActive)
+    return;
+
+  s_GroupFaceCount = 0;
+  memoryBarrierShared();
+
+  pushVertices(blockAddr);
 
   IndirectCommand command;
 
-  command.count = s_OutFaceIndex * 4;
+  memoryBarrier();
+  command.count = 6 * s_GroupFaceCount;
   command.instanceCount = 1;
   command.firstIndex = 0;
   command.baseVertex = 0;
   command.baseInstance = 0;
-
-  barrier();
   c_IndirectCommands[gl_WorkGroupID.x] = command;
 }
 
 // vi: ft=c
-
