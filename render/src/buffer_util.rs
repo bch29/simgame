@@ -12,11 +12,6 @@ pub struct BufferSyncedData<Data, Item> {
     buffer: Buffer,
 }
 
-pub struct OpaqueBuffer {
-    helper: BufferSyncHelper<u8>,
-    buffer: Buffer
-}
-
 #[derive(Debug, Clone)]
 pub struct BufferSyncHelper<Item> {
     desc: BufferSyncHelperDesc,
@@ -30,43 +25,21 @@ pub struct BufferSyncHelperDesc {
     pub usage: BufferUsage,
 }
 
-pub trait IntoBufferSynced {
+pub trait BufferSyncable {
     type Item;
 
+    fn sync<'a>(&self, fill_buffer: &mut FillBuffer<'a, Self::Item>, encoder: &mut CommandEncoder);
+}
+
+pub trait IntoBufferSynced: BufferSyncable {
     fn buffer_sync_desc(&self) -> BufferSyncHelperDesc;
 
-    fn buffer_synced(self, device: &wgpu::Device) -> BufferSyncedData<Self, Self::Item>
+    fn into_buffer_synced(self, device: &wgpu::Device) -> BufferSyncedData<Self, Self::Item>
     where
         Self: Sized,
     {
         let desc = self.buffer_sync_desc();
         BufferSyncedData::new(device, self, desc)
-    }
-}
-
-impl OpaqueBuffer {
-    pub fn new(device: &Device, desc: BufferSyncHelperDesc) -> Self {
-        let helper = BufferSyncHelper::new(desc);
-        let buffer = helper.make_buffer(device);
-        Self {
-            helper,
-            buffer,
-        }
-    }
-
-    #[inline]
-    pub fn buffer(&self) -> &Buffer {
-        &self.buffer
-    }
-
-    #[inline]
-    pub fn sync_helper(&self) -> &BufferSyncHelper<u8> {
-        &self.helper
-    }
-
-    #[inline]
-    pub fn as_binding(&self, index: u32) -> wgpu::Binding {
-        self.helper.as_binding(index, &self.buffer, 0)
     }
 }
 
@@ -94,45 +67,13 @@ impl<Data, Item> BufferSyncedData<Data, Item> {
     #[inline]
     pub fn sync<'a>(&'a self, device: &Device, encoder: &mut CommandEncoder)
     where
-        &'a Data: IntoIterator,
-        <&'a Data as IntoIterator>::Item: AsRef<[Item]>,
-        Item: 'static + Copy + AsBytes + FromBytes,
+        Data: BufferSyncable<Item=Item>,
+        Item: Copy + AsBytes + FromBytes + 'static
     {
-        self.sync_with(device, encoder, |x| x.into_iter())
+        let mut fill_buffer = self.helper.begin_fill_buffer(device, &self.buffer, 0);
+        self.data.sync(&mut fill_buffer, encoder);
+        fill_buffer.finish(encoder);
     }
-
-    #[inline]
-    pub fn sync_with<'a, Iter, F>(
-        &'a self,
-        device: &Device,
-        encoder: &mut CommandEncoder,
-        into_iter: F,
-    ) where
-        Iter: IntoIterator,
-        Iter::Item: AsRef<[Item]>,
-        F: FnOnce(&'a Data) -> Iter,
-        Item: 'static + Copy + AsBytes + FromBytes,
-    {
-        self.helper
-            .fill_buffer(device, encoder, &self.buffer, 0, into_iter(&self.data));
-    }
-
-    // #[inline]
-    // pub fn start_sync_with<'a, Iter, F>(
-    //     &'a self,
-    //     device: &'a Device,
-    //     into_iter: F,
-    // ) -> FillBuffer<'a, Item>
-    //     where
-    //     Iter: Iterator,
-    //     Iter::Item: AsRef<[Item]>,
-    //     F: FnOnce(&'a Data) -> Iter,
-    //     Item: 'static + Copy + AsBytes + FromBytes,
-    // {
-    //     self.helper.begin_fill_buffer(device, &self.buffer, 0)
-    //     // self.helper
-    //     //     .fill_buffer(device, encoder, &self.buffer, 0, into_iter(&self.data));
-    // }
 
     #[inline]
     pub fn buffer(&self) -> &Buffer {
@@ -433,5 +374,86 @@ where
     #[inline]
     pub fn detach(self) -> FillBuffer<'a, Item> {
         self.fill_buffer
+    }
+}
+
+pub struct OpaqueBuffer {
+    helper: BufferSyncHelper<u8>,
+    buffer: Buffer
+}
+
+impl OpaqueBuffer {
+    pub fn new(device: &Device, desc: BufferSyncHelperDesc) -> Self {
+        let helper = BufferSyncHelper::new(desc);
+        let buffer = helper.make_buffer(device);
+        Self {
+            helper,
+            buffer,
+        }
+    }
+
+    #[inline]
+    pub fn buffer(&self) -> &Buffer {
+        &self.buffer
+    }
+
+    #[inline]
+    pub fn sync_helper(&self) -> &BufferSyncHelper<u8> {
+        &self.helper
+    }
+
+    #[inline]
+    pub fn as_binding(&self, index: u32) -> wgpu::Binding {
+        self.helper.as_binding(index, &self.buffer, 0)
+    }
+}
+
+pub struct InstancedBuffer {
+    desc: InstancedBufferDesc,
+    helper: BufferSyncHelper<u8>,
+    buffer: Buffer
+}
+
+#[derive(Debug, Clone)]
+pub struct InstancedBufferDesc {
+    pub n_instances: usize,
+    pub instance_len: usize,
+    pub usage: BufferUsage
+}
+
+impl InstancedBuffer {
+    pub fn new(device: &wgpu::Device, desc: InstancedBufferDesc) -> Self {
+        let helper_desc = BufferSyncHelperDesc {
+            buffer_len: desc.n_instances * desc.instance_len,
+            max_chunk_len: 0,
+            usage: desc.usage
+        };
+        let helper = BufferSyncHelper::new(helper_desc);
+        let buffer = helper.make_buffer(device);
+        Self {
+            desc,
+            helper,
+            buffer
+        }
+    }
+
+    #[inline]
+    pub fn buffer(&self) -> &Buffer {
+        &self.buffer
+    }
+
+    #[inline]
+    pub fn sync_helper(&self) -> &BufferSyncHelper<u8> {
+        &self.helper
+    }
+
+    #[inline]
+    pub fn as_binding(&self, index: u32) -> wgpu::Binding {
+        self.helper.as_binding(index, &self.buffer, 0)
+    }
+
+    #[inline]
+    pub fn instance_offset(&self, instance: usize) -> wgpu::BufferAddress {
+        (instance * self.desc.instance_len) as _
     }
 }

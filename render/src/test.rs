@@ -304,7 +304,7 @@ pub async fn test_render(mut world: World, shaders: crate::WorldShaders<&[u8]>) 
                     world_diff.clear();
                     time_tracker.sample(Instant::now());
 
-                    log::info!(
+                    log::debug!(
                         "Frame rate: {}/{}",
                         time_tracker.min_fps(),
                         time_tracker.mean_fps()

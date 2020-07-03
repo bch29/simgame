@@ -140,6 +140,12 @@ ivec4 neighborBlockAddr(ivec4 blockAddr, vec3 direction)
     int(isOutside) * b_ChunkMetadata[blockAddr.w].neighborIndices[outsideDirIndex]
     + int(!isOutside) * blockAddr.w;
 
+  bool activeNeighbor = neighborChunkIndex != -1 && b_ChunkMetadata[neighborChunkIndex].isActive;
+
+  neighborChunkIndex =
+    int(activeNeighbor) * neighborChunkIndex
+    + int(!activeNeighbor) * -1;
+
   posInChunk -= ivec3(CHUNK_SIZE_X, CHUNK_SIZE_Y, CHUNK_SIZE_Z) * outsideDir;
 
   return ivec4(posInChunk.xyz, neighborChunkIndex);

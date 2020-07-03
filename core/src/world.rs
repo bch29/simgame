@@ -1,5 +1,6 @@
 #![allow(unused_variables)]
 #![allow(dead_code)]
+#![allow(unused_imports)]
 
 use std::collections::HashSet;
 
@@ -28,18 +29,18 @@ impl World {
 
     /// Moves the world forward by one tick. Records anything that changed in the 'updated_state'.
     pub fn tick(&mut self, updated_state: &mut UpdatedWorldState) {
-        let bounds = Bounds::new(Point3::new(32, 32, 0), Vector3::new(16, 16, 1024));
-        for _ in 0..1024 {
-            let point = bounds.origin()
-                + Vector3 {
-                    x: self.rng.gen::<usize>() % bounds.size().x,
-                    y: self.rng.gen::<usize>() % bounds.size().y,
-                    z: self.rng.gen::<usize>() % bounds.size().z,
-                };
-            self.blocks.set_block(point, Block::from_u16(1));
-            let (chunk_pos, _) = crate::block::index_utils::to_chunk_pos(point);
-            updated_state.record_chunk_update(chunk_pos);
-        }
+        // let bounds = Bounds::new(Point3::new(32, 32, 0), Vector3::new(16, 16, 1024));
+        // for _ in 0..1024 {
+        //     let point = bounds.origin()
+        //         + Vector3 {
+        //             x: self.rng.gen::<usize>() % bounds.size().x,
+        //             y: self.rng.gen::<usize>() % bounds.size().y,
+        //             z: self.rng.gen::<usize>() % bounds.size().z,
+        //         };
+        //     self.blocks.set_block(point, Block::from_u16(1));
+        //     let (chunk_pos, _) = crate::block::index_utils::to_chunk_pos(point);
+        //     updated_state.record_chunk_update(chunk_pos);
+        // }
     }
 }
 
