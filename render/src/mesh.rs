@@ -6,9 +6,9 @@ use zerocopy::AsBytes;
 #[derive(Clone, Copy, Debug, AsBytes)]
 #[repr(C)]
 pub struct Vertex {
-    pos: [f32; 4],
-    normal: [f32; 3],
-    tex_coord: [f32; 2],
+    pub pos: [f32; 4],
+    pub normal: [f32; 3],
+    pub tex_coord: [f32; 2],
 }
 
 #[derive(Clone, Debug)]

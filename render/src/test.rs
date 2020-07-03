@@ -17,6 +17,8 @@ use crate::{RenderInit, RenderState, WorldRenderInit};
 const GAME_STEP_MILLIS: u64 = 10;
 const RENDER_INTERVAL_MILLIS: u64 = 1000 / 60;
 
+const INITIAL_VISIBLE_SIZE: Vector3<i32> = Vector3::new(5, 5, 5);
+
 pub fn build_window(
     event_loop: &winit::event_loop::EventLoop<()>,
 ) -> Result<winit::window::Window> {
@@ -148,7 +150,7 @@ impl ControlState {
                 },
             ),
             visible_height_state: AccelControlState::new(
-                5.0,
+                INITIAL_VISIBLE_SIZE.z as f64,
                 AccelControlParams {
                     min_value: Some(1.0),
                     ..base_accel_params
@@ -249,7 +251,7 @@ pub async fn test_render(mut world: World, shaders: crate::WorldShaders<&[u8]>) 
     let mut view_state = world::ViewParams {
         camera_pos: Point3::new(0f32, 0f32, 20f32),
         z_level: 1,
-        visible_size: Vector3::new(128, 128, 5),
+        visible_size: INITIAL_VISIBLE_SIZE,
     };
     render_state.set_world_view(view_state.clone());
     render_state.init(&world);

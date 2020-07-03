@@ -12,6 +12,11 @@ pub struct BufferSyncedData<Data, Item> {
     buffer: Buffer,
 }
 
+pub struct OpaqueBuffer {
+    helper: BufferSyncHelper<u8>,
+    buffer: Buffer
+}
+
 #[derive(Debug, Clone)]
 pub struct BufferSyncHelper<Item> {
     desc: BufferSyncHelperDesc,
@@ -22,7 +27,7 @@ pub struct BufferSyncHelper<Item> {
 pub struct BufferSyncHelperDesc {
     pub buffer_len: usize,
     pub max_chunk_len: usize,
-    pub gpu_usage: BufferUsage,
+    pub usage: BufferUsage,
 }
 
 pub trait IntoBufferSynced {
@@ -39,8 +44,36 @@ pub trait IntoBufferSynced {
     }
 }
 
+impl OpaqueBuffer {
+    pub fn new(device: &Device, desc: BufferSyncHelperDesc) -> Self {
+        let helper = BufferSyncHelper::new(desc);
+        let buffer = helper.make_buffer(device);
+        Self {
+            helper,
+            buffer,
+        }
+    }
+
+    #[inline]
+    pub fn buffer(&self) -> &Buffer {
+        &self.buffer
+    }
+
+    #[inline]
+    pub fn sync_helper(&self) -> &BufferSyncHelper<u8> {
+        &self.helper
+    }
+
+    #[inline]
+    pub fn as_binding(&self, index: u32) -> wgpu::Binding {
+        self.helper.as_binding(index, &self.buffer, 0)
+    }
+}
+
 impl<Data, Item> BufferSyncedData<Data, Item> {
     pub fn new(device: &Device, data: Data, desc: BufferSyncHelperDesc) -> Self {
+        assert!(desc.usage.contains(wgpu::BufferUsage::COPY_DST));
+
         let helper = BufferSyncHelper::new(desc);
         let buffer = helper.make_buffer(device);
         BufferSyncedData {
@@ -75,7 +108,7 @@ impl<Data, Item> BufferSyncedData<Data, Item> {
         encoder: &mut CommandEncoder,
         into_iter: F,
     ) where
-        Iter: Iterator,
+        Iter: IntoIterator,
         Iter::Item: AsRef<[Item]>,
         F: FnOnce(&'a Data) -> Iter,
         Item: 'static + Copy + AsBytes + FromBytes,
@@ -137,7 +170,7 @@ impl<Item> BufferSyncHelper<Item> {
         device.create_buffer(&BufferDescriptor {
             label: None,
             size: (self.desc.buffer_len * std::mem::size_of::<Item>()) as u64,
-            usage: BufferUsage::COPY_DST | self.desc.gpu_usage,
+            usage: self.desc.usage,
         })
     }
 

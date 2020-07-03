@@ -12,11 +12,12 @@ use simgame_core::{
 };
 
 use crate::buffer_util::{
-    BufferSyncHelper, BufferSyncHelperDesc, BufferSyncedData, IntoBufferSynced,
+    BufferSyncHelper, BufferSyncHelperDesc, BufferSyncedData, IntoBufferSynced, OpaqueBuffer,
 };
 use crate::mesh;
 
 const LOOK_AT_DIR: Vector3<f32> = Vector3::new(1., 1., -3.);
+const CUBE_VERTEX_STRIDE: u64 = 16 + 16 + 8 + 4 + 4;
 
 #[derive(Debug, Clone)]
 pub struct ViewParams {
@@ -28,6 +29,7 @@ pub struct ViewParams {
 pub struct Shaders<R> {
     pub vert: R,
     pub frag: R,
+    pub comp: R,
 }
 
 pub struct WorldRenderInit<R> {
@@ -37,33 +39,75 @@ pub struct WorldRenderInit<R> {
     pub height: u32,
 }
 
+pub struct ComputeData {
+    pipeline: wgpu::ComputePipeline,
+    uniforms: BufferSyncedData<ComputeUniforms, u8>,
+    bind_group_layout: wgpu::BindGroupLayout,
+}
+
+pub struct RenderData {
+    pipeline: wgpu::RenderPipeline,
+    uniforms: BufferSyncedData<RenderUniforms, f32>,
+    bind_group_layout: wgpu::BindGroupLayout,
+    depth_texture: wgpu::TextureView,
+}
+
 pub struct WorldRenderState {
-    render_pipeline: wgpu::RenderPipeline,
-    cube_vertex_buf: wgpu::Buffer,
-    cube_index_buf: wgpu::Buffer,
-    cube_mesh: mesh::Mesh,
+    compute_data: ComputeData,
+    render_data: RenderData,
 
     view_params: ViewParams,
-    uniforms: BufferSyncedData<Uniforms, f32>,
 
-    bind_group_layout: wgpu::BindGroupLayout,
     rotation: Matrix4<f32>,
-    depth_texture: wgpu::TextureView,
 
     chunk_batch: ChunkBatchRenderState,
+    needs_compute_pass: bool,
+
     // /// Contains textures for each block type.
     // /// Dimensions are 16x16xN, where N is number of block types.
     // block_master_texture: wgpu::TextureView,
 }
 
 #[repr(C)]
-struct Uniforms {
+struct RenderUniforms {
     proj: Matrix4<f32>,
     view: Matrix4<f32>,
     model: Matrix4<f32>,
     camera_pos: Point3<f32>,
+}
+
+#[repr(C)]
+struct ComputeUniforms {
     visible_box_origin: Point3<f32>,
     visible_box_limit: Point3<f32>,
+    cube: mesh::cube::Cube,
+}
+
+type ActiveChunks = crate::stable_map::StableMap<Point3<i32>, ()>;
+
+struct ChunkBatchRenderState {
+    active_chunks: ActiveChunks,
+    chunk_metadata_helper: BufferSyncHelper<u8>,
+    chunk_metadata_buf: wgpu::Buffer,
+    block_type_helper: BufferSyncHelper<u16>,
+    block_type_buf: wgpu::Buffer,
+    active_view_box: Option<Bounds<i32>>,
+
+    cube_vertex_buf: OpaqueBuffer,
+    cube_index_buf: OpaqueBuffer,
+    cube_indirect_buf: OpaqueBuffer,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone)]
+struct ChunkMeta {
+    offset: Point3<f32>,
+    // padding to align offset and neighbor indices to 16 bytes
+    _padding0: [f32; 1],
+    neighbor_indices: [i32; 6],
+    active: bool,
+    // padding to align struct to 16 bytes
+    _padding1: i32,
 }
 
 impl WorldRenderState {
@@ -71,7 +115,9 @@ impl WorldRenderState {
         if params.visible_size != self.view_params.visible_size {
             self.chunk_batch.set_visible_size(params.visible_size);
         }
-        self.uniforms.update_view_params(&self.view_params);
+        self.render_data
+            .uniforms
+            .update_view_params(&self.view_params);
         self.view_params = params;
     }
 
@@ -83,125 +129,221 @@ impl WorldRenderState {
             Ok(device.create_shader_module(&wgpu::read_spirv(stream)?))
         })?;
 
-        let bind_group_layout =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("simgame_render::world::WorldRenderState"),
-                bindings: &[
-                    // Uniforms
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: wgpu::ShaderStage::VERTEX,
-                        ty: wgpu::BindingType::UniformBuffer { dynamic: false },
-                    },
-                    // Block type buffer
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 1,
-                        visibility: wgpu::ShaderStage::VERTEX,
-                        ty: wgpu::BindingType::StorageBuffer {
-                            dynamic: false,
-                            readonly: true,
-                        },
-                    },
-                    // Chunk offset buffer
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 2,
-                        visibility: wgpu::ShaderStage::VERTEX,
-                        ty: wgpu::BindingType::StorageBuffer {
-                            dynamic: false,
-                            readonly: true,
-                        },
-                    },
-                ],
-            });
-        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            bind_group_layouts: &[&bind_group_layout],
-        });
-
-        let cube_mesh = mesh::cube::create();
-        let cube_vertex_buf = cube_mesh.vertex_buffer(device);
-        let cube_index_buf = cube_mesh.index_buffer(device);
-
-        let depth_texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("simgame_render::world::WorldRenderState/depth"),
-            size: wgpu::Extent3d {
-                width: init.width,
-                height: init.height,
-                depth: 1,
-            },
-            array_layer_count: 1,
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Depth32Float,
-            usage: wgpu::TextureUsage::OUTPUT_ATTACHMENT,
-        });
-
         let view_params = ViewParams::default();
 
-        let mut uniforms = Uniforms {
-            proj: OPENGL_TO_WGPU_MATRIX
-                * cgmath::perspective(Deg(70f32), init.aspect_ratio, 1.0, 1000.0),
-            view: Matrix4::look_at_dir(Point3::new(0., 0., 0.), LOOK_AT_DIR, Vector3::unit_z()),
-            model: Matrix4::<f32>::identity(),
-            camera_pos: Point3::origin(),
-            visible_box_origin: Point3::origin(),
-            visible_box_limit: Point3::origin(),
-        }
-        .buffer_synced(device);
-        uniforms.update_view_params(&view_params);
+        let compute_data = {
+            let uniforms = ComputeUniforms {
+                visible_box_origin: Point3::origin(),
+                visible_box_limit: Point3::origin(),
+                cube: mesh::cube::Cube::new(),
+            }
+            .buffer_synced(device);
 
-        let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            layout: &pipeline_layout,
-            vertex_stage: wgpu::ProgrammableStageDescriptor {
-                module: &shaders.vert,
-                entry_point: "main",
-            },
-            fragment_stage: Some(wgpu::ProgrammableStageDescriptor {
-                module: &shaders.frag,
-                entry_point: "main",
-            }),
-            rasterization_state: Some(wgpu::RasterizationStateDescriptor {
-                front_face: wgpu::FrontFace::Ccw,
-                cull_mode: wgpu::CullMode::Back,
-                depth_bias: 0,
-                depth_bias_slope_scale: 0.0,
-                depth_bias_clamp: 0.0,
-            }),
-            primitive_topology: wgpu::PrimitiveTopology::TriangleList,
-            color_states: &[wgpu::ColorStateDescriptor {
-                format: wgpu::TextureFormat::Bgra8UnormSrgb,
-                color_blend: wgpu::BlendDescriptor::REPLACE,
-                alpha_blend: wgpu::BlendDescriptor::REPLACE,
-                write_mask: wgpu::ColorWrite::ALL,
-            }],
-            depth_stencil_state: Some(wgpu::DepthStencilStateDescriptor {
+            let bind_group_layout =
+                device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                    label: Some("simgame_render::world::WorldRenderState/compute/layout"),
+                    bindings: &[
+                        // Uniforms
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 0,
+                            visibility: wgpu::ShaderStage::COMPUTE,
+                            ty: wgpu::BindingType::UniformBuffer { dynamic: false },
+                        },
+                        // Block type buffer
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 1,
+                            visibility: wgpu::ShaderStage::COMPUTE,
+                            ty: wgpu::BindingType::StorageBuffer {
+                                dynamic: false,
+                                readonly: true,
+                            },
+                        },
+                        // Chunk metadata buffer
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 2,
+                            visibility: wgpu::ShaderStage::COMPUTE,
+                            ty: wgpu::BindingType::StorageBuffer {
+                                dynamic: false,
+                                readonly: true,
+                            },
+                        },
+                        // Output vertex buffer
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 3,
+                            visibility: wgpu::ShaderStage::COMPUTE,
+                            ty: wgpu::BindingType::StorageBuffer {
+                                dynamic: false,
+                                readonly: false,
+                            },
+                        },
+                        // Output index buffer
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 4,
+                            visibility: wgpu::ShaderStage::COMPUTE,
+                            ty: wgpu::BindingType::StorageBuffer {
+                                dynamic: false,
+                                readonly: false,
+                            },
+                        },
+                        // Output indirect buffer
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 5,
+                            visibility: wgpu::ShaderStage::COMPUTE,
+                            ty: wgpu::BindingType::StorageBuffer {
+                                dynamic: false,
+                                readonly: false,
+                            },
+                        },
+                    ],
+                });
+
+            let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                bind_group_layouts: &[&bind_group_layout],
+            });
+
+            let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                layout: &pipeline_layout,
+                compute_stage: wgpu::ProgrammableStageDescriptor {
+                    module: &shaders.comp,
+                    entry_point: "main",
+                },
+            });
+
+            ComputeData {
+                pipeline,
+                uniforms,
+                bind_group_layout,
+            }
+        };
+
+        let render_data = {
+            let mut uniforms = RenderUniforms {
+                proj: OPENGL_TO_WGPU_MATRIX
+                    * cgmath::perspective(Deg(70f32), init.aspect_ratio, 1.0, 1000.0),
+                view: Matrix4::look_at_dir(
+                    Point3::new(0., 0., 0.),
+                    LOOK_AT_DIR,
+                    Vector3::unit_z(),
+                ),
+                model: Matrix4::<f32>::identity(),
+                camera_pos: Point3::origin(),
+            }
+            .buffer_synced(device);
+            uniforms.update_view_params(&view_params);
+
+            let bind_group_layout =
+                device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                    label: Some("simgame_render::world::WorldRenderState/vertex/layout"),
+                    bindings: &[
+                        // Uniforms
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 0,
+                            visibility: wgpu::ShaderStage::VERTEX,
+                            ty: wgpu::BindingType::UniformBuffer { dynamic: false },
+                        },
+                    ],
+                });
+
+            let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                bind_group_layouts: &[&bind_group_layout],
+            });
+
+            let depth_texture = device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("simgame_render::world::WorldRenderState/depth"),
+                size: wgpu::Extent3d {
+                    width: init.width,
+                    height: init.height,
+                    depth: 1,
+                },
+                array_layer_count: 1,
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
                 format: wgpu::TextureFormat::Depth32Float,
-                depth_write_enabled: true,
-                depth_compare: wgpu::CompareFunction::Less,
-                stencil_front: wgpu::StencilStateFaceDescriptor::IGNORE,
-                stencil_back: wgpu::StencilStateFaceDescriptor::IGNORE,
-                stencil_read_mask: 0u32,
-                stencil_write_mask: 0u32,
-            }),
-            vertex_state: wgpu::VertexStateDescriptor {
-                index_format: cube_mesh.index_format(),
-                vertex_buffers: &[cube_mesh.vertex_buffer_descriptor()],
-            },
-            sample_count: 1,
-            sample_mask: !0,
-            alpha_to_coverage_enabled: false,
-        });
+                usage: wgpu::TextureUsage::OUTPUT_ATTACHMENT,
+            });
+
+            let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                layout: &pipeline_layout,
+                vertex_stage: wgpu::ProgrammableStageDescriptor {
+                    module: &shaders.vert,
+                    entry_point: "main",
+                },
+                fragment_stage: Some(wgpu::ProgrammableStageDescriptor {
+                    module: &shaders.frag,
+                    entry_point: "main",
+                }),
+                rasterization_state: Some(wgpu::RasterizationStateDescriptor {
+                    front_face: wgpu::FrontFace::Ccw,
+                    cull_mode: wgpu::CullMode::Back,
+                    depth_bias: 0,
+                    depth_bias_slope_scale: 0.0,
+                    depth_bias_clamp: 0.0,
+                }),
+                primitive_topology: wgpu::PrimitiveTopology::TriangleList,
+                color_states: &[wgpu::ColorStateDescriptor {
+                    format: wgpu::TextureFormat::Bgra8UnormSrgb,
+                    color_blend: wgpu::BlendDescriptor::REPLACE,
+                    alpha_blend: wgpu::BlendDescriptor::REPLACE,
+                    write_mask: wgpu::ColorWrite::ALL,
+                }],
+                depth_stencil_state: Some(wgpu::DepthStencilStateDescriptor {
+                    format: wgpu::TextureFormat::Depth32Float,
+                    depth_write_enabled: true,
+                    depth_compare: wgpu::CompareFunction::Less,
+                    stencil_front: wgpu::StencilStateFaceDescriptor::IGNORE,
+                    stencil_back: wgpu::StencilStateFaceDescriptor::IGNORE,
+                    stencil_read_mask: 0u32,
+                    stencil_write_mask: 0u32,
+                }),
+                vertex_state: wgpu::VertexStateDescriptor {
+                    index_format: wgpu::IndexFormat::Uint32,
+                    vertex_buffers: &[wgpu::VertexBufferDescriptor {
+                        stride: CUBE_VERTEX_STRIDE,
+                        step_mode: wgpu::InputStepMode::Vertex,
+                        attributes: &[
+                            wgpu::VertexAttributeDescriptor {
+                                format: wgpu::VertexFormat::Float4,
+                                offset: 0,
+                                shader_location: 0,
+                            },
+                            wgpu::VertexAttributeDescriptor {
+                                format: wgpu::VertexFormat::Float4,
+                                offset: 4 * 4,
+                                shader_location: 1,
+                            },
+                            wgpu::VertexAttributeDescriptor {
+                                format: wgpu::VertexFormat::Float2,
+                                offset: (4 + 4) * 4,
+                                shader_location: 2,
+                            },
+                            wgpu::VertexAttributeDescriptor {
+                                format: wgpu::VertexFormat::Uint,
+                                offset: (4 + 4 + 2) * 4,
+                                shader_location: 3,
+                            },
+                        ],
+                    }],
+                },
+                sample_count: 1,
+                sample_mask: !0,
+                alpha_to_coverage_enabled: false,
+            });
+
+            RenderData {
+                pipeline,
+                uniforms,
+                bind_group_layout,
+                depth_texture: depth_texture.create_default_view(),
+            }
+        };
 
         Ok(WorldRenderState {
-            render_pipeline,
-            cube_mesh,
-            cube_vertex_buf,
-            cube_index_buf,
-            uniforms,
-            bind_group_layout,
+            compute_data,
+            render_data,
             rotation: Matrix4::identity(),
-            depth_texture: depth_texture.create_default_view(),
             chunk_batch: ChunkBatchRenderState::new(device, view_params.visible_size),
+            needs_compute_pass: false,
             view_params,
         })
     }
@@ -212,63 +354,111 @@ impl WorldRenderState {
         frame: &wgpu::SwapChainOutput,
         encoder: &mut wgpu::CommandEncoder,
     ) {
+        if self.needs_compute_pass {
+            self.compute_pass(device, encoder);
+        }
+        self.render_pass(device, frame, encoder);
+    }
+
+    fn compute_pass(&mut self, device: &wgpu::Device, encoder: &mut wgpu::CommandEncoder) {
+        let uniform_slices = self.compute_data.uniforms.as_slices();
+
+        self.compute_data
+            .uniforms
+            .sync_with(device, encoder, |_| &uniform_slices);
+
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: None,
+            layout: &self.compute_data.bind_group_layout,
+            bindings: &[
+                self.compute_data.uniforms.as_binding(0),
+                self.chunk_batch.block_type_binding(1),
+                self.chunk_batch.chunk_metadata_binding(2),
+                self.chunk_batch.cube_vertex_buf.as_binding(3),
+                self.chunk_batch.cube_index_buf.as_binding(4),
+                self.chunk_batch.cube_indirect_buf.as_binding(5),
+            ],
+        });
+
+        let mut cpass = encoder.begin_compute_pass();
+
+        cpass.set_pipeline(&self.compute_data.pipeline);
+        cpass.set_bind_group(0, &bind_group, &[]);
+
+        cpass.dispatch(self.chunk_batch.count_chunks() as u32, 1, 1);
+    }
+
+    fn render_pass(
+        &mut self,
+        device: &wgpu::Device,
+        frame: &wgpu::SwapChainOutput,
+        encoder: &mut wgpu::CommandEncoder,
+    ) {
         let background_color = wgpu::Color::BLACK;
 
-        self.uniforms.model = self.rotation;
-        self.uniforms
+        self.render_data.uniforms.model = self.rotation;
+        self.render_data
+            .uniforms
             .sync_with(device, encoder, |data| data.as_slices());
 
-        {
-            let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: None,
-                layout: &self.bind_group_layout,
-                bindings: &[
-                    self.uniforms.as_binding(0),
-                    self.chunk_batch.block_type_binding(1),
-                    self.chunk_batch.chunk_metadata_binding(2),
-                ],
-            });
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: None,
+            layout: &self.render_data.bind_group_layout,
+            bindings: &[self.render_data.uniforms.as_binding(0)],
+        });
 
-            let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                color_attachments: &[wgpu::RenderPassColorAttachmentDescriptor {
-                    attachment: &frame.view,
-                    resolve_target: None,
-                    load_op: wgpu::LoadOp::Clear,
-                    store_op: wgpu::StoreOp::Store,
-                    clear_color: background_color,
-                }],
-                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachmentDescriptor {
-                    attachment: &self.depth_texture,
-                    depth_load_op: wgpu::LoadOp::Clear,
-                    depth_store_op: wgpu::StoreOp::Store,
-                    stencil_load_op: wgpu::LoadOp::Clear,
-                    stencil_store_op: wgpu::StoreOp::Store,
-                    clear_depth: 1.0,
-                    clear_stencil: 0,
-                }),
-            });
-            rpass.set_pipeline(&self.render_pipeline);
-            rpass.set_bind_group(0, &bind_group, &[]);
-            rpass.set_index_buffer(&self.cube_index_buf, 0, self.cube_mesh.index_buffer_size());
+        let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            color_attachments: &[wgpu::RenderPassColorAttachmentDescriptor {
+                attachment: &frame.view,
+                resolve_target: None,
+                load_op: wgpu::LoadOp::Clear,
+                store_op: wgpu::StoreOp::Store,
+                clear_color: background_color,
+            }],
+            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachmentDescriptor {
+                attachment: &self.render_data.depth_texture,
+                depth_load_op: wgpu::LoadOp::Clear,
+                depth_store_op: wgpu::StoreOp::Store,
+                stencil_load_op: wgpu::LoadOp::Clear,
+                stencil_store_op: wgpu::StoreOp::Store,
+                clear_depth: 1.0,
+                clear_stencil: 0,
+            }),
+        });
+        rpass.set_pipeline(&self.render_data.pipeline);
+        rpass.set_bind_group(0, &bind_group, &[]);
+
+        // One draw call per visible chunk. The compute stage has populated our index, vertex
+        // and indirect buffers.
+        for (_, chunk_index, _) in self.chunk_batch.active_chunks.iter() {
+            let chunk_index = chunk_index as u64;
+
+            let chunk_index_size = 4 * index_utils::chunk_size_total() as u64;
+            let chunk_vert_size = CUBE_VERTEX_STRIDE * index_utils::chunk_size_total() as u64;
+
+            rpass.set_index_buffer(
+                &self.chunk_batch.cube_index_buf.buffer(),
+                chunk_index * chunk_index_size,
+                (1 + chunk_index) * chunk_index_size,
+            );
 
             rpass.set_vertex_buffer(
                 0,
-                &self.cube_vertex_buf,
-                0,
-                self.cube_mesh.vertex_buffer_size(),
+                &self.chunk_batch.cube_vertex_buf.buffer(),
+                chunk_index * chunk_vert_size,
+                (1 + chunk_index) * chunk_vert_size,
             );
 
-            rpass.draw_indexed(
-                0..self.cube_mesh.indices.len() as u32,
-                0,
-                0..(index_utils::chunk_size_total() * self.chunk_batch.count_chunks()) as u32,
+            rpass.draw_indexed_indirect(
+                &self.chunk_batch.cube_indirect_buf.buffer(),
+                chunk_index * 4 * 8,
             );
         }
     }
 
     /// Calculates the box containing chunks that will be rendered according to current view.
     fn calculate_view_box(&self, world: &World) -> Option<Bounds<i32>> {
-        let mut center = self.uniforms.camera_pos + 60. * LOOK_AT_DIR;
+        let mut center = self.render_data.uniforms.camera_pos + 60. * LOOK_AT_DIR;
         center.z = self.view_params.z_level as f32 - 0.5;
         let size = convert_vec!(self.view_params.visible_size, f32);
         let float_bounds = Bounds::new(center - 0.5 * size, size);
@@ -291,11 +481,11 @@ impl WorldRenderState {
     ) {
         let active_view_box = self.calculate_view_box(world);
         if let Some(active_view_box) = active_view_box {
-            self.uniforms.update_view_box(active_view_box);
+            self.compute_data.uniforms.update_view_box(active_view_box);
             self.chunk_batch.update_view_box(active_view_box, world);
         }
 
-        self.chunk_batch.update_buffers(device, encoder, world);
+        self.needs_compute_pass = self.chunk_batch.update_buffers(device, encoder, world);
     }
 
     pub fn update(
@@ -307,37 +497,15 @@ impl WorldRenderState {
     ) {
         let active_view_box = self.calculate_view_box(world);
         if let Some(active_view_box) = active_view_box {
-            self.uniforms.update_view_box(active_view_box);
+            self.compute_data.uniforms.update_view_box(active_view_box);
             self.chunk_batch.update_view_box(active_view_box, world);
         } else {
             self.chunk_batch.clear_view_box();
         }
 
         self.chunk_batch.apply_chunk_diff(world, diff);
-        self.chunk_batch.update_buffers(device, encoder, world);
+        self.needs_compute_pass = self.chunk_batch.update_buffers(device, encoder, world);
     }
-}
-
-type ActiveChunks = crate::stable_map::StableMap<Point3<i32>, ()>;
-
-struct ChunkBatchRenderState {
-    active_chunks: ActiveChunks,
-    chunk_metadata_helper: BufferSyncHelper<u8>,
-    chunk_metadata_buf: wgpu::Buffer,
-    block_type_helper: BufferSyncHelper<u16>,
-    block_type_buf: wgpu::Buffer,
-    active_view_box: Option<Bounds<i32>>,
-}
-
-#[repr(C)]
-#[derive(Debug, Clone)]
-struct ChunkMeta {
-    offset: Point3<f32>,
-    // padding to align offset and neighbor indices to 16 bytes
-    _padding0: [f32; 1],
-    neighbor_indices: [i32; 6],
-    // padding to align struct to 16 bytes
-    _padding1: [i32; 2],
 }
 
 impl ChunkBatchRenderState {
@@ -372,14 +540,45 @@ impl ChunkBatchRenderState {
         let block_type_helper = BufferSyncHelper::new(BufferSyncHelperDesc {
             buffer_len: Self::max_batch_blocks(),
             max_chunk_len: index_utils::chunk_size_total(),
-            gpu_usage: wgpu::BufferUsage::STORAGE | wgpu::BufferUsage::STORAGE_READ,
+            usage: wgpu::BufferUsage::STORAGE
+                | wgpu::BufferUsage::STORAGE_READ
+                | wgpu::BufferUsage::COPY_DST,
         });
 
         let chunk_metadata_helper = BufferSyncHelper::new(BufferSyncHelperDesc {
             buffer_len: Self::metadata_size() * Self::max_batch_chunks(),
             max_chunk_len: index_utils::chunk_size_total(),
-            gpu_usage: wgpu::BufferUsage::STORAGE | wgpu::BufferUsage::STORAGE_READ,
+            usage: wgpu::BufferUsage::STORAGE
+                | wgpu::BufferUsage::STORAGE_READ
+                | wgpu::BufferUsage::COPY_DST,
         });
+
+        let cube_index_buf = OpaqueBuffer::new(
+            device,
+            BufferSyncHelperDesc {
+                buffer_len: 4 * Self::max_batch_blocks(),
+                max_chunk_len: 0,
+                usage: wgpu::BufferUsage::STORAGE | wgpu::BufferUsage::INDEX,
+            },
+        );
+
+        let cube_vertex_buf = OpaqueBuffer::new(
+            device,
+            BufferSyncHelperDesc {
+                buffer_len: CUBE_VERTEX_STRIDE as usize * Self::max_batch_blocks(),
+                max_chunk_len: 0,
+                usage: wgpu::BufferUsage::STORAGE | wgpu::BufferUsage::VERTEX,
+            },
+        );
+
+        let cube_indirect_buf = OpaqueBuffer::new(
+            device,
+            BufferSyncHelperDesc {
+                buffer_len: CUBE_VERTEX_STRIDE as usize * Self::max_batch_blocks(),
+                max_chunk_len: 0,
+                usage: wgpu::BufferUsage::STORAGE | wgpu::BufferUsage::INDIRECT,
+            },
+        );
 
         ChunkBatchRenderState {
             active_chunks,
@@ -388,6 +587,9 @@ impl ChunkBatchRenderState {
             chunk_metadata_buf: chunk_metadata_helper.make_buffer(device),
             chunk_metadata_helper,
             active_view_box: None,
+            cube_index_buf,
+            cube_vertex_buf,
+            cube_indirect_buf,
         }
     }
 
@@ -507,31 +709,35 @@ impl ChunkBatchRenderState {
         device: &wgpu::Device,
         encoder: &mut wgpu::CommandEncoder,
         world: &World,
-    ) {
+    ) -> bool {
         let mut any_updates = false;
 
         let mut fill_block_types =
             self.block_type_helper
                 .begin_fill_buffer(device, &self.block_type_buf, 0);
 
+        let mut fill_chunk_metadatas =
+            self.chunk_metadata_helper
+                .begin_fill_buffer(device, &self.chunk_metadata_buf, 0);
+
         // Copy chunk data to GPU buffers for only the chunks that have changed since last time
         // buffers were updated.
         for (index, opt_point) in self.active_chunks.take_diff().changed_entries().into_iter() {
             any_updates = true;
 
-            let zeroes: [u16; index_utils::chunk_size_total()];
-            let chunk_data: &[u16];
-
             if let Some((&p, _)) = opt_point {
                 let chunk = world.blocks.chunks().get(convert_point!(p, usize)).unwrap();
-                chunk_data = block::blocks_to_u16(&chunk.blocks);
+                let chunk_data = block::blocks_to_u16(&chunk.blocks);
+                fill_block_types.seek(encoder, index * index_utils::chunk_size_total());
+                fill_block_types.advance(encoder, chunk_data);
             } else {
-                zeroes = [0; index_utils::chunk_size_total()];
-                chunk_data = &zeroes;
+                // if a chunk was deleted, write inactive metadata
+                let meta = ChunkMeta::empty();
+                fill_chunk_metadatas.seek(encoder, index * Self::metadata_size());
+                for slice in &meta.as_slices() {
+                    fill_chunk_metadatas.advance(encoder, slice);
+                }
             }
-
-            fill_block_types.seek(encoder, index * index_utils::chunk_size_total());
-            fill_block_types.advance(encoder, chunk_data);
         }
 
         fill_block_types.finish(encoder);
@@ -541,22 +747,18 @@ impl ChunkBatchRenderState {
             // need to update new/deleted chunks and those with neighbours that are new/deleted.
             // Updating everything doesn't cost too much though.
 
-            let mut fill_chunk_metadatas =
-                self.chunk_metadata_helper
-                    .begin_fill_buffer(device, &self.chunk_metadata_buf, 0);
-
             for (&point, index, _) in self.active_chunks.iter() {
                 let meta = Self::make_chunk_meta(&self.active_chunks, point);
                 fill_chunk_metadatas.seek(encoder, index * Self::metadata_size());
-                let offset_vec = meta.offset.as_ref() as &[f32; 3];
-                fill_chunk_metadatas.advance(encoder, offset_vec.as_bytes());
-                fill_chunk_metadatas.advance(encoder, meta._padding0.as_bytes());
-                fill_chunk_metadatas.advance(encoder, meta.neighbor_indices.as_bytes());
-                fill_chunk_metadatas.advance(encoder, meta._padding1.as_bytes());
+                for slice in &meta.as_slices() {
+                    fill_chunk_metadatas.advance(encoder, slice);
+                }
             }
 
             fill_chunk_metadatas.finish(encoder);
         }
+
+        any_updates
     }
 
     fn block_type_binding(&self, index: u32) -> wgpu::Binding {
@@ -604,7 +806,8 @@ impl ChunkBatchRenderState {
             offset,
             _padding0: [0f32],
             neighbor_indices,
-            _padding1: [0, 0],
+            active: true,
+            _padding1: 0,
         }
     }
 
@@ -620,17 +823,6 @@ impl ChunkBatchRenderState {
     }
 }
 
-// impl ChunkMeta {
-//     fn empty() -> Self {
-//         Self {
-//             offset: Point3::new(0f32, 0f32, 0f32),
-//             _padding0: [0f32],
-//             neighbor_indices: [-1, -1, -1, -1, -1, -1],
-//             _padding1: [0, 0],
-//         }
-//     }
-// }
-
 #[rustfmt::skip]
 pub const OPENGL_TO_WGPU_MATRIX: Matrix4<f32> = Matrix4::new(
     1.0, 0.0, 0.0, 0.0,
@@ -639,29 +831,18 @@ pub const OPENGL_TO_WGPU_MATRIX: Matrix4<f32> = Matrix4::new(
     0.0, 0.0, 0.5, 1.0,
 );
 
-impl Uniforms {
+impl RenderUniforms {
     #[inline]
     fn as_slices(&self) -> impl Iterator<Item = &[f32]> {
         let proj: &[f32; 16] = self.proj.as_ref();
         let view: &[f32; 16] = self.view.as_ref();
         let model: &[f32; 16] = self.model.as_ref();
         let camera_pos: &[f32; 3] = self.camera_pos.as_ref();
-        let visible_box_origin: &[f32; 3] = self.visible_box_origin.as_ref();
-        let visible_box_limit: &[f32; 3] = self.visible_box_limit.as_ref();
 
         iter::once(proj as &[f32])
             .chain(iter::once(view as &[f32]))
             .chain(iter::once(model as &[f32]))
             .chain(iter::once(camera_pos as &[f32]))
-            .chain(iter::once(&[0f32] as &[f32]))
-            .chain(iter::once(visible_box_origin as &[f32]))
-            .chain(iter::once(&[0f32] as &[f32]))
-            .chain(iter::once(visible_box_limit as &[f32]))
-    }
-
-    fn update_view_box(&mut self, view_box: Bounds<i32>) {
-        self.visible_box_origin = convert_point!(view_box.origin(), f32);
-        self.visible_box_limit = convert_point!(view_box.limit(), f32);
     }
 
     fn update_view_params(&mut self, params: &ViewParams) {
@@ -669,14 +850,71 @@ impl Uniforms {
     }
 }
 
-impl IntoBufferSynced for Uniforms {
+impl IntoBufferSynced for RenderUniforms {
     type Item = f32;
 
     fn buffer_sync_desc(&self) -> BufferSyncHelperDesc {
         BufferSyncHelperDesc {
-            buffer_len: 16 + 16 + 16 + 4 + 4 + 3,
+            buffer_len: 16 + 16 + 16 + 4,
             max_chunk_len: std::mem::size_of::<Matrix4<f32>>(),
-            gpu_usage: wgpu::BufferUsage::UNIFORM,
+            usage: wgpu::BufferUsage::UNIFORM | wgpu::BufferUsage::COPY_DST,
+        }
+    }
+}
+
+impl ComputeUniforms {
+    #[inline]
+    fn as_slices(&self) -> [&[u8]; 5] {
+        let visible_box_origin = self.visible_box_origin.as_ref() as &[f32; 3];
+        let visible_box_limit = self.visible_box_limit.as_ref() as &[f32; 3];
+        [
+            visible_box_origin.as_bytes(),
+            &[0f32].as_bytes(),
+            visible_box_limit.as_bytes(),
+            &[0f32].as_bytes(),
+            self.cube.faces.as_bytes(),
+        ]
+    }
+
+    fn update_view_box(&mut self, view_box: Bounds<i32>) {
+        self.visible_box_origin = convert_point!(view_box.origin(), f32);
+        self.visible_box_limit = convert_point!(view_box.limit(), f32);
+    }
+}
+
+impl IntoBufferSynced for ComputeUniforms {
+    type Item = u8;
+
+    fn buffer_sync_desc(&self) -> BufferSyncHelperDesc {
+        let face_len = 6 * std::mem::size_of::<mesh::cube::Face>();
+        BufferSyncHelperDesc {
+            buffer_len: (4 + 4) * 4 + face_len,
+            max_chunk_len: face_len,
+            usage: wgpu::BufferUsage::UNIFORM | wgpu::BufferUsage::COPY_DST,
+        }
+    }
+}
+
+impl ChunkMeta {
+    #[inline]
+    fn as_slices(&self) -> [&[u8]; 5] {
+        let offset_vec = self.offset.as_ref() as &[f32; 3];
+        [
+            offset_vec.as_bytes(),
+            self._padding0.as_bytes(),
+            self.neighbor_indices.as_bytes(),
+            self.active.as_bytes(),
+            self._padding1.as_bytes(),
+        ]
+    }
+
+    fn empty() -> Self {
+        Self {
+            offset: Point3::new(0.0, 0.0, 0.0),
+            _padding0: [0.0],
+            neighbor_indices: [0, 0, 0, 0, 0, 0],
+            active: false,
+            _padding1: 0,
         }
     }
 }
@@ -699,6 +937,7 @@ impl<R> Shaders<R> {
         Shaders {
             vert: f(self.vert),
             frag: f(self.frag),
+            comp: f(self.comp),
         }
     }
 
@@ -709,6 +948,7 @@ impl<R> Shaders<R> {
         Ok(Shaders {
             vert: f(self.vert)?,
             frag: f(self.frag)?,
+            comp: f(self.comp)?,
         })
     }
 }

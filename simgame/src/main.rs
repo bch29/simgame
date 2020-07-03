@@ -4,10 +4,10 @@ use std::env;
 use std::path::PathBuf;
 use structopt::StructOpt;
 
+use simgame_core::block::index_utils;
 use simgame_core::files::FileContext;
 use simgame_core::world::World;
 use simgame_core::worldgen;
-use simgame_core::block::index_utils;
 // use simgame::settings::{CoreSettings, Settings};
 
 #[derive(Debug, StructOpt)]
@@ -64,19 +64,22 @@ fn run(opt: Opts) -> Result<()> {
 }
 
 async fn run_load_world(ctx: &FileContext, save_name: &str) -> Result<()> {
+    let mut shader_compiler = simgame_shaders::Compiler::new(simgame_shaders::CompileParams {
+        chunk_size: index_utils::chunk_size().into(),
+    })?;
+
+    let vert_shader = shader_compiler.compile_vert("shaders/vert_partial.glsl".as_ref())?;
+    let frag_shader = shader_compiler.compile_frag("shaders/frag.glsl".as_ref())?;
+    let comp_shader =
+        shader_compiler.compile_compute("shaders/comp_block_vertices.glsl".as_ref())?;
+
     let blocks = ctx.load_world_blocks(save_name)?;
     info!("Loaded world: {:?}", blocks.debug_summary());
 
-    let mut shader_compiler = simgame_shaders::Compiler::new(simgame_shaders::CompileParams {
-        chunk_size: index_utils::chunk_size().into()
-    })?;
-
-    let vert_shader = shader_compiler.compile_vert("shaders/vert_full.glsl".as_ref())?;
-    let frag_shader = shader_compiler.compile_frag("shaders/frag.glsl".as_ref())?;
-
     let shaders = simgame_render::WorldShaders {
         vert: vert_shader.as_ref(),
-        frag: frag_shader.as_ref()
+        frag: frag_shader.as_ref(),
+        comp: comp_shader.as_ref(),
     };
 
     let world = World::from_blocks(blocks);
