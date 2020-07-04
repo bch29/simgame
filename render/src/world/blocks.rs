@@ -10,7 +10,7 @@ use simgame_core::{
 
 use crate::buffer_util::{
     BufferSyncHelper, BufferSyncHelperDesc, BufferSyncable, BufferSyncedData, FillBuffer,
-    InstancedBuffer, InstancedBufferDesc, IntoBufferSynced, Swappable,
+    InstancedBuffer, InstancedBufferDesc, IntoBufferSynced
 };
 use crate::mesh;
 use crate::world::{self, Shaders, ViewParams};
@@ -76,7 +76,7 @@ struct ChunkBatchRenderState {
     block_type_buf: wgpu::Buffer,
     active_view_box: Option<Bounds<i32>>,
 
-    cube_buffers: Swappable<CubeBuffers>,
+    cube_buffers: CubeBuffers,
 }
 
 #[repr(C)]
@@ -361,7 +361,7 @@ impl BlocksRenderState {
     fn compute_pass(&mut self, device: &wgpu::Device, encoder: &mut wgpu::CommandEncoder) {
         self.compute_stage.uniforms.sync(device, encoder);
 
-        let bufs = self.chunk_batch.cube_buffers.active();
+        let bufs = &self.chunk_batch.cube_buffers;
 
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: None,
@@ -382,8 +382,6 @@ impl BlocksRenderState {
         cpass.set_bind_group(0, &bind_group, &[]);
 
         cpass.dispatch(self.chunk_batch.count_chunks() as u32, 1, 1);
-
-        // self.chunk_batch.cube_buffers.swap();
     }
 
     fn render_pass(
@@ -423,10 +421,10 @@ impl BlocksRenderState {
         rpass.set_pipeline(&self.render_stage.pipeline);
         rpass.set_bind_group(0, &bind_group, &[]);
 
-        let active_bufs = self.chunk_batch.cube_buffers.active();
-        let index_buf = &active_bufs.index;
-        let vertex_buf = &active_bufs.vertex;
-        let indirect_buf = &active_bufs.indirect;
+        let bufs = &self.chunk_batch.cube_buffers;
+        let index_buf = &bufs.index;
+        let vertex_buf = &bufs.vertex;
+        let indirect_buf = &bufs.indirect;
 
         for (_, chunk_index, _) in self.chunk_batch.active_chunks.iter() {
             rpass.set_index_buffer(
@@ -491,7 +489,7 @@ impl ChunkBatchRenderState {
             usage: wgpu::BufferUsage::STORAGE_READ | wgpu::BufferUsage::COPY_DST,
         });
 
-        let make_cube_bufs = || {
+        let cube_buffers = {
             let index = InstancedBuffer::new(
                 device,
                 InstancedBufferDesc {
@@ -528,8 +526,6 @@ impl ChunkBatchRenderState {
             }
         };
 
-        let cube_buffers = Swappable::new(make_cube_bufs(), make_cube_bufs());
-
         ChunkBatchRenderState {
             active_chunks,
             block_type_buf: block_type_helper.make_buffer(device),
@@ -555,8 +551,6 @@ impl ChunkBatchRenderState {
     }
 
     fn update_box_chunks(&mut self, view_box: Bounds<i32>, world: &World) {
-        log::info!("updating box chunks");
-
         assert!(self.active_chunks.len() == 0);
         let bounds = Bounds::new(
             convert_point!(view_box.origin(), usize),
@@ -577,7 +571,6 @@ impl ChunkBatchRenderState {
         }
 
         // no chunks in view; clear all
-        log::info!("clearing view box");
         self.active_view_box = None;
         self.active_chunks.clear();
 
@@ -592,7 +585,6 @@ impl ChunkBatchRenderState {
             Some(x) => x,
             None => {
                 // no chunks in previous view; insert all
-                log::info!("initializing view box");
                 self.update_box_chunks(active_view_box, world);
                 return true;
             }
@@ -651,25 +643,17 @@ impl ChunkBatchRenderState {
             None => return,
         };
 
-        let mut any_updates = false;
-
         for &pos in &diff.modified_chunks {
             let pos_i32 = convert_point!(pos, i32);
             if !active_chunk_box.contains_point(pos_i32) {
                 continue;
             }
 
-            any_updates = true;
-
             if let Some(_chunk) = world.blocks.chunks().get(pos) {
                 self.active_chunks.update(pos_i32, ());
             } else {
                 self.active_chunks.remove(&pos_i32);
             }
-        }
-
-        if any_updates {
-            log::info!("applied chunk diff");
         }
     }
 
