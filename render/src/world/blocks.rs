@@ -10,7 +10,7 @@ use simgame_core::{
 
 use crate::buffer_util::{
     BufferSyncHelper, BufferSyncHelperDesc, BufferSyncable, BufferSyncedData, FillBuffer,
-    InstancedBuffer, InstancedBufferDesc, IntoBufferSynced
+    InstancedBuffer, InstancedBufferDesc, IntoBufferSynced,
 };
 use crate::mesh;
 use crate::world::{self, Shaders, ViewParams};
@@ -66,6 +66,7 @@ struct CubeBuffers {
     vertex: InstancedBuffer,
     index: InstancedBuffer,
     indirect: InstancedBuffer,
+    globals: InstancedBuffer,
 }
 
 struct ChunkBatchRenderState {
@@ -157,6 +158,15 @@ impl BlocksRenderState {
                         // Output indirect buffer
                         wgpu::BindGroupLayoutEntry {
                             binding: 5,
+                            visibility: wgpu::ShaderStage::COMPUTE,
+                            ty: wgpu::BindingType::StorageBuffer {
+                                dynamic: false,
+                                readonly: false,
+                            },
+                        },
+                        // Globals within a compute invocation
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 6,
                             visibility: wgpu::ShaderStage::COMPUTE,
                             ty: wgpu::BindingType::StorageBuffer {
                                 dynamic: false,
@@ -363,6 +373,9 @@ impl BlocksRenderState {
 
         let bufs = &self.chunk_batch.cube_buffers;
 
+        // reset compute shader globals to 0
+        bufs.globals.clear(device, encoder);
+
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: None,
             layout: &self.compute_stage.bind_group_layout,
@@ -373,6 +386,7 @@ impl BlocksRenderState {
                 bufs.vertex.as_binding(3),
                 bufs.index.as_binding(4),
                 bufs.indirect.as_binding(5),
+                bufs.globals.as_binding(6),
             ],
         });
 
@@ -382,6 +396,7 @@ impl BlocksRenderState {
         cpass.set_bind_group(0, &bind_group, &[]);
 
         cpass.dispatch(self.chunk_batch.count_chunks() as u32, 1, 1);
+        // cpass.dispatch(1, 1, 1);
     }
 
     fn render_pass(
@@ -429,15 +444,15 @@ impl BlocksRenderState {
         for (_, chunk_index, _) in self.chunk_batch.active_chunks.iter() {
             rpass.set_index_buffer(
                 &index_buf.buffer(),
-                index_buf.instance_offset(chunk_index),
-                index_buf.instance_offset(1 + chunk_index),
+                0,
+                index_buf.len()
             );
 
             rpass.set_vertex_buffer(
                 0,
                 &vertex_buf.buffer(),
-                vertex_buf.instance_offset(chunk_index),
-                vertex_buf.instance_offset(1 + chunk_index),
+                0,
+                vertex_buf.len()
             );
 
             rpass.draw_indexed_indirect(
@@ -519,10 +534,22 @@ impl ChunkBatchRenderState {
                 },
             );
 
+            let globals = InstancedBuffer::new(
+                device,
+                InstancedBufferDesc {
+                    instance_len: 8,
+                    n_instances: 1,
+                    usage: wgpu::BufferUsage::STORAGE
+                        | wgpu::BufferUsage::STORAGE_READ
+                        | wgpu::BufferUsage::COPY_DST,
+                },
+            );
+
             CubeBuffers {
                 index,
                 vertex,
                 indirect,
+                globals,
             }
         };
 

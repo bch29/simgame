@@ -67,8 +67,8 @@ impl<Data, Item> BufferSyncedData<Data, Item> {
     #[inline]
     pub fn sync<'a>(&'a self, device: &Device, encoder: &mut CommandEncoder)
     where
-        Data: BufferSyncable<Item=Item>,
-        Item: Copy + AsBytes + FromBytes + 'static
+        Data: BufferSyncable<Item = Item>,
+        Item: Copy + AsBytes + FromBytes + 'static,
     {
         let mut fill_buffer = self.helper.begin_fill_buffer(device, &self.buffer, 0);
         self.data.sync(&mut fill_buffer, encoder);
@@ -379,17 +379,14 @@ where
 
 pub struct OpaqueBuffer {
     helper: BufferSyncHelper<u8>,
-    buffer: Buffer
+    buffer: Buffer,
 }
 
 impl OpaqueBuffer {
     pub fn new(device: &Device, desc: BufferSyncHelperDesc) -> Self {
         let helper = BufferSyncHelper::new(desc);
         let buffer = helper.make_buffer(device);
-        Self {
-            helper,
-            buffer,
-        }
+        Self { helper, buffer }
     }
 
     #[inline]
@@ -406,34 +403,38 @@ impl OpaqueBuffer {
     pub fn as_binding(&self, index: u32) -> wgpu::Binding {
         self.helper.as_binding(index, &self.buffer, 0)
     }
+
+    pub fn len(&self) -> wgpu::BufferAddress {
+        self.helper.desc().buffer_len as _
+    }
 }
 
 pub struct InstancedBuffer {
     desc: InstancedBufferDesc,
     helper: BufferSyncHelper<u8>,
-    buffer: Buffer
+    buffer: Buffer,
 }
 
 #[derive(Debug, Clone)]
 pub struct InstancedBufferDesc {
     pub n_instances: usize,
     pub instance_len: usize,
-    pub usage: BufferUsage
+    pub usage: BufferUsage,
 }
 
 impl InstancedBuffer {
     pub fn new(device: &wgpu::Device, desc: InstancedBufferDesc) -> Self {
         let helper_desc = BufferSyncHelperDesc {
             buffer_len: desc.n_instances * desc.instance_len,
-            max_chunk_len: 0,
-            usage: desc.usage
+            max_chunk_len: desc.instance_len,
+            usage: desc.usage,
         };
         let helper = BufferSyncHelper::new(helper_desc);
         let buffer = helper.make_buffer(device);
         Self {
             desc,
             helper,
-            buffer
+            buffer,
         }
     }
 
@@ -456,11 +457,27 @@ impl InstancedBuffer {
     pub fn instance_offset(&self, instance: usize) -> wgpu::BufferAddress {
         (instance * self.desc.instance_len) as _
     }
+
+    #[inline]
+    pub fn len(&self) -> wgpu::BufferAddress {
+        self.helper.desc().buffer_len as _
+    }
+
+    #[inline]
+    pub fn clear(&self, device: &Device, encoder: &mut CommandEncoder) {
+        self.helper.fill_buffer(
+            device,
+            encoder,
+            &self.buffer,
+            0,
+            std::iter::repeat(&[0u8]).take(self.len() as usize),
+        );
+    }
 }
 
 pub struct Swappable<T> {
     active: T,
-    inactive: T
+    inactive: T,
 }
 
 impl<T> Swappable<T> {
