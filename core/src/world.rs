@@ -13,6 +13,7 @@ use crate::util::Bounds;
 pub struct World {
     pub blocks: WorldBlockData,
     rng: rand::rngs::ThreadRng,
+    updating: bool
 }
 
 pub struct UpdatedWorldState {
@@ -23,12 +24,17 @@ impl World {
     pub fn from_blocks(blocks: WorldBlockData) -> World {
         World {
             blocks,
-            rng: rand::thread_rng()
+            rng: rand::thread_rng(),
+            updating: false
         }
     }
 
     /// Moves the world forward by one tick. Records anything that changed in the 'updated_state'.
     pub fn tick(&mut self, updated_state: &mut UpdatedWorldState) {
+        if !self.updating {
+            return;
+        }
+
         let bounds = Bounds::new(Point3::new(32, 32, 0), Vector3::new(16, 16, 1024));
         for _ in 0..64 {
             let point = bounds.origin()
@@ -41,6 +47,10 @@ impl World {
             let (chunk_pos, _) = crate::block::index_utils::to_chunk_pos(point);
             updated_state.record_chunk_update(chunk_pos);
         }
+    }
+
+    pub fn toggle_updates(&mut self) {
+        self.updating = !self.updating;
     }
 }
 

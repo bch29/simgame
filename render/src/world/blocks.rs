@@ -1,5 +1,5 @@
 use cgmath::{ElementWise, EuclideanSpace, Matrix4, Point3, Vector3};
-use zerocopy::AsBytes;
+use zerocopy::{AsBytes, FromBytes};
 
 use simgame_core::{
     block::{self, index_utils},
@@ -15,7 +15,14 @@ use crate::buffer_util::{
 use crate::mesh;
 use crate::world::{self, Shaders, ViewParams};
 
-const CUBE_VERTEX_STRIDE: u64 = 16 + 16 + 8 + 4 + 4;
+/// ### GLSL definition:
+/// ```
+/// struct Vertex {
+///   uint localBlockIndex;
+///   uint vertexId;
+/// };
+/// ```
+const VERTEX_STRIDE: u64 = 4 + 4;
 
 pub struct BlocksRenderInit<'a> {
     pub shaders: &'a Shaders<wgpu::ShaderModule>,
@@ -40,9 +47,17 @@ pub struct ComputeStage {
 
 pub struct RenderStage {
     pipeline: wgpu::RenderPipeline,
-    uniforms: BufferSyncedData<RenderUniforms, f32>,
     bind_group_layout: wgpu::BindGroupLayout,
     depth_texture: wgpu::TextureView,
+
+    uniforms: BufferSyncedData<RenderUniforms, f32>,
+    locals: BufferSyncedData<RenderLocals, u8>,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, AsBytes, FromBytes)]
+struct RenderLocals {
+    cube_faces: [mesh::cube::Face; 6],
 }
 
 #[repr(C)]
@@ -62,7 +77,7 @@ struct ComputeUniforms {
 
 type ActiveChunks = crate::stable_map::StableMap<Point3<i32>, ()>;
 
-struct CubeBuffers {
+struct ComputeShaderBuffers {
     vertex: InstancedBuffer,
     index: InstancedBuffer,
     indirect: InstancedBuffer,
@@ -77,7 +92,7 @@ struct ChunkBatchRenderState {
     block_type_buf: wgpu::Buffer,
     active_view_box: Option<Bounds<i32>>,
 
-    cube_buffers: CubeBuffers,
+    compute_shader_buffers: ComputeShaderBuffers,
 }
 
 #[repr(C)]
@@ -98,11 +113,13 @@ impl BlocksRenderState {
     }
 
     pub fn new(init: BlocksRenderInit, device: &wgpu::Device) -> Self {
+        let cube = mesh::cube::Cube::new();
+
         let compute_stage = {
             let uniforms = ComputeUniforms {
                 visible_box_origin: Point3::origin(),
                 visible_box_limit: Point3::origin(),
-                cube: mesh::cube::Cube::new(),
+                cube,
             }
             .into_buffer_synced(device);
 
@@ -196,14 +213,6 @@ impl BlocksRenderState {
         };
 
         let render_stage = {
-            let uniforms = RenderUniforms {
-                proj: init.uniforms.proj,
-                view: init.uniforms.view,
-                model: init.uniforms.view,
-                camera_pos: init.uniforms.camera_pos,
-            }
-            .into_buffer_synced(device);
-
             let bind_group_layout =
                 device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                     label: Some("simgame_render::world::WorldRenderState/vertex/layout"),
@@ -213,6 +222,24 @@ impl BlocksRenderState {
                             binding: 0,
                             visibility: wgpu::ShaderStage::VERTEX,
                             ty: wgpu::BindingType::UniformBuffer { dynamic: false },
+                        },
+                        // Locals
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 1,
+                            visibility: wgpu::ShaderStage::VERTEX,
+                            ty: wgpu::BindingType::StorageBuffer { dynamic: false, readonly: true },
+                        },
+                        // Block types
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 2,
+                            visibility: wgpu::ShaderStage::VERTEX,
+                            ty: wgpu::BindingType::StorageBuffer { dynamic: false, readonly: true },
+                        },
+                        // Chunk metadata
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 3,
+                            visibility: wgpu::ShaderStage::VERTEX,
+                            ty: wgpu::BindingType::StorageBuffer { dynamic: false, readonly: true },
                         },
                     ],
                 });
@@ -257,32 +284,20 @@ impl BlocksRenderState {
                 vertex_state: wgpu::VertexStateDescriptor {
                     index_format: wgpu::IndexFormat::Uint32,
                     vertex_buffers: &[wgpu::VertexBufferDescriptor {
-                        stride: CUBE_VERTEX_STRIDE,
+                        stride: VERTEX_STRIDE,
                         step_mode: wgpu::InputStepMode::Vertex,
                         attributes: &[
-                            // pos
+                            // localBlockIndex
                             wgpu::VertexAttributeDescriptor {
-                                format: wgpu::VertexFormat::Float4,
+                                format: wgpu::VertexFormat::Uint,
                                 offset: 0,
                                 shader_location: 0,
                             },
-                            // normal
-                            wgpu::VertexAttributeDescriptor {
-                                format: wgpu::VertexFormat::Float4,
-                                offset: 4 * 4,
-                                shader_location: 1,
-                            },
-                            // tex coord
-                            wgpu::VertexAttributeDescriptor {
-                                format: wgpu::VertexFormat::Float2,
-                                offset: (4 + 4) * 4,
-                                shader_location: 2,
-                            },
-                            // block type
+                            // vertexId
                             wgpu::VertexAttributeDescriptor {
                                 format: wgpu::VertexFormat::Uint,
-                                offset: (4 + 4 + 2) * 4,
-                                shader_location: 3,
+                                offset: 4,
+                                shader_location: 1,
                             },
                         ],
                     }],
@@ -292,11 +307,25 @@ impl BlocksRenderState {
                 alpha_to_coverage_enabled: false,
             });
 
+            let uniforms = RenderUniforms {
+                proj: init.uniforms.proj,
+                view: init.uniforms.view,
+                model: init.uniforms.view,
+                camera_pos: init.uniforms.camera_pos,
+            }
+            .into_buffer_synced(device);
+
+            let locals = RenderLocals {
+                cube_faces: cube.faces,
+            }
+            .into_buffer_synced(device);
+
             RenderStage {
                 pipeline,
                 uniforms,
                 bind_group_layout,
                 depth_texture: init.depth_texture.create_default_view(),
+                locals
             }
         };
 
@@ -319,7 +348,7 @@ impl BlocksRenderState {
         self.render_stage.uniforms.camera_pos = frame_render.uniforms.camera_pos;
 
         if self.needs_compute_pass {
-            log::info!("Running compute pass");
+            log::debug!("Running compute pass");
             self.compute_pass(frame_render.device, encoder);
             self.needs_compute_pass = false;
         }
@@ -371,7 +400,7 @@ impl BlocksRenderState {
     fn compute_pass(&mut self, device: &wgpu::Device, encoder: &mut wgpu::CommandEncoder) {
         self.compute_stage.uniforms.sync(device, encoder);
 
-        let bufs = &self.chunk_batch.cube_buffers;
+        let bufs = &self.chunk_batch.compute_shader_buffers;
 
         // reset compute shader globals to 0
         bufs.globals.clear(device, encoder);
@@ -396,7 +425,6 @@ impl BlocksRenderState {
         cpass.set_bind_group(0, &bind_group, &[]);
 
         cpass.dispatch(self.chunk_batch.count_chunks() as u32, 1, 1);
-        // cpass.dispatch(1, 1, 1);
     }
 
     fn render_pass(
@@ -408,11 +436,17 @@ impl BlocksRenderState {
         let background_color = wgpu::Color::BLACK;
 
         self.render_stage.uniforms.sync(device, encoder);
+        self.render_stage.locals.sync(device, encoder);
 
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: None,
             layout: &self.render_stage.bind_group_layout,
-            bindings: &[self.render_stage.uniforms.as_binding(0)],
+            bindings: &[
+                self.render_stage.uniforms.as_binding(0),
+                self.render_stage.locals.as_binding(1),
+                self.chunk_batch.block_type_binding(2),
+                self.chunk_batch.chunk_metadata_binding(3)
+            ],
         });
 
         let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -436,24 +470,15 @@ impl BlocksRenderState {
         rpass.set_pipeline(&self.render_stage.pipeline);
         rpass.set_bind_group(0, &bind_group, &[]);
 
-        let bufs = &self.chunk_batch.cube_buffers;
+        let bufs = &self.chunk_batch.compute_shader_buffers;
         let index_buf = &bufs.index;
         let vertex_buf = &bufs.vertex;
         let indirect_buf = &bufs.indirect;
 
         for (_, chunk_index, _) in self.chunk_batch.active_chunks.iter() {
-            rpass.set_index_buffer(
-                &index_buf.buffer(),
-                0,
-                index_buf.len()
-            );
+            rpass.set_index_buffer(&index_buf.buffer(), 0, index_buf.len());
 
-            rpass.set_vertex_buffer(
-                0,
-                &vertex_buf.buffer(),
-                0,
-                vertex_buf.len()
-            );
+            rpass.set_vertex_buffer(0, &vertex_buf.buffer(), 0, vertex_buf.len());
 
             rpass.draw_indexed_indirect(
                 &indirect_buf.buffer(),
@@ -465,8 +490,8 @@ impl BlocksRenderState {
 
 impl ChunkBatchRenderState {
     const fn max_batch_chunks() -> usize {
-        let mb_allowed = 8;
-        (1024 * 1024 * mb_allowed) / index_utils::chunk_size_total()
+        let block_types_mb = 32;
+        (1024 * 1024 * block_types_mb) / index_utils::chunk_size_total()
     }
 
     const fn max_batch_blocks() -> usize {
@@ -504,7 +529,7 @@ impl ChunkBatchRenderState {
             usage: wgpu::BufferUsage::STORAGE_READ | wgpu::BufferUsage::COPY_DST,
         });
 
-        let cube_buffers = {
+        let compute_shader_buffers = {
             let index = InstancedBuffer::new(
                 device,
                 InstancedBufferDesc {
@@ -517,9 +542,7 @@ impl ChunkBatchRenderState {
             let vertex = InstancedBuffer::new(
                 device,
                 InstancedBufferDesc {
-                    instance_len: 4
-                        * CUBE_VERTEX_STRIDE as usize
-                        * index_utils::chunk_size_total(),
+                    instance_len: 4 * VERTEX_STRIDE as usize * index_utils::chunk_size_total(),
                     n_instances: Self::max_batch_chunks(),
                     usage: wgpu::BufferUsage::STORAGE | wgpu::BufferUsage::VERTEX,
                 },
@@ -545,7 +568,7 @@ impl ChunkBatchRenderState {
                 },
             );
 
-            CubeBuffers {
+            ComputeShaderBuffers {
                 index,
                 vertex,
                 indirect,
@@ -560,7 +583,7 @@ impl ChunkBatchRenderState {
             chunk_metadata_buf: chunk_metadata_helper.make_buffer(device),
             chunk_metadata_helper,
             active_view_box: None,
-            cube_buffers,
+            compute_shader_buffers,
         }
     }
 
@@ -829,6 +852,28 @@ impl IntoBufferSynced for RenderUniforms {
             buffer_len: 16 + 16 + 16 + 4,
             max_chunk_len: std::mem::size_of::<Matrix4<f32>>(),
             usage: wgpu::BufferUsage::UNIFORM | wgpu::BufferUsage::COPY_DST,
+        }
+    }
+}
+
+impl BufferSyncable for RenderLocals {
+    type Item = u8;
+
+    fn sync<'a>(
+        &self,
+        fill_buffer: &mut FillBuffer<'a, Self::Item>,
+        encoder: &mut wgpu::CommandEncoder,
+    ) {
+        fill_buffer.advance(encoder, self.as_bytes());
+    }
+}
+
+impl IntoBufferSynced for RenderLocals {
+    fn buffer_sync_desc(&self) -> BufferSyncHelperDesc {
+        BufferSyncHelperDesc {
+            buffer_len: std::mem::size_of::<Self>(),
+            max_chunk_len: std::mem::size_of::<Self>(),
+            usage: wgpu::BufferUsage::STORAGE_READ | wgpu::BufferUsage::COPY_DST,
         }
     }
 }

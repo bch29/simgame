@@ -35,18 +35,11 @@ struct ChunkMetadata {
 };
 
 struct Vertex {
-  vec4 pos;
-  vec4 normal;
-  vec2 texCoord;
-  uint blockType;
-  float _padding;
-};
+  uint blockIndex;
 
-struct CubeFace {
-  vec4 normal;
-  uint[8] indices;
-  vec4[4] vertexLocs;
-  vec2[4] vertexTexCoords;
+  // identifies where on the cube the vertex lies:
+  // faceId * 4 + faceVertexId
+  uint vertexId;
 };
 
 struct IndirectCommand {
@@ -56,6 +49,13 @@ struct IndirectCommand {
   uint baseVertex;
   uint baseInstance;
   uint[3] _padding;
+};
+
+struct CubeFace {
+  vec4 normal;
+  uint[8] indices;
+  vec4[4] vertexLocs;
+  vec2[4] vertexTexCoords;
 };
 
 layout(set = 0, binding = 0) buffer Locals {
@@ -91,22 +91,6 @@ layout(set = 0, binding = 6) buffer FaceCounts {
 
 // keeps track of the number of faces produced by this work group so far
 shared uint s_LocalFaceCount;
-
-/* 
- * w component is chunk index
- */
-ivec4 decodeBlockIndex(uint index)
-{
-  uint insideChunk = index % CHUNK_SIZE_XYZ;
-  uint chunkIndex = index / CHUNK_SIZE_XYZ;
-
-  uint block_xy = insideChunk  % CHUNK_SIZE_XY;
-  uint block_z = insideChunk / CHUNK_SIZE_XY;
-  uint block_y = block_xy / CHUNK_SIZE_Y;
-  uint block_x = block_xy % CHUNK_SIZE_X;
-
-  return ivec4(block_x, block_y, block_z, chunkIndex);
-}
 
 uint encodeBlockIndex(uvec4 pos)
 {
@@ -176,14 +160,6 @@ int getBlockType(ivec4 blockAddr)
   return mult * blockTypeAtIndex(encodeBlockIndex(blockAddrU));
 }
 
-mat4 translation_matrix(vec3 offset) {
-  return mat4(
-    1.0, 0.0, 0.0, 0.0,
-    0.0, 1.0, 0.0, 0.0,
-    0.0, 0.0, 1.0, 0.0,
-    offset.x, offset.y, offset.z, 1.0);
-}
-
 bool isBlockVisible(ivec4 blockAddr, int blockType)
 {
   vec3 blockPos = vec3(blockAddr.xyz) + b_ChunkMetadata[blockAddr.w].offset.xyz;
@@ -238,39 +214,22 @@ BlockInfo getBlockInfo(ivec4 blockAddr) {
 void pushVertices(in BlockInfo info, uint startChunkIx_g, uint faceIx_l) {
   ChunkMetadata chunkMeta = b_ChunkMetadata[info.addr.w];
 
-  vec3 chunkOffset = chunkMeta.offset.xyz;
-  vec3 offset = chunkOffset + scale * (vec3(.5) + info.addr.xyz);
-
-  mat4 rescale = mat4(
-      half_scale, 0.0, 0.0, 0.0,
-      0.0, half_scale, 0.0, 0.0,
-      0.0, 0.0, half_scale, 0.0,
-      0.0, 0.0, 0.0, 1.0);
-
-  mat4 model = translation_matrix(offset.xyz) * rescale;
-
-  for (uint faceIx = 0; faceIx < 6; faceIx++) {
-    if (!info.visibleFaces[faceIx])
+  for (uint faceId = 0; faceId < 6; faceId++) {
+    if (!info.visibleFaces[faceId])
       continue;
 
-    CubeFace face = u_CubeFaces[faceIx];
-    ivec4 neighborAddr = info.neighborAddrs[faceIx];
+    CubeFace face = u_CubeFaces[faceId];
+    ivec4 neighborAddr = info.neighborAddrs[faceId];
 
     uint faceIx_g = startChunkIx_g + faceIx_l;
     uint outVertexStart = 4 * faceIx_g;
 
-    for (uint faceVertIx = 0; faceVertIx < 4; faceVertIx++) {
-      vec4 vertPos = face.vertexLocs[faceVertIx];
-      vec2 texCoord = face.vertexTexCoords[faceVertIx];
-
+    for (uint faceVertexId = 0; faceVertexId < 4; faceVertexId++) {
       Vertex vert;
-      vert.pos = model * vertPos;
-      vert.normal = model * face.normal;
-      vert.texCoord = texCoord;
-      vert.blockType = info.blockType;
-      vert._padding = 0.0;
+      vert.blockIndex = encodeBlockIndex(uvec4(info.addr));
+      vert.vertexId = faceId * 6 + faceVertexId;
 
-      c_OutputVertices[outVertexStart + faceVertIx] = vert;
+      c_OutputVertices[outVertexStart + faceVertexId] = vert;
     }
 
     for (uint faceIndexIx = 0; faceIndexIx < 6; faceIndexIx++) {

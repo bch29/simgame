@@ -291,6 +291,15 @@ pub async fn test_render(mut world: World, shaders: crate::WorldShaders<&[u8]>) 
                 | WindowEvent::CloseRequested => {
                     *control_flow = ControlFlow::Exit;
                 }
+                WindowEvent::KeyboardInput {
+                    input:
+                        event::KeyboardInput {
+                            virtual_keycode: Some(VirtualKeyCode::Space),
+                            state: event::ElementState::Pressed,
+                            ..
+                        },
+                    ..
+                } => world.toggle_updates(),
                 WindowEvent::KeyboardInput { input, .. } => {
                     control_state.update_from_keyboard_event(input)
                 }
@@ -304,7 +313,7 @@ pub async fn test_render(mut world: World, shaders: crate::WorldShaders<&[u8]>) 
                     world_diff.clear();
                     time_tracker.sample(Instant::now());
 
-                    log::debug!(
+                    log::info!(
                         "Frame rate: {}/{}",
                         time_tracker.min_fps(),
                         time_tracker.mean_fps()
