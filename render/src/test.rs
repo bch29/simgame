@@ -16,7 +16,7 @@ use crate::{RenderInit, RenderState, WorldRenderInit};
 const GAME_STEP_MILLIS: u64 = 10;
 const RENDER_INTERVAL_MILLIS: u64 = 1000 / 120;
 
-const INITIAL_VISIBLE_SIZE: Vector3<i32> = Vector3::new(128, 128, 32);
+const INITIAL_VISIBLE_SIZE: Vector3<i32> = Vector3::new(128, 128, 600);
 
 pub fn build_window(
     event_loop: &winit::event_loop::EventLoop<()>,

@@ -79,7 +79,6 @@ type ActiveChunks = crate::stable_map::StableMap<Point3<i32>, ()>;
 
 struct ComputeShaderBuffers {
     vertex: InstancedBuffer,
-    index: InstancedBuffer,
     indirect: InstancedBuffer,
     globals: InstancedBuffer,
 }
@@ -157,15 +156,6 @@ impl BlocksRenderState {
                         // Output vertex buffer
                         wgpu::BindGroupLayoutEntry {
                             binding: 3,
-                            visibility: wgpu::ShaderStage::COMPUTE,
-                            ty: wgpu::BindingType::StorageBuffer {
-                                dynamic: false,
-                                readonly: false,
-                            },
-                        },
-                        // Output index buffer
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 4,
                             visibility: wgpu::ShaderStage::COMPUTE,
                             ty: wgpu::BindingType::StorageBuffer {
                                 dynamic: false,
@@ -413,7 +403,6 @@ impl BlocksRenderState {
                 self.chunk_batch.block_type_binding(1),
                 self.chunk_batch.chunk_metadata_binding(2),
                 bufs.vertex.as_binding(3),
-                bufs.index.as_binding(4),
                 bufs.indirect.as_binding(5),
                 bufs.globals.as_binding(6),
             ],
@@ -471,16 +460,13 @@ impl BlocksRenderState {
         rpass.set_bind_group(0, &bind_group, &[]);
 
         let bufs = &self.chunk_batch.compute_shader_buffers;
-        let index_buf = &bufs.index;
         let vertex_buf = &bufs.vertex;
         let indirect_buf = &bufs.indirect;
 
         for (_, chunk_index, _) in self.chunk_batch.active_chunks.iter() {
-            rpass.set_index_buffer(&index_buf.buffer(), 0, index_buf.len());
-
             rpass.set_vertex_buffer(0, &vertex_buf.buffer(), 0, vertex_buf.len());
 
-            rpass.draw_indexed_indirect(
+            rpass.draw_indirect(
                 &indirect_buf.buffer(),
                 indirect_buf.instance_offset(chunk_index),
             );
@@ -530,19 +516,10 @@ impl ChunkBatchRenderState {
         });
 
         let compute_shader_buffers = {
-            let index = InstancedBuffer::new(
-                device,
-                InstancedBufferDesc {
-                    instance_len: 6 * 4 * index_utils::chunk_size_total(),
-                    n_instances: Self::max_batch_chunks(),
-                    usage: wgpu::BufferUsage::STORAGE | wgpu::BufferUsage::INDEX,
-                },
-            );
-
             let vertex = InstancedBuffer::new(
                 device,
                 InstancedBufferDesc {
-                    instance_len: 4 * VERTEX_STRIDE as usize * index_utils::chunk_size_total(),
+                    instance_len: 6 * VERTEX_STRIDE as usize * index_utils::chunk_size_total(),
                     n_instances: Self::max_batch_chunks(),
                     usage: wgpu::BufferUsage::STORAGE | wgpu::BufferUsage::VERTEX,
                 },
@@ -551,7 +528,7 @@ impl ChunkBatchRenderState {
             let indirect = InstancedBuffer::new(
                 device,
                 InstancedBufferDesc {
-                    instance_len: 4 * 8,
+                    instance_len: 4 * 4,
                     n_instances: Self::max_batch_chunks(),
                     usage: wgpu::BufferUsage::STORAGE | wgpu::BufferUsage::INDIRECT,
                 },
@@ -569,7 +546,6 @@ impl ChunkBatchRenderState {
             );
 
             ComputeShaderBuffers {
-                index,
                 vertex,
                 indirect,
                 globals,

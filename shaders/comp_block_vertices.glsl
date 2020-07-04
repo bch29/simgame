@@ -7,6 +7,7 @@
 
 const uint CHUNK_SIZE_XY = CHUNK_SIZE_X * CHUNK_SIZE_Y;
 const uint CHUNK_SIZE_XYZ = CHUNK_SIZE_XY * CHUNK_SIZE_Z;
+const uint MAX_UINT = 4294967295;
 
 const float scale = 1.0;
 const float half_scale = scale / 2.;
@@ -45,10 +46,8 @@ struct Vertex {
 struct IndirectCommand {
   uint count;
   uint instanceCount;
-  uint firstIndex;
-  uint baseVertex;
+  uint first;
   uint baseInstance;
-  uint[3] _padding;
 };
 
 struct CubeFace {
@@ -73,15 +72,11 @@ layout(set = 0, binding = 2) buffer ChunkMetadataArr {
 };
 
 layout(set = 0, binding = 3) buffer OutputVertices {
-  writeonly Vertex[] c_OutputVertices;
-};
-
-layout(set = 0, binding = 4) buffer OutputIndices {
-  writeonly uint[] c_OutputIndices;
+  Vertex[] c_OutputVertices;
 };
 
 layout(set = 0, binding = 5) buffer IndirectCommands {
-  writeonly IndirectCommand[] c_IndirectCommands;
+  IndirectCommand[] c_IndirectCommands;
 };
 
 layout(set = 0, binding = 6) buffer FaceCounts {
@@ -94,6 +89,18 @@ shared uint s_LocalFaceCount;
 
 uint encodeBlockIndex(uvec4 pos)
 {
+  if (pos.x >= CHUNK_SIZE_X)
+    return 0;
+
+  if (pos.y >= CHUNK_SIZE_Y)
+    return 0;
+
+  if (pos.z >= CHUNK_SIZE_Z)
+    return 0;
+
+  if (pos.w >= MAX_UINT / CHUNK_SIZE_XYZ)
+    return 0;
+
   return pos.x + pos.y * CHUNK_SIZE_X + pos.z * CHUNK_SIZE_XY + pos.w * CHUNK_SIZE_XYZ;
 }
 
@@ -222,19 +229,14 @@ void pushVertices(in BlockInfo info, uint startChunkIx_g, uint faceIx_l) {
     ivec4 neighborAddr = info.neighborAddrs[faceId];
 
     uint faceIx_g = startChunkIx_g + faceIx_l;
-    uint outVertexStart = 4 * faceIx_g;
+    uint outVertexStart = 6 * faceIx_g;
 
-    for (uint faceVertexId = 0; faceVertexId < 4; faceVertexId++) {
+    for (uint faceIndexIx = 0; faceIndexIx < 6; faceIndexIx++) {
+      uint faceVertexId = face.indices[faceIndexIx];
       Vertex vert;
       vert.blockIndex = encodeBlockIndex(uvec4(info.addr));
       vert.vertexId = faceId * 6 + faceVertexId;
-
-      c_OutputVertices[outVertexStart + faceVertexId] = vert;
-    }
-
-    for (uint faceIndexIx = 0; faceIndexIx < 6; faceIndexIx++) {
-      uint vertIndex = face.indices[faceIndexIx];
-      c_OutputIndices[6 * faceIx_g + faceIndexIx] = 4 * faceIx_l + vertIndex;
+      c_OutputVertices[outVertexStart + faceIndexIx] = vert;
     }
 
     faceIx_l += 1;
@@ -242,37 +244,34 @@ void pushVertices(in BlockInfo info, uint startChunkIx_g, uint faceIx_l) {
 }
 
 void main() {
-  bool isParent = gl_LocalInvocationID.x == 0 
-    && gl_LocalInvocationID.y == 0 
-    && gl_LocalInvocationID.z == 0;
-
   // gl_LocalInvocationID is block pos within chunk, gl_WorkGroupID.x is chunk index
   ivec4 blockAddr = ivec4(gl_LocalInvocationID, gl_WorkGroupID.x);
 
-  if (isParent)
-    s_LocalFaceCount = 0;
-  barrier();
+  s_LocalFaceCount = 0;
+  barrier(); // ensure s_LocalFaceCount is set to 0 in all invocations in the work group
+  memoryBarrierShared();
 
   BlockInfo info = getBlockInfo(blockAddr);
   uint faceIx_l = atomicAdd(s_LocalFaceCount, info.visibleFaceCount);
 
   barrier(); // wait for s_LocalFaceCount to get its final value
+  memoryBarrierShared();
+
   /* uint startChunkIx_g = atomicAdd(g_TotalFaceCount, s_LocalFaceCount); */
   uint startChunkIx_g = info.addr.w * CHUNK_SIZE_XYZ;
 
-  if (isParent) {
-    IndirectCommand command;
-    command.count = 6 * s_LocalFaceCount;
-    command.instanceCount = 1;
-    command.firstIndex = 6 * startChunkIx_g;
-    command.baseVertex = 4 * startChunkIx_g;
-    command.baseInstance = 0;
-    c_IndirectCommands[gl_WorkGroupID.x] = command;
-    memoryBarrier();
-  }
+  IndirectCommand command;
+  command.count = 6 * s_LocalFaceCount;
+  command.instanceCount = 1;
+  command.first = 6 * startChunkIx_g;
+  command.baseInstance = 0;
+  c_IndirectCommands[gl_WorkGroupID.x] = command;
 
   if (info.visibleFaceCount != 0)
     pushVertices(info, startChunkIx_g, faceIx_l);
+
+  // ensure buffer writes are flushed
+  memoryBarrierBuffer();
 }
 
 // vi: ft=c
