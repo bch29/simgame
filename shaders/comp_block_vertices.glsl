@@ -201,16 +201,48 @@ bool isBlockVisible(ivec4 blockAddr, int blockType)
   return blockType != 0 && inVisibleBox;
 }
 
-void pushVertices(ivec4 blockAddr) {
-  ChunkMetadata chunkMeta = b_ChunkMetadata[blockAddr.w];
+struct BlockInfo {
+  uint visibleFaceCount;
+  ivec4 addr;
+  int blockType;
+  bool[6] visibleFaces;
+  ivec4[6] neighborAddrs;
+};
 
-  int thisBlockType = getBlockType(blockAddr);
+
+BlockInfo getBlockInfo(ivec4 blockAddr) {
+  BlockInfo res;
+  res.addr = blockAddr;
+  res.visibleFaceCount = 0;
+  res.blockType = getBlockType(blockAddr);
+
+  if (!isBlockVisible(blockAddr, res.blockType))
+    return res;
+
+  for (uint faceIx = 0; faceIx < 6; faceIx++) {
+    CubeFace face = u_CubeFaces[faceIx];
+    ivec4 neighborAddr = neighborBlockAddr(blockAddr, face.normal.xyz);
+    int neighborBlockType = getBlockType(neighborAddr);
+
+    // No point in rendering a face if it is invisible or its neighbor covers it completely.
+    bool faceVisible = !isBlockVisible(neighborAddr, neighborBlockType);
+    if (faceVisible) {
+      res.neighborAddrs[faceIx] = neighborAddr;
+      res.visibleFaceCount += 1;
+    }
+
+    res.visibleFaces[faceIx] = faceVisible;
+  }
+
+  return res;
+}
+
+
+void pushVertices(in BlockInfo info, uint groupFaceIx) {
+  ChunkMetadata chunkMeta = b_ChunkMetadata[info.addr.w];
+
   vec3 chunkOffset = chunkMeta.offset.xyz;
-  vec3 offset = chunkOffset + scale * (vec3(.5) + blockAddr.xyz);
-
-  // do not push any vertices to the buffer for invisible blocks
-  if (!isBlockVisible(blockAddr, thisBlockType))
-    return;
+  vec3 offset = chunkOffset + scale * (vec3(.5) + info.addr.xyz);
 
   mat4 rescale = mat4(
       half_scale, 0.0, 0.0, 0.0,
@@ -220,41 +252,14 @@ void pushVertices(ivec4 blockAddr) {
 
   mat4 model = translation_matrix(offset.xyz) * rescale;
 
-  uint chunkIndexStart = blockAddr.w * CHUNK_SIZE_XYZ;
-
-  uint blockFaceCount = 0;
-  bool[6] visibleFaces;
-  ivec4[6] neighborAddrs;
+  uint chunkIndexStart = info.addr.w * CHUNK_SIZE_XYZ;
 
   for (uint faceIx = 0; faceIx < 6; faceIx++) {
-    CubeFace face = u_CubeFaces[faceIx];
-    ivec4 neighborAddr = neighborBlockAddr(blockAddr, face.normal.xyz);
-    int neighborBlockType = getBlockType(neighborAddr);
-
-    // No point in rendering a face if its neighbor covers it completely.
-    bool faceVisible = !isBlockVisible(neighborAddr, neighborBlockType);
-    if (faceVisible) {
-      neighborAddrs[faceIx] = neighborAddr;
-      blockFaceCount += 1;
-    }
-
-    visibleFaces[faceIx] = faceVisible;
-  }
-
-  if (blockFaceCount == 0)
-    return;
-
-  uint groupFaceIx = atomicAdd(s_GroupFaceCount, blockFaceCount);
-  /* memoryBarrier(); */
-  /* s_WorkGroupFaceCounts[gl_WorkGroupID.x] = s_GroupFaceCount; */
-  /* memoryBarrier(); */
-
-  for (uint faceIx = 0; faceIx < 6; faceIx++) {
-    if (!visibleFaces[faceIx])
+    if (!info.visibleFaces[faceIx])
       continue;
 
     CubeFace face = u_CubeFaces[faceIx];
-    ivec4 neighborAddr = neighborAddrs[faceIx];
+    ivec4 neighborAddr = info.neighborAddrs[faceIx];
 
     uint outFaceIx = chunkIndexStart + groupFaceIx;
     uint outVertexStart = 4 * outFaceIx;
@@ -267,7 +272,7 @@ void pushVertices(ivec4 blockAddr) {
       vert.pos = model * vertPos;
       vert.normal = model * face.normal;
       vert.texCoord = texCoord;
-      vert.blockType = thisBlockType;
+      vert.blockType = info.blockType;
       vert._padding = 0.0;
 
       c_OutputVertices[outVertexStart + faceVertIx] = vert;
@@ -286,29 +291,41 @@ void pushVertices(ivec4 blockAddr) {
 }
 
 void main() {
+  bool isParent = gl_LocalInvocationID.x == 0 
+    && gl_LocalInvocationID.y == 0 
+    && gl_LocalInvocationID.z == 0;
+
   // gl_LocalInvocationID is block pos within chunk, gl_WorkGroupID.x is chunk index
   ivec4 blockAddr = ivec4(gl_LocalInvocationID, gl_WorkGroupID.x);
-  ChunkMetadata chunkMeta = b_ChunkMetadata[blockAddr.w];
+  ChunkMetadata chunkMeta = b_ChunkMetadata[gl_WorkGroupID.x];
 
   // Do not push any vertices to the buffer for inactive chunks. N.B. this applies across the
   // entire work group so we don't have to worry about hitting subsequent memory barriers.
   if (!chunkMeta.isActive)
     return;
 
-  s_GroupFaceCount = 0;
+  if (isParent)
+    s_GroupFaceCount = 0;
   barrier();
 
-  pushVertices(blockAddr);
+  BlockInfo info = getBlockInfo(blockAddr);
+  uint groupFaceIx = atomicAdd(s_GroupFaceCount, info.visibleFaceCount);
+
+  if (info.visibleFaceCount != 0)
+    pushVertices(info, groupFaceIx);
 
   IndirectCommand command;
 
-  memoryBarrier();
-  command.count = 6 * s_GroupFaceCount;
-  command.instanceCount = 1;
-  command.firstIndex = 0;
-  command.baseVertex = 0;
-  command.baseInstance = 0;
-  c_IndirectCommands[gl_WorkGroupID.x] = command;
+  barrier();
+  if (isParent) {
+    memoryBarrier();
+    command.count = 6 * s_GroupFaceCount;
+    command.instanceCount = 1;
+    command.firstIndex = 0;
+    command.baseVertex = 0;
+    command.baseInstance = 0;
+    c_IndirectCommands[gl_WorkGroupID.x] = command;
+  }
 }
 
 // vi: ft=c
