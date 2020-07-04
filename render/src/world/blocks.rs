@@ -1,3 +1,7 @@
+#![allow(unused_variables)]
+#![allow(dead_code)]
+#![allow(unused_imports)]
+
 use cgmath::{ElementWise, EuclideanSpace, Matrix4, Point3, Vector3};
 use zerocopy::{AsBytes, FromBytes};
 
@@ -95,13 +99,13 @@ struct ChunkBatchRenderState {
 }
 
 #[repr(C)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, AsBytes, FromBytes)]
 struct ChunkMeta {
-    offset: Point3<f32>,
+    offset: [f32; 3],
     // padding to align offset and neighbor indices to 16 bytes
     _padding0: [f32; 1],
     neighbor_indices: [i32; 6],
-    active: bool,
+    active: u32,
     // padding to align struct to 16 bytes
     _padding1: i32,
 }
@@ -127,59 +131,65 @@ impl BlocksRenderState {
                     label: Some("simgame_render::world::WorldRenderState/compute/input_layout"),
                     bindings: &[
                         // Uniforms
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 0,
-                            visibility: wgpu::ShaderStage::COMPUTE,
-                            ty: wgpu::BindingType::StorageBuffer {
+                        wgpu::BindGroupLayoutEntry::new(
+                            0,
+                            wgpu::ShaderStage::COMPUTE,
+                            wgpu::BindingType::StorageBuffer {
                                 dynamic: false,
                                 readonly: true,
+                                min_binding_size: None,
                             },
-                        },
+                        ),
                         // Block type buffer
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 1,
-                            visibility: wgpu::ShaderStage::COMPUTE,
-                            ty: wgpu::BindingType::StorageBuffer {
+                        wgpu::BindGroupLayoutEntry::new(
+                            1,
+                            wgpu::ShaderStage::COMPUTE,
+                            wgpu::BindingType::StorageBuffer {
                                 dynamic: false,
                                 readonly: true,
+                                min_binding_size: None,
                             },
-                        },
+                        ),
                         // Chunk metadata buffer
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 2,
-                            visibility: wgpu::ShaderStage::COMPUTE,
-                            ty: wgpu::BindingType::StorageBuffer {
+                        wgpu::BindGroupLayoutEntry::new(
+                            2,
+                            wgpu::ShaderStage::COMPUTE,
+                            wgpu::BindingType::StorageBuffer {
                                 dynamic: false,
                                 readonly: true,
+                                min_binding_size: None,
                             },
-                        },
+                        ),
                         // Output vertex buffer
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 3,
-                            visibility: wgpu::ShaderStage::COMPUTE,
-                            ty: wgpu::BindingType::StorageBuffer {
+                        wgpu::BindGroupLayoutEntry::new(
+                            3,
+                            wgpu::ShaderStage::COMPUTE,
+                            wgpu::BindingType::StorageBuffer {
                                 dynamic: false,
                                 readonly: false,
+                                min_binding_size: None,
                             },
-                        },
+                        ),
                         // Output indirect buffer
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 5,
-                            visibility: wgpu::ShaderStage::COMPUTE,
-                            ty: wgpu::BindingType::StorageBuffer {
+                        wgpu::BindGroupLayoutEntry::new(
+                            5,
+                            wgpu::ShaderStage::COMPUTE,
+                            wgpu::BindingType::StorageBuffer {
                                 dynamic: false,
                                 readonly: false,
+                                min_binding_size: None,
                             },
-                        },
+                        ),
                         // Globals within a compute invocation
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 6,
-                            visibility: wgpu::ShaderStage::COMPUTE,
-                            ty: wgpu::BindingType::StorageBuffer {
+                        wgpu::BindGroupLayoutEntry::new(
+                            6,
+                            wgpu::ShaderStage::COMPUTE,
+                            wgpu::BindingType::StorageBuffer {
                                 dynamic: false,
                                 readonly: false,
+                                min_binding_size: None,
                             },
-                        },
+                        ),
                     ],
                 });
 
@@ -208,29 +218,44 @@ impl BlocksRenderState {
                     label: Some("simgame_render::world::WorldRenderState/vertex/layout"),
                     bindings: &[
                         // Uniforms
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 0,
-                            visibility: wgpu::ShaderStage::VERTEX,
-                            ty: wgpu::BindingType::UniformBuffer { dynamic: false },
-                        },
+                        wgpu::BindGroupLayoutEntry::new(
+                            0,
+                            wgpu::ShaderStage::VERTEX,
+                            wgpu::BindingType::UniformBuffer {
+                                dynamic: false,
+                                min_binding_size: None,
+                            },
+                        ),
                         // Locals
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 1,
-                            visibility: wgpu::ShaderStage::VERTEX,
-                            ty: wgpu::BindingType::StorageBuffer { dynamic: false, readonly: true },
-                        },
+                        wgpu::BindGroupLayoutEntry::new(
+                            1,
+                            wgpu::ShaderStage::VERTEX,
+                            wgpu::BindingType::StorageBuffer {
+                                dynamic: false,
+                                readonly: true,
+                                min_binding_size: None,
+                            },
+                        ),
                         // Block types
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 2,
-                            visibility: wgpu::ShaderStage::VERTEX,
-                            ty: wgpu::BindingType::StorageBuffer { dynamic: false, readonly: true },
-                        },
+                        wgpu::BindGroupLayoutEntry::new(
+                            2,
+                            wgpu::ShaderStage::VERTEX,
+                            wgpu::BindingType::StorageBuffer {
+                                dynamic: false,
+                                readonly: true,
+                                min_binding_size: None,
+                            },
+                        ),
                         // Chunk metadata
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 3,
-                            visibility: wgpu::ShaderStage::VERTEX,
-                            ty: wgpu::BindingType::StorageBuffer { dynamic: false, readonly: true },
-                        },
+                        wgpu::BindGroupLayoutEntry::new(
+                            3,
+                            wgpu::ShaderStage::VERTEX,
+                            wgpu::BindingType::StorageBuffer {
+                                dynamic: false,
+                                readonly: true,
+                                min_binding_size: None,
+                            },
+                        ),
                     ],
                 });
 
@@ -250,7 +275,7 @@ impl BlocksRenderState {
                 }),
                 rasterization_state: Some(wgpu::RasterizationStateDescriptor {
                     front_face: wgpu::FrontFace::Ccw,
-                    cull_mode: wgpu::CullMode::Back,
+                    cull_mode: wgpu::CullMode::None,
                     depth_bias: 0,
                     depth_bias_slope_scale: 0.0,
                     depth_bias_clamp: 0.0,
@@ -272,7 +297,7 @@ impl BlocksRenderState {
                     stencil_write_mask: 0u32,
                 }),
                 vertex_state: wgpu::VertexStateDescriptor {
-                    index_format: wgpu::IndexFormat::Uint32,
+                    index_format: wgpu::IndexFormat::Uint16,
                     vertex_buffers: &[wgpu::VertexBufferDescriptor {
                         stride: VERTEX_STRIDE,
                         step_mode: wgpu::InputStepMode::Vertex,
@@ -315,7 +340,7 @@ impl BlocksRenderState {
                 uniforms,
                 bind_group_layout,
                 depth_texture: init.depth_texture.create_default_view(),
-                locals
+                locals,
             }
         };
 
@@ -338,17 +363,16 @@ impl BlocksRenderState {
         self.render_stage.uniforms.camera_pos = frame_render.uniforms.camera_pos;
 
         if self.needs_compute_pass {
-            log::debug!("Running compute pass");
-            self.compute_pass(frame_render.device, encoder);
+            log::info!("Running compute pass");
+            self.compute_pass(frame_render, encoder);
             self.needs_compute_pass = false;
         }
-        self.render_pass(frame_render.device, frame_render.frame, encoder);
+        self.render_pass(frame_render, encoder);
     }
 
     pub fn init(
         &mut self,
-        device: &wgpu::Device,
-        encoder: &mut wgpu::CommandEncoder,
+        queue: &wgpu::Queue,
         world: &World,
         active_view_box: Option<Bounds<i32>>,
     ) {
@@ -359,15 +383,14 @@ impl BlocksRenderState {
             }
         }
 
-        if self.chunk_batch.update_buffers(device, encoder, world) {
+        if self.chunk_batch.update_buffers(queue, world) {
             self.needs_compute_pass = true;
         }
     }
 
     pub fn update(
         &mut self,
-        device: &wgpu::Device,
-        encoder: &mut wgpu::CommandEncoder,
+        queue: &wgpu::Queue,
         world: &World,
         diff: &UpdatedWorldState,
         active_view_box: Option<Bounds<i32>>,
@@ -382,20 +405,20 @@ impl BlocksRenderState {
         }
 
         self.chunk_batch.apply_chunk_diff(world, diff);
-        if self.chunk_batch.update_buffers(device, encoder, world) {
+        if self.chunk_batch.update_buffers(queue, world) {
             self.needs_compute_pass = true;
         }
     }
 
-    fn compute_pass(&mut self, device: &wgpu::Device, encoder: &mut wgpu::CommandEncoder) {
-        self.compute_stage.uniforms.sync(device, encoder);
+    fn compute_pass(&mut self, frame_render: &world::FrameRender, encoder: &mut wgpu::CommandEncoder) {
+        self.compute_stage.uniforms.sync(frame_render.queue);
 
         let bufs = &self.chunk_batch.compute_shader_buffers;
 
         // reset compute shader globals to 0
-        bufs.globals.clear(device, encoder);
+        bufs.globals.clear(frame_render.queue);
 
-        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        let bind_group = frame_render.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: None,
             layout: &self.compute_stage.bind_group_layout,
             bindings: &[
@@ -412,48 +435,46 @@ impl BlocksRenderState {
 
         cpass.set_pipeline(&self.compute_stage.pipeline);
         cpass.set_bind_group(0, &bind_group, &[]);
-
         cpass.dispatch(self.chunk_batch.count_chunks() as u32, 1, 1);
     }
 
     fn render_pass(
         &mut self,
-        device: &wgpu::Device,
-        frame: &wgpu::SwapChainOutput,
+        frame_render: &world::FrameRender,
         encoder: &mut wgpu::CommandEncoder,
     ) {
         let background_color = wgpu::Color::BLACK;
 
-        self.render_stage.uniforms.sync(device, encoder);
-        self.render_stage.locals.sync(device, encoder);
+        self.render_stage.uniforms.sync(frame_render.queue);
+        self.render_stage.locals.sync(frame_render.queue);
 
-        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        let bind_group = frame_render.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: None,
             layout: &self.render_stage.bind_group_layout,
             bindings: &[
                 self.render_stage.uniforms.as_binding(0),
                 self.render_stage.locals.as_binding(1),
                 self.chunk_batch.block_type_binding(2),
-                self.chunk_batch.chunk_metadata_binding(3)
+                self.chunk_batch.chunk_metadata_binding(3),
             ],
         });
 
         let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             color_attachments: &[wgpu::RenderPassColorAttachmentDescriptor {
-                attachment: &frame.view,
+                attachment: &frame_render.frame.output.view,
                 resolve_target: None,
-                load_op: wgpu::LoadOp::Clear,
-                store_op: wgpu::StoreOp::Store,
-                clear_color: background_color,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(background_color),
+                    store: true,
+                },
             }],
             depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachmentDescriptor {
                 attachment: &self.render_stage.depth_texture,
-                depth_load_op: wgpu::LoadOp::Clear,
-                depth_store_op: wgpu::StoreOp::Store,
-                stencil_load_op: wgpu::LoadOp::Clear,
-                stencil_store_op: wgpu::StoreOp::Store,
-                clear_depth: 1.0,
-                clear_stencil: 0,
+                depth_ops: Some(wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(1.0),
+                    store: true,
+                }),
+                stencil_ops: None,
             }),
         });
         rpass.set_pipeline(&self.render_stage.pipeline);
@@ -463,9 +484,9 @@ impl BlocksRenderState {
         let vertex_buf = &bufs.vertex;
         let indirect_buf = &bufs.indirect;
 
-        for (_, chunk_index, _) in self.chunk_batch.active_chunks.iter() {
-            rpass.set_vertex_buffer(0, &vertex_buf.buffer(), 0, vertex_buf.len());
+        rpass.set_vertex_buffer(0, vertex_buf.buffer().slice(..));
 
+        for (_, chunk_index, _) in self.chunk_batch.active_chunks.iter() {
             rpass.draw_indirect(
                 &indirect_buf.buffer(),
                 indirect_buf.instance_offset(chunk_index),
@@ -476,7 +497,7 @@ impl BlocksRenderState {
 
 impl ChunkBatchRenderState {
     const fn max_batch_chunks() -> usize {
-        let block_types_mb = 32;
+        let block_types_mb = 8;
         (1024 * 1024 * block_types_mb) / index_utils::chunk_size_total()
     }
 
@@ -506,13 +527,13 @@ impl ChunkBatchRenderState {
         let block_type_helper = BufferSyncHelper::new(BufferSyncHelperDesc {
             buffer_len: Self::max_batch_blocks(),
             max_chunk_len: index_utils::chunk_size_total(),
-            usage: wgpu::BufferUsage::STORAGE_READ | wgpu::BufferUsage::COPY_DST,
+            usage: wgpu::BufferUsage::STORAGE | wgpu::BufferUsage::COPY_DST,
         });
 
         let chunk_metadata_helper = BufferSyncHelper::new(BufferSyncHelperDesc {
             buffer_len: Self::metadata_size() * Self::max_batch_chunks(),
-            max_chunk_len: index_utils::chunk_size_total(),
-            usage: wgpu::BufferUsage::STORAGE_READ | wgpu::BufferUsage::COPY_DST,
+            max_chunk_len: Self::metadata_size(),
+            usage: wgpu::BufferUsage::STORAGE | wgpu::BufferUsage::COPY_DST,
         });
 
         let compute_shader_buffers = {
@@ -540,7 +561,6 @@ impl ChunkBatchRenderState {
                     instance_len: 8,
                     n_instances: 1,
                     usage: wgpu::BufferUsage::STORAGE
-                        | wgpu::BufferUsage::STORAGE_READ
                         | wgpu::BufferUsage::COPY_DST,
                 },
             );
@@ -685,19 +705,18 @@ impl ChunkBatchRenderState {
 
     fn update_buffers(
         &mut self,
-        device: &wgpu::Device,
-        encoder: &mut wgpu::CommandEncoder,
+        queue: &wgpu::Queue,
         world: &World,
     ) -> bool {
         let mut any_updates = false;
 
         let mut fill_block_types =
             self.block_type_helper
-                .begin_fill_buffer(device, &self.block_type_buf, 0);
+                .begin_fill_buffer(queue, &self.block_type_buf, 0);
 
         let mut fill_chunk_metadatas =
             self.chunk_metadata_helper
-                .begin_fill_buffer(device, &self.chunk_metadata_buf, 0);
+                .begin_fill_buffer(queue, &self.chunk_metadata_buf, 0);
 
         // Copy chunk data to GPU buffers for only the chunks that have changed since last time
         // buffers were updated.
@@ -707,19 +726,17 @@ impl ChunkBatchRenderState {
             if let Some((&p, _)) = opt_point {
                 let chunk = world.blocks.chunks().get(convert_point!(p, usize)).unwrap();
                 let chunk_data = block::blocks_to_u16(&chunk.blocks);
-                fill_block_types.seek(encoder, index * index_utils::chunk_size_total());
-                fill_block_types.advance(encoder, chunk_data);
+                fill_block_types.seek(index * index_utils::chunk_size_total());
+                fill_block_types.advance(chunk_data);
             } else {
                 // if a chunk was deleted, write inactive metadata
                 let meta = ChunkMeta::empty();
-                fill_chunk_metadatas.seek(encoder, index * Self::metadata_size());
-                for slice in &meta.as_slices() {
-                    fill_chunk_metadatas.advance(encoder, slice);
-                }
+                fill_chunk_metadatas.seek(index * Self::metadata_size());
+                fill_chunk_metadatas.advance(meta.as_bytes());
             }
         }
 
-        fill_block_types.finish(encoder);
+        fill_block_types.finish();
 
         if any_updates {
             // If any chunks have been updated, update metadata for every chunk. In theory we only
@@ -728,14 +745,12 @@ impl ChunkBatchRenderState {
 
             for (&point, index, _) in self.active_chunks.iter() {
                 let meta = Self::make_chunk_meta(&self.active_chunks, point);
-                fill_chunk_metadatas.seek(encoder, index * Self::metadata_size());
-                for slice in &meta.as_slices() {
-                    fill_chunk_metadatas.advance(encoder, slice);
-                }
+                fill_chunk_metadatas.seek(index * Self::metadata_size());
+                fill_chunk_metadatas.advance(meta.as_bytes());
             }
-
-            fill_chunk_metadatas.finish(encoder);
         }
+
+        fill_chunk_metadatas.finish();
 
         any_updates
     }
@@ -782,10 +797,10 @@ impl ChunkBatchRenderState {
         let neighbor_indices = make_neighbor_indices(&active_chunks, p);
 
         ChunkMeta {
-            offset,
+            offset: offset.into(),
             _padding0: [0f32],
             neighbor_indices,
-            active: true,
+            active: 1,
             _padding1: 0,
         }
     }
@@ -808,17 +823,16 @@ impl BufferSyncable for RenderUniforms {
     fn sync<'a>(
         &self,
         fill_buffer: &mut FillBuffer<'a, Self::Item>,
-        encoder: &mut wgpu::CommandEncoder,
     ) {
         let proj: &[f32; 16] = self.proj.as_ref();
         let view: &[f32; 16] = self.view.as_ref();
         let model: &[f32; 16] = self.model.as_ref();
         let camera_pos: &[f32; 3] = self.camera_pos.as_ref();
 
-        fill_buffer.advance(encoder, proj);
-        fill_buffer.advance(encoder, view);
-        fill_buffer.advance(encoder, model);
-        fill_buffer.advance(encoder, camera_pos);
+        fill_buffer.advance(proj);
+        fill_buffer.advance(view);
+        fill_buffer.advance(model);
+        fill_buffer.advance(camera_pos);
     }
 }
 
@@ -838,9 +852,8 @@ impl BufferSyncable for RenderLocals {
     fn sync<'a>(
         &self,
         fill_buffer: &mut FillBuffer<'a, Self::Item>,
-        encoder: &mut wgpu::CommandEncoder,
     ) {
-        fill_buffer.advance(encoder, self.as_bytes());
+        fill_buffer.advance(self.as_bytes());
     }
 }
 
@@ -849,7 +862,7 @@ impl IntoBufferSynced for RenderLocals {
         BufferSyncHelperDesc {
             buffer_len: std::mem::size_of::<Self>(),
             max_chunk_len: std::mem::size_of::<Self>(),
-            usage: wgpu::BufferUsage::STORAGE_READ | wgpu::BufferUsage::COPY_DST,
+            usage: wgpu::BufferUsage::STORAGE | wgpu::BufferUsage::COPY_DST,
         }
     }
 }
@@ -867,16 +880,15 @@ impl BufferSyncable for ComputeUniforms {
     fn sync<'a>(
         &self,
         fill_buffer: &mut FillBuffer<'a, Self::Item>,
-        encoder: &mut wgpu::CommandEncoder,
     ) {
         let visible_box_origin = self.visible_box_origin.as_ref() as &[f32; 3];
         let visible_box_limit = self.visible_box_limit.as_ref() as &[f32; 3];
 
-        fill_buffer.advance(encoder, visible_box_origin.as_bytes());
-        fill_buffer.advance(encoder, 0f32.as_bytes());
-        fill_buffer.advance(encoder, visible_box_limit.as_bytes());
-        fill_buffer.advance(encoder, 0f32.as_bytes());
-        fill_buffer.advance(encoder, self.cube.faces.as_bytes());
+        fill_buffer.advance(visible_box_origin.as_bytes());
+        fill_buffer.advance(0f32.as_bytes());
+        fill_buffer.advance(visible_box_limit.as_bytes());
+        fill_buffer.advance(0f32.as_bytes());
+        fill_buffer.advance(self.cube.faces.as_bytes());
     }
 }
 
@@ -888,30 +900,18 @@ impl IntoBufferSynced for ComputeUniforms {
         BufferSyncHelperDesc {
             buffer_len: full_len,
             max_chunk_len: full_len,
-            usage: wgpu::BufferUsage::STORAGE_READ | wgpu::BufferUsage::COPY_DST,
+            usage: wgpu::BufferUsage::STORAGE | wgpu::BufferUsage::COPY_DST,
         }
     }
 }
 
 impl ChunkMeta {
-    #[inline]
-    fn as_slices(&self) -> [&[u8]; 5] {
-        let offset_vec = self.offset.as_ref() as &[f32; 3];
-        [
-            offset_vec.as_bytes(),
-            self._padding0.as_bytes(),
-            self.neighbor_indices.as_bytes(),
-            self.active.as_bytes(),
-            self._padding1.as_bytes(),
-        ]
-    }
-
     fn empty() -> Self {
         Self {
-            offset: Point3::new(0.0, 0.0, 0.0),
+            offset: Point3::new(0.0, 0.0, 0.0).into(),
             _padding0: [0.0],
             neighbor_indices: [0, 0, 0, 0, 0, 0],
-            active: false,
+            active: 0,
             _padding1: 0,
         }
     }

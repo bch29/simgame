@@ -24,8 +24,8 @@ pub struct Shaders<R> {
     pub comp: R,
 }
 
-pub struct WorldRenderInit<R> {
-    pub shaders: Shaders<R>,
+pub struct WorldRenderInit<'a> {
+    pub shaders: Shaders<&'a [u32]>,
     pub aspect_ratio: f32,
     pub width: u32,
     pub height: u32,
@@ -50,9 +50,10 @@ pub struct Uniforms {
 }
 
 pub struct FrameRender<'a> {
-    device: &'a wgpu::Device,
-    frame: &'a wgpu::SwapChainOutput,
-    uniforms: &'a Uniforms,
+    pub queue: &'a wgpu::Queue,
+    pub device: &'a wgpu::Device,
+    pub frame: &'a wgpu::SwapChainFrame,
+    pub uniforms: &'a Uniforms,
 }
 
 impl WorldRenderState {
@@ -66,13 +67,13 @@ impl WorldRenderState {
         self.view_params = params;
     }
 
-    pub fn new<R>(init: WorldRenderInit<R>, device: &wgpu::Device) -> Result<Self>
-    where
-        R: std::io::Seek + std::io::Read,
+    pub fn new(init: WorldRenderInit, device: &wgpu::Device) -> Result<Self>
     {
-        let shaders = init.shaders.map_result::<std::io::Error, _, _>(|stream| {
-            Ok(device.create_shader_module(&wgpu::read_spirv(stream)?))
-        })?;
+        let shaders = init
+            .shaders
+            .map_result::<std::io::Error, _, _>(|stream| {
+                Ok(device.create_shader_module(wgpu::ShaderModuleSource::SpirV(stream)))
+            })?;
 
         let view_params = ViewParams::default();
 
@@ -83,7 +84,6 @@ impl WorldRenderState {
                 height: init.height,
                 depth: 1,
             },
-            array_layer_count: 1,
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
@@ -121,13 +121,15 @@ impl WorldRenderState {
 
     pub fn render_frame(
         &mut self,
+        queue: &wgpu::Queue,
         device: &wgpu::Device,
-        frame: &wgpu::SwapChainOutput,
+        frame: &wgpu::SwapChainFrame,
         encoder: &mut wgpu::CommandEncoder,
     ) {
         self.uniforms.model = self.rotation;
 
         let render = FrameRender {
+            queue,
             device,
             frame,
             uniforms: &self.uniforms,
@@ -154,25 +156,23 @@ impl WorldRenderState {
 
     pub fn init(
         &mut self,
-        device: &wgpu::Device,
-        encoder: &mut wgpu::CommandEncoder,
+        queue: &wgpu::Queue,
         world: &World,
     ) {
         let active_view_box = self.calculate_view_box(world);
         self.render_blocks
-            .init(device, encoder, world, active_view_box);
+            .init(queue, world, active_view_box);
     }
 
     pub fn update(
         &mut self,
-        device: &wgpu::Device,
-        encoder: &mut wgpu::CommandEncoder,
+        queue: &wgpu::Queue,
         world: &World,
         diff: &UpdatedWorldState,
     ) {
         let active_view_box = self.calculate_view_box(world);
         self.render_blocks
-            .update(device, encoder, world, diff, active_view_box);
+            .update(queue, world, diff, active_view_box);
     }
 }
 

@@ -57,18 +57,18 @@ struct CubeFace {
   vec2[4] vertexTexCoords;
 };
 
-layout(set = 0, binding = 0) buffer Locals {
-  readonly vec4 u_VisibleBoxOrigin;
-  readonly vec4 u_VisibleBoxLimit;
-  readonly CubeFace[6] u_CubeFaces;
+layout(set = 0, binding = 0) readonly buffer Locals {
+  vec4 u_VisibleBoxOrigin;
+  vec4 u_VisibleBoxLimit;
+  CubeFace[6] u_CubeFaces;
 };
 
-layout(set = 0, binding = 1) buffer BlockTypes {
-  readonly int[] b_BlockTypes;
+layout(set = 0, binding = 1) readonly buffer BlockTypes {
+  int[] b_BlockTypes;
 };
 
-layout(set = 0, binding = 2) buffer ChunkMetadataArr {
-  readonly ChunkMetadata[] b_ChunkMetadata;
+layout(set = 0, binding = 2) readonly buffer ChunkMetadataArr {
+  ChunkMetadata[] b_ChunkMetadata;
 };
 
 layout(set = 0, binding = 3) buffer OutputVertices {

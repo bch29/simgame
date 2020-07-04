@@ -1,9 +1,6 @@
 use std::ops::{Deref, DerefMut};
 
-use wgpu::{
-    Buffer, BufferAddress, BufferDescriptor, BufferUsage, CommandEncoder, CreateBufferMapped,
-    Device,
-};
+use wgpu::{Buffer, BufferDescriptor, BufferUsage, Device, Queue};
 use zerocopy::{AsBytes, FromBytes};
 
 pub struct BufferSyncedData<Data, Item> {
@@ -28,7 +25,7 @@ pub struct BufferSyncHelperDesc {
 pub trait BufferSyncable {
     type Item;
 
-    fn sync<'a>(&self, fill_buffer: &mut FillBuffer<'a, Self::Item>, encoder: &mut CommandEncoder);
+    fn sync<'a>(&self, fill_buffer: &mut FillBuffer<'a, Self::Item>);
 }
 
 pub trait IntoBufferSynced: BufferSyncable {
@@ -65,14 +62,14 @@ impl<Data, Item> BufferSyncedData<Data, Item> {
     }
 
     #[inline]
-    pub fn sync<'a>(&'a self, device: &Device, encoder: &mut CommandEncoder)
+    pub fn sync<'a>(&'a self, queue: &Queue)
     where
         Data: BufferSyncable<Item = Item>,
         Item: Copy + AsBytes + FromBytes + 'static,
     {
-        let mut fill_buffer = self.helper.begin_fill_buffer(device, &self.buffer, 0);
-        self.data.sync(&mut fill_buffer, encoder);
-        fill_buffer.finish(encoder);
+        let mut fill_buffer = self.helper.begin_fill_buffer(queue, &self.buffer, 0);
+        self.data.sync(&mut fill_buffer);
+        fill_buffer.finish();
     }
 
     #[inline]
@@ -112,10 +109,26 @@ impl<Item> BufferSyncHelper<Item> {
             label: None,
             size: (self.desc.buffer_len * std::mem::size_of::<Item>()) as u64,
             usage: self.desc.usage,
+            mapped_at_creation: false,
         })
     }
 
     pub fn new(desc: BufferSyncHelperDesc) -> Self {
+        let item_size = std::mem::size_of::<Item>();
+        let byte_len = desc.buffer_len * item_size;
+        let chunk_byte_len = desc.max_chunk_len * item_size;
+
+        assert!(
+            byte_len % 4 == 0,
+            "buffer helper byte length {} should be a multiple of 4",
+            byte_len
+        );
+        assert!(
+            chunk_byte_len % 4 == 0,
+            "buffer helper max chunk byte length {} should be a multiple of 4",
+            chunk_byte_len
+        );
+
         BufferSyncHelper {
             desc,
             _marker: std::marker::PhantomData,
@@ -130,7 +143,7 @@ impl<Item> BufferSyncHelper<Item> {
     /// The `Drop` impl may panic if you fail to do so.
     pub fn begin_fill_buffer<'a>(
         &'a self,
-        device: &'a Device,
+        queue: &'a Queue,
         target: &'a Buffer,
         start_pos: usize,
     ) -> FillBuffer<'a, Item>
@@ -138,7 +151,7 @@ impl<Item> BufferSyncHelper<Item> {
         Item: 'static + Copy + AsBytes + FromBytes,
     {
         FillBuffer {
-            device,
+            queue,
             target,
             mapped_buffer: None,
             pos: start_pos,
@@ -150,8 +163,7 @@ impl<Item> BufferSyncHelper<Item> {
     /// Fills the buffer with chunks of data from the given iterator.
     pub fn fill_buffer<Chunks>(
         &self,
-        device: &Device,
-        encoder: &mut CommandEncoder,
+        queue: &Queue,
         target: &Buffer,
         start_pos: usize,
         chunks: Chunks,
@@ -160,25 +172,13 @@ impl<Item> BufferSyncHelper<Item> {
         Chunks::Item: AsRef<[Item]>,
         Item: 'static + Copy + AsBytes + FromBytes,
     {
-        let mut fill_buffer = self.begin_fill_buffer(device, target, start_pos);
+        let mut fill_buffer = self.begin_fill_buffer(queue, target, start_pos);
 
         for chunk in chunks {
-            fill_buffer.advance(encoder, chunk);
+            fill_buffer.advance(chunk);
         }
 
-        fill_buffer.finish(encoder);
-    }
-
-    #[inline]
-    fn make_src_buffer<'a>(&self, device: &'a Device) -> CreateBufferMapped<'a>
-    where
-        Item: Copy + 'static,
-    {
-        device.create_buffer_mapped(&wgpu::BufferDescriptor {
-            label: None,
-            size: (std::mem::size_of::<Item>() * self.desc.max_chunk_len) as u64,
-            usage: BufferUsage::COPY_SRC,
-        })
+        fill_buffer.finish();
     }
 
     #[inline]
@@ -200,18 +200,17 @@ impl<Item> BufferSyncHelper<Item> {
     ) -> wgpu::Binding<'a> {
         wgpu::Binding {
             binding: index,
-            resource: wgpu::BindingResource::Buffer {
-                buffer,
-                range: start_offset..start_offset + self.buffer_byte_len(),
-            },
+            resource: wgpu::BindingResource::Buffer(
+                buffer.slice(start_offset..start_offset + self.buffer_byte_len()),
+            ),
         }
     }
 }
 
 pub struct FillBuffer<'a, Item> {
-    device: &'a Device,
+    queue: &'a Queue,
     target: &'a Buffer,
-    mapped_buffer: Option<CreateBufferMapped<'a>>,
+    mapped_buffer: Option<Buffer>,
     pos: usize,
     batch_len: usize,
     sync_helper: &'a BufferSyncHelper<Item>,
@@ -238,7 +237,7 @@ impl<'a, Item> FillBuffer<'a, Item> {
 
     /// Copy a single chunk of data to the buffer.
     #[inline]
-    pub fn advance<Chunk>(&mut self, encoder: &mut CommandEncoder, chunk: Chunk)
+    pub fn advance<Chunk>(&mut self, chunk: Chunk)
     where
         Chunk: AsRef<[Item]>,
         Item: 'static + Copy + AsBytes + FromBytes,
@@ -246,88 +245,87 @@ impl<'a, Item> FillBuffer<'a, Item> {
         let chunk_slice = chunk.as_ref();
         let chunk_len = chunk_slice.len();
 
+        let byte_len = chunk_len * std::mem::size_of::<Item>();
+
+        assert!(
+            byte_len % 4 == 0,
+            "chunk byte len {} should be a multiple of 4",
+            byte_len
+        );
         assert!(chunk_len <= self.sync_helper.desc.max_chunk_len);
 
         if self.batch_len + chunk_len > self.sync_helper.desc.max_chunk_len {
-            self.end_batch(encoder);
+            self.end_batch();
         }
 
-        let sync_helper = &self.sync_helper;
-        let device = &self.device;
-
-        let mapped_buffer = self
-            .mapped_buffer
-            .get_or_insert_with(|| sync_helper.make_src_buffer(device));
-
         let item_size = std::mem::size_of::<Item>();
-        let begin = item_size * self.batch_len;
-        let end = begin + item_size * chunk_len;
-        mapped_buffer.data[begin..end].copy_from_slice(chunk_slice.as_bytes());
+        let begin = item_size * (self.pos + self.batch_len);
 
+        self.queue.write_buffer(self.target, begin as _, chunk_slice.as_bytes());
         self.batch_len += chunk_len;
     }
 
     /// Copies each chunk from the given iterator to the buffer.
     #[inline]
-    pub fn advance_iter<Iter>(&mut self, encoder: &mut CommandEncoder, chunks: Iter)
+    pub fn advance_iter<Iter>(&mut self, chunks: Iter)
     where
         Iter::Item: AsRef<[Item]>,
         Iter: IntoIterator,
         Item: 'static + Copy + AsBytes + FromBytes,
     {
         for chunk in chunks {
-            self.advance(encoder, chunk)
+            self.advance(chunk)
         }
     }
 
     /// Copies each chunk from the given iterator to the buffer, then finalizes the copy.
     #[inline]
-    pub fn finish_with_iter<Iter>(self, encoder: &mut CommandEncoder, chunks: Iter)
+    pub fn finish_with_iter<Iter>(self, chunks: Iter)
     where
         Iter::Item: AsRef<[Item]>,
         Iter: IntoIterator,
         Item: 'static + Copy + AsBytes + FromBytes,
     {
-        self.attach_iter(chunks).drain(encoder)
+        self.attach_iter(chunks).drain()
     }
 
     /// Finalizes the copy, copying any remaining chunks.
-    pub fn finish(mut self, encoder: &mut CommandEncoder)
+    pub fn finish(mut self)
     where
         Item: Copy,
     {
-        self.end_batch(encoder)
+        self.end_batch()
     }
 
-    fn end_batch(&mut self, encoder: &mut CommandEncoder)
+    fn end_batch(&mut self)
     where
         Item: Copy,
     {
-        if let Some(mapped_buffer) = self.mapped_buffer.take() {
-            let item_size = std::mem::size_of::<Item>();
-            let src = mapped_buffer.finish();
-            encoder.copy_buffer_to_buffer(
-                &src,
-                0,
-                self.target,
-                (item_size * self.pos) as BufferAddress,
-                (item_size * self.batch_len) as BufferAddress,
-            );
+        // if let Some(mapped_buffer) = self.mapped_buffer.take() {
+        //     let item_size = std::mem::size_of::<Item>();
+        //     encoder.copy_buffer_to_buffer(
+        //         &mapped_buffer,
+        //         0,
+        //         self.target,
+        //         (item_size * self.pos) as BufferAddress,
+        //         (item_size * self.batch_len) as BufferAddress,
+        //     );
 
-            self.pos += self.batch_len;
-        }
+        //     self.pos += self.batch_len;
+        // }
 
+        self.pos += self.batch_len;
         self.batch_len = 0;
     }
 
     /// Subsequent writes will begin at the given position. May end the current batch.
     #[inline]
-    pub fn seek(&mut self, encoder: &mut CommandEncoder, new_pos: usize)
+    pub fn seek(&mut self, new_pos: usize)
     where
         Item: Copy,
     {
         if self.pos + self.batch_len != new_pos {
-            self.end_batch(encoder);
+            self.end_batch();
             self.pos = new_pos;
         }
     }
@@ -348,23 +346,23 @@ where
     Item: 'static + Copy + AsBytes + FromBytes,
 {
     #[inline]
-    pub fn advance(mut self, encoder: &mut CommandEncoder) -> Option<Self> {
+    pub fn advance(mut self) -> Option<Self> {
         match self.iter.next() {
             Some(chunk) => {
-                self.fill_buffer.advance(encoder, chunk);
+                self.fill_buffer.advance(chunk);
                 Some(self)
             }
             None => {
-                self.fill_buffer.finish(encoder);
+                self.fill_buffer.finish();
                 None
             }
         }
     }
 
     #[inline]
-    pub fn drain(mut self, encoder: &mut CommandEncoder) {
+    pub fn drain(mut self) {
         loop {
-            self = match self.advance(encoder) {
+            self = match self.advance() {
                 Some(x) => x,
                 None => break,
             }
@@ -430,6 +428,11 @@ impl InstancedBuffer {
             usage: desc.usage,
         };
         let helper = BufferSyncHelper::new(helper_desc);
+
+        log::info!(
+            "Creating buffer of size {} MB",
+            helper.desc().buffer_len / (1024 * 1024)
+        );
         let buffer = helper.make_buffer(device);
         Self {
             desc,
@@ -464,13 +467,12 @@ impl InstancedBuffer {
     }
 
     #[inline]
-    pub fn clear(&self, device: &Device, encoder: &mut CommandEncoder) {
+    pub fn clear(&self, queue: &Queue) {
         self.helper.fill_buffer(
-            device,
-            encoder,
+            queue,
             &self.buffer,
             0,
-            std::iter::repeat(&[0u8]).take(self.len() as usize),
+            std::iter::repeat(&[0u8, 0, 0, 0]).take(self.len() as usize / 4),
         );
     }
 }

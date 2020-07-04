@@ -36,16 +36,16 @@ layout(set = 0, binding = 0) uniform Locals {
   vec4 u_CameraPos;
 };
 
-layout(set = 0, binding = 1) buffer BufLocals {
-  readonly CubeFace[6] b_CubeFaces;
+layout(set = 0, binding = 1) readonly buffer BufLocals {
+  CubeFace[6] b_CubeFaces;
 };
 
-layout(set = 0, binding = 2) buffer BlockTypes {
-  readonly int[] b_BlockTypes;
+layout(set = 0, binding = 2) readonly buffer BlockTypes {
+  int[] b_BlockTypes;
 };
 
-layout(set = 0, binding = 3) buffer ChunkMetadataArr {
-  readonly ChunkMetadata[] b_ChunkMetadata;
+layout(set = 0, binding = 3) readonly buffer ChunkMetadataArr {
+  ChunkMetadata[] b_ChunkMetadata;
 };
 
 /* 
@@ -97,6 +97,8 @@ void main() {
   ivec4 blockAddr = decodeBlockIndex(a_BlockIndex);
   ChunkMetadata chunkMeta = b_ChunkMetadata[blockAddr.w];
 
+  vec3 blockOffset = chunkMeta.offset.xyz;
+
   uint faceId = a_VertexId / 6;
   uint faceVertexId = a_VertexId % 6;
   
@@ -106,7 +108,7 @@ void main() {
   vec2 a_TexCoord = face.vertexTexCoords[faceVertexId];
 
   mat4 view = u_View * translation_matrix(-u_CameraPos.xyz);
-  mat4 model = fullModelMatrix(blockAddr, chunkMeta.offset.xyz);
+  mat4 model = fullModelMatrix(blockAddr, blockOffset);
 
   v_CameraPos = u_CameraPos.xyz;
   v_TexCoord = a_TexCoord;

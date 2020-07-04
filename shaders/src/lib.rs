@@ -36,22 +36,22 @@ impl Compiler {
         })
     }
 
-    pub fn compile_vert(&mut self, path: &Path) -> Result<Vec<u8>> {
+    pub fn compile_vert(&mut self, path: &Path) -> Result<Vec<u32>> {
         info!("Compiling vertex shader {:?}", path);
         self.compile_impl(path, shaderc::ShaderKind::Vertex)
     }
 
-    pub fn compile_frag(&mut self, path: &Path) -> Result<Vec<u8>> {
+    pub fn compile_frag(&mut self, path: &Path) -> Result<Vec<u32>> {
         info!("Compiling fragment shader {:?}", path);
         self.compile_impl(path, shaderc::ShaderKind::Fragment)
     }
 
-    pub fn compile_compute(&mut self, path: &Path) -> Result<Vec<u8>> {
+    pub fn compile_compute(&mut self, path: &Path) -> Result<Vec<u32>> {
         info!("Compiling compute shader {:?}", path);
         self.compile_impl(path, shaderc::ShaderKind::Compute)
     }
 
-    fn compile_impl(&mut self, path: &Path, kind: shaderc::ShaderKind) -> Result<Vec<u8>> {
+    fn compile_impl(&mut self, path: &Path, kind: shaderc::ShaderKind) -> Result<Vec<u32>> {
         let fname = path
             .file_name()
             .ok_or_else(|| anyhow!("Expected file path, got directory path"))?;
@@ -77,6 +77,6 @@ impl Compiler {
             )
             .context("Compiling shader")?;
 
-        Ok(compiled.as_binary_u8().into())
+        Ok(compiled.as_binary().into())
     }
 }

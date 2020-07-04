@@ -34,29 +34,29 @@ impl Mesh {
         (std::mem::size_of::<u16>() * self.indices.len()) as u64
     }
 
-    pub fn vertex_buffer(&self, device: &wgpu::Device) -> wgpu::Buffer {
-        let mapped_buffer = device
-            .create_buffer_mapped(&wgpu::BufferDescriptor {
-                label: None,
-                size: self.vertex_buffer_size(),
-                usage: wgpu::BufferUsage::VERTEX,
-            });
+    // pub fn vertex_buffer(&self, device: &wgpu::Device) -> wgpu::Buffer {
+    //     let mapped_buffer = device
+    //         .create_buffer_mapped(&wgpu::BufferDescriptor {
+    //             label: None,
+    //             size: self.vertex_buffer_size(),
+    //             usage: wgpu::BufferUsage::VERTEX,
+    //         });
 
-        mapped_buffer.data.copy_from_slice(self.vertices.as_bytes());
-        mapped_buffer.finish()
-    }
+    //     mapped_buffer.data.copy_from_slice(self.vertices.as_bytes());
+    //     mapped_buffer.finish()
+    // }
 
-    pub fn index_buffer(&self, device: &wgpu::Device) -> wgpu::Buffer {
-        let mapped_buffer = device
-            .create_buffer_mapped(&wgpu::BufferDescriptor {
-                label: None,
-                size: self.index_buffer_size(),
-                usage: wgpu::BufferUsage::INDEX,
-            });
+    // pub fn index_buffer(&self, device: &wgpu::Device) -> wgpu::Buffer {
+    //     let mapped_buffer = device
+    //         .create_buffer_mapped(&wgpu::BufferDescriptor {
+    //             label: None,
+    //             size: self.index_buffer_size(),
+    //             usage: wgpu::BufferUsage::INDEX,
+    //         });
 
-        mapped_buffer.data.copy_from_slice(self.indices.as_bytes());
-        mapped_buffer.finish()
-    }
+    //     mapped_buffer.data.copy_from_slice(self.indices.as_bytes());
+    //     mapped_buffer.finish()
+    // }
 
     pub fn vertex_buffer_descriptor(&self) -> wgpu::VertexBufferDescriptor {
         wgpu::VertexBufferDescriptor {

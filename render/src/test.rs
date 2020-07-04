@@ -16,7 +16,7 @@ use crate::{RenderInit, RenderState, WorldRenderInit};
 const GAME_STEP_MILLIS: u64 = 10;
 const RENDER_INTERVAL_MILLIS: u64 = 1000 / 120;
 
-const INITIAL_VISIBLE_SIZE: Vector3<i32> = Vector3::new(128, 128, 600);
+const INITIAL_VISIBLE_SIZE: Vector3<i32> = Vector3::new(128, 128, 5);
 
 pub fn build_window(
     event_loop: &winit::event_loop::EventLoop<()>,
@@ -226,7 +226,7 @@ impl ControlState {
     }
 }
 
-pub async fn test_render(mut world: World, shaders: crate::WorldShaders<&[u8]>) -> Result<()> {
+pub async fn test_render(mut world: World, shaders: crate::WorldShaders<&[u32]>) -> Result<()> {
     let event_loop = EventLoop::new();
 
     let window = build_window(&event_loop)?;
@@ -239,7 +239,7 @@ pub async fn test_render(mut world: World, shaders: crate::WorldShaders<&[u8]>) 
         window: &window,
         physical_win_size: win_size,
         world: WorldRenderInit {
-            shaders: shaders.map(|bytes| std::io::Cursor::new(bytes)),
+            shaders,
             aspect_ratio: (physical_win_size.width / physical_win_size.height) as f32,
             width: win_size.0,
             height: win_size.1,

@@ -13,6 +13,11 @@ log = "*"
 # graphics
 winit = "*"
 raw-window-handle = "*"
-wgpu = "*"
 zerocopy = "*"
 rand = "*"
+
+[dependencies.wgpu]
+package = "wgpu"
+version = "0.5"
+git = "https://github.com/gfx-rs/wgpu-rs"
+rev = "0c7c3afebb12bf411d6964887b85e5fd152057f5"

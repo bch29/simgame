@@ -10,14 +10,14 @@ pub mod test;
 mod triangulate;
 mod world;
 
-pub use world::WorldRenderInit;
 pub use world::Shaders as WorldShaders;
+pub use world::WorldRenderInit;
 
 // TODO: UI rendering pipeline
 
-pub struct RenderInit<'a, R, W> {
+pub struct RenderInit<'a, W> {
     pub window: &'a W,
-    pub world: WorldRenderInit<R>,
+    pub world: WorldRenderInit<'a>,
     pub physical_win_size: (u32, u32),
 }
 
@@ -33,29 +33,40 @@ impl RenderState {
         self.world.set_view(params);
     }
 
-    pub async fn new<'a, R, W>(init: RenderInit<'a, R, W>) -> Result<Self>
+    pub async fn new<'a, W>(init: RenderInit<'a, W>) -> Result<Self>
     where
-        R: std::io::Seek + std::io::Read,
         W: HasRawWindowHandle,
     {
-        let surface = wgpu::Surface::create(init.window);
+        let instance = wgpu::Instance::new(wgpu::BackendBit::PRIMARY);
 
-        let adapter = wgpu::Adapter::request(
-            &wgpu::RequestAdapterOptions {
-                power_preference: wgpu::PowerPreference::HighPerformance,
-                compatible_surface: None,
-            },
-            wgpu::BackendBit::PRIMARY,
-        )
-        .await
-        .ok_or_else(|| anyhow!("Failed to request wgpu::Adaptor"))?;
+        let surface = unsafe { instance.create_surface(init.window) };
 
-        let (device, queue) = adapter.request_device(&wgpu::DeviceDescriptor {
-            extensions: wgpu::Extensions {
-                anisotropic_filtering: false,
-            },
-            limits: wgpu::Limits::default(),
-        }).await;
+        let adapter = instance
+            .request_adapter(
+                &wgpu::RequestAdapterOptions {
+                    power_preference: wgpu::PowerPreference::HighPerformance,
+                    compatible_surface: None,
+                },
+                wgpu::UnsafeFeatures::disallow(),
+            )
+            .await
+            .ok_or_else(|| anyhow!("Failed to request wgpu::Adaptor"))?;
+
+        let (device, queue) = adapter
+            .request_device(
+                &wgpu::DeviceDescriptor {
+                    features: wgpu::Features::empty(),
+                        // wgpu::Features::MULTI_DRAW_INDIRECT,
+                    shader_validation: false,
+                    limits: wgpu::Limits {
+                        max_bind_groups: 8,
+                        ..wgpu::Limits::default()
+                    },
+                },
+                None,
+            )
+            .await
+            .map_err(|err| anyhow!("{:?}", err))?;
 
         let swap_chain = device.create_swap_chain(
             &surface,
@@ -79,28 +90,23 @@ impl RenderState {
     }
 
     pub fn render_frame(&mut self) {
-        let frame = self.swap_chain.get_next_texture().expect("failed to get next texture");
+        let frame = self
+            .swap_chain
+            .get_next_frame()
+            .expect("failed to get next frame");
         let mut encoder = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
 
-        self.world.render_frame(&self.device, &frame, &mut encoder);
-        self.queue.submit(&[encoder.finish()]);
+        self.world.render_frame(&self.queue, &self.device, &frame, &mut encoder);
+        self.queue.submit(std::iter::once(encoder.finish()));
     }
 
     pub fn init(&mut self, world: &World) {
-        let mut encoder = self
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
-        self.world.init(&self.device, &mut encoder, world);
-        self.queue.submit(&[encoder.finish()]);
+        self.world.init(&self.queue, world);
     }
 
     pub fn update(&mut self, world: &World, diff: &UpdatedWorldState) {
-        let mut encoder = self
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
-        self.world.update(&self.device, &mut encoder, world, diff);
-        self.queue.submit(&[encoder.finish()]);
+        self.world.update(&self.queue, world, diff);
     }
 }
