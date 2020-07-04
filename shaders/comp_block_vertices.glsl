@@ -84,6 +84,10 @@ layout(set = 0, binding = 5) buffer IndirectCommands {
   writeonly IndirectCommand[] c_IndirectCommands;
 };
 
+/* layout(set = 0, binding = 6) buffer FaceCounts { */
+/*   uint[] s_WorkGroupFaceCounts; */
+/* }; */
+
 // keeps track of the number of faces produced by this work group so far
 shared uint s_GroupFaceCount;
 
@@ -218,6 +222,10 @@ void pushVertices(ivec4 blockAddr) {
 
   uint chunkIndexStart = blockAddr.w * CHUNK_SIZE_XYZ;
 
+  uint blockFaceCount = 0;
+  bool[6] visibleFaces;
+  ivec4[6] neighborAddrs;
+
   for (uint faceIx = 0; faceIx < 6; faceIx++) {
     CubeFace face = u_CubeFaces[faceIx];
     ivec4 neighborAddr = neighborBlockAddr(blockAddr, face.normal.xyz);
@@ -225,9 +233,29 @@ void pushVertices(ivec4 blockAddr) {
 
     // No point in rendering a face if its neighbor covers it completely.
     bool faceVisible = !isBlockVisible(neighborAddr, neighborBlockType);
-    if (!faceVisible) continue;
+    if (faceVisible) {
+      neighborAddrs[faceIx] = neighborAddr;
+      blockFaceCount += 1;
+    }
 
-    uint groupFaceIx = atomicAdd(s_GroupFaceCount, 1);
+    visibleFaces[faceIx] = faceVisible;
+  }
+
+  if (blockFaceCount == 0)
+    return;
+
+  uint groupFaceIx = atomicAdd(s_GroupFaceCount, blockFaceCount);
+  /* memoryBarrier(); */
+  /* s_WorkGroupFaceCounts[gl_WorkGroupID.x] = s_GroupFaceCount; */
+  /* memoryBarrier(); */
+
+  for (uint faceIx = 0; faceIx < 6; faceIx++) {
+    if (!visibleFaces[faceIx])
+      continue;
+
+    CubeFace face = u_CubeFaces[faceIx];
+    ivec4 neighborAddr = neighborAddrs[faceIx];
+
     uint outFaceIx = chunkIndexStart + groupFaceIx;
     uint outVertexStart = 4 * outFaceIx;
 
@@ -252,6 +280,8 @@ void pushVertices(ivec4 blockAddr) {
       uint localIndex = face.indices[faceIndexIx];
       c_OutputIndices[outIndexStart + faceIndexIx] = firstIndex + localIndex;
     }
+
+    groupFaceIx += 1;
   }
 }
 
@@ -266,7 +296,7 @@ void main() {
     return;
 
   s_GroupFaceCount = 0;
-  memoryBarrierShared();
+  barrier();
 
   pushVertices(blockAddr);
 
