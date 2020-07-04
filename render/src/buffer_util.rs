@@ -457,3 +457,26 @@ impl InstancedBuffer {
         (instance * self.desc.instance_len) as _
     }
 }
+
+pub struct Swappable<T> {
+    active: T,
+    inactive: T
+}
+
+impl<T> Swappable<T> {
+    pub fn new(active: T, inactive: T) -> Self {
+        Self { active, inactive }
+    }
+
+    pub fn swap(&mut self) {
+        std::mem::swap(&mut self.active, &mut self.inactive)
+    }
+
+    pub fn active(&self) -> &T {
+        &self.active
+    }
+
+    pub fn inactive(&self) -> &T {
+        &self.inactive
+    }
+}

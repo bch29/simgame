@@ -10,7 +10,7 @@ use simgame_core::{
 
 use crate::buffer_util::{
     BufferSyncHelper, BufferSyncHelperDesc, BufferSyncable, BufferSyncedData, FillBuffer,
-    IntoBufferSynced, InstancedBuffer, InstancedBufferDesc
+    InstancedBuffer, InstancedBufferDesc, IntoBufferSynced, Swappable,
 };
 use crate::mesh;
 use crate::world::{self, Shaders, ViewParams};
@@ -62,6 +62,12 @@ struct ComputeUniforms {
 
 type ActiveChunks = crate::stable_map::StableMap<Point3<i32>, ()>;
 
+struct CubeBuffers {
+    vertex: InstancedBuffer,
+    index: InstancedBuffer,
+    indirect: InstancedBuffer,
+}
+
 struct ChunkBatchRenderState {
     active_chunks: ActiveChunks,
     chunk_metadata_helper: BufferSyncHelper<u8>,
@@ -70,9 +76,7 @@ struct ChunkBatchRenderState {
     block_type_buf: wgpu::Buffer,
     active_view_box: Option<Bounds<i32>>,
 
-    cube_vertex_buf: InstancedBuffer,
-    cube_index_buf: InstancedBuffer,
-    cube_indirect_buf: InstancedBuffer,
+    cube_buffers: Swappable<CubeBuffers>,
 }
 
 #[repr(C)]
@@ -246,21 +250,25 @@ impl BlocksRenderState {
                         stride: CUBE_VERTEX_STRIDE,
                         step_mode: wgpu::InputStepMode::Vertex,
                         attributes: &[
+                            // pos
                             wgpu::VertexAttributeDescriptor {
                                 format: wgpu::VertexFormat::Float4,
                                 offset: 0,
                                 shader_location: 0,
                             },
+                            // normal
                             wgpu::VertexAttributeDescriptor {
                                 format: wgpu::VertexFormat::Float4,
                                 offset: 4 * 4,
                                 shader_location: 1,
                             },
+                            // tex coord
                             wgpu::VertexAttributeDescriptor {
                                 format: wgpu::VertexFormat::Float2,
                                 offset: (4 + 4) * 4,
                                 shader_location: 2,
                             },
+                            // block type
                             wgpu::VertexAttributeDescriptor {
                                 format: wgpu::VertexFormat::Uint,
                                 offset: (4 + 4 + 2) * 4,
@@ -353,6 +361,8 @@ impl BlocksRenderState {
     fn compute_pass(&mut self, device: &wgpu::Device, encoder: &mut wgpu::CommandEncoder) {
         self.compute_stage.uniforms.sync(device, encoder);
 
+        let bufs = self.chunk_batch.cube_buffers.active();
+
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: None,
             layout: &self.compute_stage.bind_group_layout,
@@ -360,9 +370,9 @@ impl BlocksRenderState {
                 self.compute_stage.uniforms.as_binding(0),
                 self.chunk_batch.block_type_binding(1),
                 self.chunk_batch.chunk_metadata_binding(2),
-                self.chunk_batch.cube_vertex_buf.as_binding(3),
-                self.chunk_batch.cube_index_buf.as_binding(4),
-                self.chunk_batch.cube_indirect_buf.as_binding(5),
+                bufs.vertex.as_binding(3),
+                bufs.index.as_binding(4),
+                bufs.indirect.as_binding(5),
             ],
         });
 
@@ -372,6 +382,8 @@ impl BlocksRenderState {
         cpass.set_bind_group(0, &bind_group, &[]);
 
         cpass.dispatch(self.chunk_batch.count_chunks() as u32, 1, 1);
+
+        // self.chunk_batch.cube_buffers.swap();
     }
 
     fn render_pass(
@@ -411,28 +423,28 @@ impl BlocksRenderState {
         rpass.set_pipeline(&self.render_stage.pipeline);
         rpass.set_bind_group(0, &bind_group, &[]);
 
+        let active_bufs = self.chunk_batch.cube_buffers.active();
+        let index_buf = &active_bufs.index;
+        let vertex_buf = &active_bufs.vertex;
+        let indirect_buf = &active_bufs.indirect;
+
         for (_, chunk_index, _) in self.chunk_batch.active_chunks.iter() {
-            let chunk_index = chunk_index as u64;
-
-            let chunk_index_size = 6 * 4 * index_utils::chunk_size_total() as u64;
-            let chunk_vert_size = 4 * CUBE_VERTEX_STRIDE * index_utils::chunk_size_total() as u64;
-
             rpass.set_index_buffer(
-                &self.chunk_batch.cube_index_buf.buffer(),
-                chunk_index * chunk_index_size,
-                (1 + chunk_index) * chunk_index_size,
+                &index_buf.buffer(),
+                index_buf.instance_offset(chunk_index),
+                index_buf.instance_offset(1 + chunk_index),
             );
 
             rpass.set_vertex_buffer(
                 0,
-                &self.chunk_batch.cube_vertex_buf.buffer(),
-                chunk_index * chunk_vert_size,
-                (1 + chunk_index) * chunk_vert_size,
+                &vertex_buf.buffer(),
+                vertex_buf.instance_offset(chunk_index),
+                vertex_buf.instance_offset(1 + chunk_index),
             );
 
             rpass.draw_indexed_indirect(
-                &self.chunk_batch.cube_indirect_buf.buffer(),
-                chunk_index * 4 * 8,
+                &indirect_buf.buffer(),
+                indirect_buf.instance_offset(chunk_index),
             );
         }
     }
@@ -440,7 +452,7 @@ impl BlocksRenderState {
 
 impl ChunkBatchRenderState {
     const fn max_batch_chunks() -> usize {
-        let mb_allowed = 16;
+        let mb_allowed = 8;
         (1024 * 1024 * mb_allowed) / index_utils::chunk_size_total()
     }
 
@@ -479,32 +491,44 @@ impl ChunkBatchRenderState {
             usage: wgpu::BufferUsage::STORAGE_READ | wgpu::BufferUsage::COPY_DST,
         });
 
-        let cube_index_buf = InstancedBuffer::new(
-            device,
-            InstancedBufferDesc {
-                instance_len: 6 * 4,
-                n_instances: Self::max_batch_blocks(),
-                usage: wgpu::BufferUsage::STORAGE | wgpu::BufferUsage::INDEX,
-            },
-        );
+        let make_cube_bufs = || {
+            let index = InstancedBuffer::new(
+                device,
+                InstancedBufferDesc {
+                    instance_len: 6 * 4 * index_utils::chunk_size_total(),
+                    n_instances: Self::max_batch_chunks(),
+                    usage: wgpu::BufferUsage::STORAGE | wgpu::BufferUsage::INDEX,
+                },
+            );
 
-        let cube_vertex_buf = InstancedBuffer::new(
-            device,
-            InstancedBufferDesc {
-                instance_len: 4 * CUBE_VERTEX_STRIDE as usize,
-                n_instances: Self::max_batch_blocks(),
-                usage: wgpu::BufferUsage::STORAGE | wgpu::BufferUsage::VERTEX,
-            },
-        );
+            let vertex = InstancedBuffer::new(
+                device,
+                InstancedBufferDesc {
+                    instance_len: 4
+                        * CUBE_VERTEX_STRIDE as usize
+                        * index_utils::chunk_size_total(),
+                    n_instances: Self::max_batch_chunks(),
+                    usage: wgpu::BufferUsage::STORAGE | wgpu::BufferUsage::VERTEX,
+                },
+            );
 
-        let cube_indirect_buf = InstancedBuffer::new(
-            device,
-            InstancedBufferDesc {
-                instance_len: 4 * 8,
-                n_instances: Self::max_batch_blocks(),
-                usage: wgpu::BufferUsage::STORAGE | wgpu::BufferUsage::INDIRECT,
-            },
-        );
+            let indirect = InstancedBuffer::new(
+                device,
+                InstancedBufferDesc {
+                    instance_len: 4 * 8,
+                    n_instances: Self::max_batch_chunks(),
+                    usage: wgpu::BufferUsage::STORAGE | wgpu::BufferUsage::INDIRECT,
+                },
+            );
+
+            CubeBuffers {
+                index,
+                vertex,
+                indirect,
+            }
+        };
+
+        let cube_buffers = Swappable::new(make_cube_bufs(), make_cube_bufs());
 
         ChunkBatchRenderState {
             active_chunks,
@@ -513,9 +537,7 @@ impl ChunkBatchRenderState {
             chunk_metadata_buf: chunk_metadata_helper.make_buffer(device),
             chunk_metadata_helper,
             active_view_box: None,
-            cube_index_buf,
-            cube_vertex_buf,
-            cube_indirect_buf,
+            cube_buffers,
         }
     }
 

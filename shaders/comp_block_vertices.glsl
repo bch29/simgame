@@ -81,7 +81,7 @@ layout(set = 0, binding = 4) buffer OutputIndices {
 };
 
 layout(set = 0, binding = 5) buffer IndirectCommands {
-  writeonly coherent IndirectCommand[] c_IndirectCommands;
+  writeonly IndirectCommand[] c_IndirectCommands;
 };
 
 // keeps track of the number of faces produced by this work group so far
