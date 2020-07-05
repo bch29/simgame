@@ -29,6 +29,8 @@ pub struct WorldRenderInit<'a> {
     pub aspect_ratio: f32,
     pub width: u32,
     pub height: u32,
+    pub view_params: ViewParams,
+    pub world: &'a World,
 }
 
 pub struct WorldRenderState {
@@ -67,15 +69,10 @@ impl WorldRenderState {
         self.view_params = params;
     }
 
-    pub fn new(init: WorldRenderInit, device: &wgpu::Device) -> Result<Self>
-    {
-        let shaders = init
-            .shaders
-            .map_result::<std::io::Error, _, _>(|stream| {
-                Ok(device.create_shader_module(wgpu::ShaderModuleSource::SpirV(stream)))
-            })?;
-
-        let view_params = ViewParams::default();
+    pub fn new(init: WorldRenderInit, device: &wgpu::Device, queue: &wgpu::Queue) -> Result<Self> {
+        let shaders = init.shaders.map_result::<std::io::Error, _, _>(|stream| {
+            Ok(device.create_shader_module(wgpu::ShaderModuleSource::SpirV(stream)))
+        })?;
 
         let depth_texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("simgame_render::world::WorldRenderState/depth"),
@@ -98,23 +95,30 @@ impl WorldRenderState {
             model: Matrix4::<f32>::identity(),
             camera_pos: Point3::origin(),
         };
-        uniforms.update_view_params(&view_params);
+        uniforms.update_view_params(&init.view_params);
 
         let render_blocks = blocks::BlocksRenderState::new(
             blocks::BlocksRenderInit {
                 shaders: &shaders,
-                view_params: &view_params,
+                view_params: &init.view_params,
                 aspect_ratio: init.aspect_ratio,
                 depth_texture: &depth_texture,
                 uniforms: &uniforms,
+                world: init.world,
+                active_view_box: Self::calculate_view_box(
+                    uniforms.camera_pos,
+                    &init.view_params,
+                    init.world,
+                ),
             },
             device,
+            queue
         );
 
         Ok(WorldRenderState {
             render_blocks,
             rotation: Matrix4::identity(),
-            view_params,
+            view_params: init.view_params,
             uniforms,
         })
     }
@@ -138,10 +142,14 @@ impl WorldRenderState {
     }
 
     /// Calculates the box containing chunks that will be rendered according to current view.
-    fn calculate_view_box(&self, world: &World) -> Option<Bounds<i32>> {
-        let mut center = self.uniforms.camera_pos + 60. * LOOK_AT_DIR;
-        center.z = self.view_params.z_level as f32 - 0.5;
-        let size = convert_vec!(self.view_params.visible_size, f32);
+    fn calculate_view_box(
+        camera_pos: Point3<f32>,
+        view_params: &ViewParams,
+        world: &World,
+    ) -> Option<Bounds<i32>> {
+        let mut center = camera_pos + 60. * LOOK_AT_DIR;
+        center.z = view_params.z_level as f32 - 0.5;
+        let size = convert_vec!(view_params.visible_size, f32);
         let float_bounds = Bounds::new(center - 0.5 * size, size);
         let world_bounds_limit = world.blocks.bounds().limit();
         let positive_box =
@@ -154,23 +162,9 @@ impl WorldRenderState {
         })
     }
 
-    pub fn init(
-        &mut self,
-        queue: &wgpu::Queue,
-        world: &World,
-    ) {
-        let active_view_box = self.calculate_view_box(world);
-        self.render_blocks
-            .init(queue, world, active_view_box);
-    }
-
-    pub fn update(
-        &mut self,
-        queue: &wgpu::Queue,
-        world: &World,
-        diff: &UpdatedWorldState,
-    ) {
-        let active_view_box = self.calculate_view_box(world);
+    pub fn update(&mut self, queue: &wgpu::Queue, world: &World, diff: &UpdatedWorldState) {
+        let active_view_box =
+            Self::calculate_view_box(self.uniforms.camera_pos, &self.view_params, world);
         self.render_blocks
             .update(queue, world, diff, active_view_box);
     }

@@ -18,18 +18,6 @@ const RENDER_INTERVAL_MILLIS: u64 = 1000 / 120;
 
 const INITIAL_VISIBLE_SIZE: Vector3<i32> = Vector3::new(128, 128, 5);
 
-pub fn build_window(
-    event_loop: &winit::event_loop::EventLoop<()>,
-) -> Result<winit::window::Window> {
-    let builder = winit::window::WindowBuilder::new()
-        .with_inner_size(winit::dpi::LogicalSize {
-            width: 1920.0,
-            height: 1080.0,
-        })
-        .with_decorations(true);
-    Ok(builder.build(event_loop)?)
-}
-
 #[derive(Debug, Clone)]
 pub struct AccelControlParams {
     pub initial_step: f64,
@@ -52,69 +40,19 @@ struct AccelControlState {
     current_value: f64,
 }
 
-impl AccelControlState {
-    fn new(initial_value: f64, params: AccelControlParams) -> Self {
-        Self {
-            params,
+struct TimingParams {
+    window_len: usize,
+    tick_size: Duration,
+    render_interval: Duration,
+}
 
-            direction: 0,
-            initial_step_required: false,
-            delay_ticks_remaining: 0,
-            current_speed: 0.0,
-            current_value: initial_value,
-        }
-    }
-
-    fn tick(&mut self) {
-        let mut offset = 0.0;
-        if self.initial_step_required {
-            offset += self.params.initial_step;
-            self.initial_step_required = false;
-        }
-
-        if self.delay_ticks_remaining > 0 {
-            self.delay_ticks_remaining -= 1;
-        } else {
-            self.current_speed += self.params.acceleration_per_tick;
-        }
-
-        if let Some(max_speed) = self.params.max_speed {
-            if self.current_speed > max_speed {
-                self.current_speed = max_speed
-            }
-        }
-
-        offset += self.current_speed;
-        offset *= self.direction as f64;
-        self.current_value += offset;
-
-        if let Some(max_value) = self.params.max_value {
-            if self.current_value > max_value {
-                self.current_value = max_value;
-            }
-        }
-
-        if let Some(min_value) = self.params.min_value {
-            if self.current_value < min_value {
-                self.current_value = min_value;
-            }
-        }
-    }
-
-    fn value(&self) -> f64 {
-        self.current_value
-    }
-
-    fn set_direction(&mut self, direction: i32) {
-        if direction == self.direction {
-            return;
-        }
-
-        self.direction = direction;
-        self.initial_step_required = true;
-        self.delay_ticks_remaining = self.params.delay_ticks;
-        self.current_speed = 0.0;
-    }
+struct TimeTracker {
+    params: TimingParams,
+    samples: VecDeque<Duration>,
+    start_time: Instant,
+    prev_sample_time: Instant,
+    total_ticks: i64,
+    prev_render_time: Instant,
 }
 
 struct ControlState {
@@ -124,6 +62,124 @@ struct ControlState {
 
     z_level_state: AccelControlState,
     visible_height_state: AccelControlState,
+}
+
+pub fn build_window(
+    event_loop: &EventLoop<()>,
+) -> Result<winit::window::Window> {
+    let builder = winit::window::WindowBuilder::new()
+        .with_inner_size(winit::dpi::LogicalSize {
+            width: 1920.0,
+            height: 1080.0,
+        })
+        .with_decorations(true);
+    Ok(builder.build(event_loop)?)
+}
+
+pub async fn test_render(mut world: World, shaders: crate::WorldShaders<&[u32]>) -> Result<()> {
+    let event_loop = EventLoop::new();
+
+    let window = build_window(&event_loop)?;
+
+    let physical_win_size = window.inner_size();
+    let win_size: (u32, u32) = physical_win_size.into();
+
+    let mut view_state = world::ViewParams {
+        camera_pos: Point3::new(0f32, 0f32, 20f32),
+        z_level: 1,
+        visible_size: INITIAL_VISIBLE_SIZE,
+    };
+
+    let render_init = RenderInit {
+        window: &window,
+        physical_win_size: win_size,
+        world: WorldRenderInit {
+            shaders,
+            aspect_ratio: (physical_win_size.width / physical_win_size.height) as f32,
+            width: win_size.0,
+            height: win_size.1,
+            world: &world,
+            view_params: view_state.clone()
+        },
+    };
+
+    let mut render_state = RenderState::new(render_init).await?;
+
+    use event::{Event, VirtualKeyCode, WindowEvent};
+
+    let mut control_state = ControlState::new();
+
+    let mut time_tracker = TimeTracker::new(
+        TimingParams {
+            window_len: 30,
+            tick_size: Duration::from_millis(GAME_STEP_MILLIS),
+            render_interval: Duration::from_millis(RENDER_INTERVAL_MILLIS),
+        },
+        Instant::now(),
+    );
+
+    let mut world_diff = UpdatedWorldState::empty();
+
+    event_loop.run(move |event, _, control_flow| {
+        *control_flow = if cfg!(feature = "metal-auto-capture") {
+            ControlFlow::Exit
+        } else {
+            ControlFlow::Poll
+        };
+
+        match event {
+            Event::WindowEvent { event, .. } => match event {
+                WindowEvent::KeyboardInput {
+                    input:
+                        event::KeyboardInput {
+                            virtual_keycode: Some(VirtualKeyCode::Escape),
+                            state: event::ElementState::Pressed,
+                            ..
+                        },
+                    ..
+                }
+                | WindowEvent::CloseRequested => {
+                    *control_flow = ControlFlow::Exit;
+                }
+                WindowEvent::KeyboardInput {
+                    input:
+                        event::KeyboardInput {
+                            virtual_keycode: Some(VirtualKeyCode::Space),
+                            state: event::ElementState::Pressed,
+                            ..
+                        },
+                    ..
+                } => world.toggle_updates(),
+                WindowEvent::KeyboardInput { input, .. } => {
+                    control_state.update_from_keyboard_event(input)
+                }
+                WindowEvent::Focused(false) => control_state.clear_key_states(),
+                _ => {}
+            },
+            Event::MainEventsCleared => {
+                if time_tracker.check_render(Instant::now()) {
+                    render_state.update(&world, &world_diff);
+                    render_state.render_frame();
+                    world_diff.clear();
+                    time_tracker.sample(Instant::now());
+
+                    log::debug!(
+                        "Frame rate: {}/{}",
+                        time_tracker.min_fps(),
+                        time_tracker.mean_fps()
+                    );
+                }
+            }
+            _ => (),
+        };
+
+        for _tick_time in time_tracker.tick(Instant::now()) {
+            world.tick(&mut world_diff);
+            control_state.tick(&mut view_state);
+        }
+
+        render_state.set_world_view(view_state.clone());
+    });
 }
 
 impl ControlState {
@@ -226,125 +282,69 @@ impl ControlState {
     }
 }
 
-pub async fn test_render(mut world: World, shaders: crate::WorldShaders<&[u32]>) -> Result<()> {
-    let event_loop = EventLoop::new();
+impl AccelControlState {
+    fn new(initial_value: f64, params: AccelControlParams) -> Self {
+        Self {
+            params,
 
-    let window = build_window(&event_loop)?;
+            direction: 0,
+            initial_step_required: false,
+            delay_ticks_remaining: 0,
+            current_speed: 0.0,
+            current_value: initial_value,
+        }
+    }
 
-    // let physical_win_size = window.inner_size().to_physical(window.hidpi_factor());
-    let physical_win_size = window.inner_size();
-    let win_size: (u32, u32) = physical_win_size.into();
-
-    let render_init = RenderInit {
-        window: &window,
-        physical_win_size: win_size,
-        world: WorldRenderInit {
-            shaders,
-            aspect_ratio: (physical_win_size.width / physical_win_size.height) as f32,
-            width: win_size.0,
-            height: win_size.1,
-        },
-    };
-
-    let mut render_state = RenderState::new(render_init).await?;
-    let mut view_state = world::ViewParams {
-        camera_pos: Point3::new(0f32, 0f32, 20f32),
-        z_level: 1,
-        visible_size: INITIAL_VISIBLE_SIZE,
-    };
-    render_state.set_world_view(view_state.clone());
-    render_state.init(&world);
-
-    use event::{Event, VirtualKeyCode, WindowEvent};
-
-    let mut control_state = ControlState::new();
-
-    let mut time_tracker = TimeTracker::new(
-        TimingParams {
-            window_len: 30,
-            tick_size: Duration::from_millis(GAME_STEP_MILLIS),
-            render_interval: Duration::from_millis(RENDER_INTERVAL_MILLIS),
-        },
-        Instant::now(),
-    );
-
-    let mut world_diff = UpdatedWorldState::empty();
-
-    event_loop.run(move |event, _, control_flow| {
-        *control_flow = if cfg!(feature = "metal-auto-capture") {
-            ControlFlow::Exit
-        } else {
-            ControlFlow::Poll
-        };
-
-        match event {
-            Event::WindowEvent { event, .. } => match event {
-                WindowEvent::KeyboardInput {
-                    input:
-                        event::KeyboardInput {
-                            virtual_keycode: Some(VirtualKeyCode::Escape),
-                            state: event::ElementState::Pressed,
-                            ..
-                        },
-                    ..
-                }
-                | WindowEvent::CloseRequested => {
-                    *control_flow = ControlFlow::Exit;
-                }
-                WindowEvent::KeyboardInput {
-                    input:
-                        event::KeyboardInput {
-                            virtual_keycode: Some(VirtualKeyCode::Space),
-                            state: event::ElementState::Pressed,
-                            ..
-                        },
-                    ..
-                } => world.toggle_updates(),
-                WindowEvent::KeyboardInput { input, .. } => {
-                    control_state.update_from_keyboard_event(input)
-                }
-                WindowEvent::Focused(false) => control_state.clear_key_states(),
-                _ => {}
-            },
-            Event::MainEventsCleared => {
-                if time_tracker.check_render(Instant::now()) {
-                    render_state.update(&world, &world_diff);
-                    render_state.render_frame();
-                    world_diff.clear();
-                    time_tracker.sample(Instant::now());
-
-                    log::info!(
-                        "Frame rate: {}/{}",
-                        time_tracker.min_fps(),
-                        time_tracker.mean_fps()
-                    );
-                }
-            }
-            _ => (),
-        };
-
-        for _tick_time in time_tracker.tick(Instant::now()) {
-            world.tick(&mut world_diff);
-            control_state.tick(&mut view_state);
+    fn tick(&mut self) {
+        let mut offset = 0.0;
+        if self.initial_step_required {
+            offset += self.params.initial_step;
+            self.initial_step_required = false;
         }
 
-        render_state.set_world_view(view_state.clone());
-    });
-}
+        if self.delay_ticks_remaining > 0 {
+            self.delay_ticks_remaining -= 1;
+        } else {
+            self.current_speed += self.params.acceleration_per_tick;
+        }
 
-struct TimingParams {
-    window_len: usize,
-    tick_size: Duration,
-    render_interval: Duration,
-}
+        if let Some(max_speed) = self.params.max_speed {
+            if self.current_speed > max_speed {
+                self.current_speed = max_speed
+            }
+        }
 
-struct TimeTracker {
-    params: TimingParams,
-    samples: VecDeque<Duration>,
-    start_time: Instant,
-    prev_sample_time: Instant,
-    total_ticks: i64,
-    prev_render_time: Instant,
+        offset += self.current_speed;
+        offset *= self.direction as f64;
+        self.current_value += offset;
+
+        if let Some(max_value) = self.params.max_value {
+            if self.current_value > max_value {
+                self.current_value = max_value;
+            }
+        }
+
+        if let Some(min_value) = self.params.min_value {
+            if self.current_value < min_value {
+                self.current_value = min_value;
+            }
+        }
+    }
+
+    fn value(&self) -> f64 {
+        self.current_value
+    }
+
+    fn set_direction(&mut self, direction: i32) {
+        if direction == self.direction {
+            return;
+        }
+
+        self.direction = direction;
+        self.initial_step_required = true;
+        self.delay_ticks_remaining = self.params.delay_ticks;
+        self.current_speed = 0.0;
+    }
 }
 
 impl TimeTracker {

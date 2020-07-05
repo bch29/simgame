@@ -55,13 +55,9 @@ impl RenderState {
         let (device, queue) = adapter
             .request_device(
                 &wgpu::DeviceDescriptor {
-                    features: wgpu::Features::empty(),
-                        // wgpu::Features::MULTI_DRAW_INDIRECT,
+                    features: wgpu::Features::MULTI_DRAW_INDIRECT,
                     shader_validation: false,
-                    limits: wgpu::Limits {
-                        max_bind_groups: 8,
-                        ..wgpu::Limits::default()
-                    },
+                    limits: wgpu::Limits::default()
                 },
                 None,
             )
@@ -79,7 +75,7 @@ impl RenderState {
             },
         );
 
-        let world_render_state = world::WorldRenderState::new(init.world, &device)?;
+        let world_render_state = world::WorldRenderState::new(init.world, &device, &queue)?;
 
         Ok(RenderState {
             swap_chain,
@@ -100,10 +96,6 @@ impl RenderState {
 
         self.world.render_frame(&self.queue, &self.device, &frame, &mut encoder);
         self.queue.submit(std::iter::once(encoder.finish()));
-    }
-
-    pub fn init(&mut self, world: &World) {
-        self.world.init(&self.queue, world);
     }
 
     pub fn update(&mut self, world: &World, diff: &UpdatedWorldState) {

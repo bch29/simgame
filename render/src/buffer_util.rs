@@ -17,6 +17,7 @@ pub struct BufferSyncHelper<Item> {
 
 #[derive(Debug, Clone)]
 pub struct BufferSyncHelperDesc {
+    pub label: &'static str,
     pub buffer_len: usize,
     pub max_chunk_len: usize,
     pub usage: BufferUsage,
@@ -105,8 +106,14 @@ impl<Data, Item> DerefMut for BufferSyncedData<Data, Item> {
 
 impl<Item> BufferSyncHelper<Item> {
     pub fn make_buffer(&self, device: &Device) -> Buffer {
+        log::info!(
+            "Creating buffer \"{}\" of size {} MB",
+            self.desc().label,
+            self.desc().buffer_len * std::mem::size_of::<Item>() / (1024 * 1024)
+        );
+
         device.create_buffer(&BufferDescriptor {
-            label: None,
+            label: Some(self.desc().label),
             size: (self.desc.buffer_len * std::mem::size_of::<Item>()) as u64,
             usage: self.desc.usage,
             mapped_at_creation: false,
@@ -415,6 +422,7 @@ pub struct InstancedBuffer {
 
 #[derive(Debug, Clone)]
 pub struct InstancedBufferDesc {
+    pub label: &'static str,
     pub n_instances: usize,
     pub instance_len: usize,
     pub usage: BufferUsage,
@@ -423,16 +431,13 @@ pub struct InstancedBufferDesc {
 impl InstancedBuffer {
     pub fn new(device: &wgpu::Device, desc: InstancedBufferDesc) -> Self {
         let helper_desc = BufferSyncHelperDesc {
+            label: desc.label,
             buffer_len: desc.n_instances * desc.instance_len,
             max_chunk_len: desc.instance_len,
             usage: desc.usage,
         };
         let helper = BufferSyncHelper::new(helper_desc);
 
-        log::info!(
-            "Creating buffer of size {} MB",
-            helper.desc().buffer_len / (1024 * 1024)
-        );
         let buffer = helper.make_buffer(device);
         Self {
             desc,

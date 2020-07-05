@@ -34,6 +34,8 @@ pub struct BlocksRenderInit<'a> {
     pub aspect_ratio: f32,
     pub depth_texture: &'a wgpu::Texture,
     pub uniforms: &'a world::Uniforms,
+    pub world: &'a World,
+    pub active_view_box: Option<Bounds<i32>>
 }
 
 pub struct BlocksRenderState {
@@ -89,7 +91,7 @@ struct ComputeShaderBuffers {
 
 struct ChunkBatchRenderState {
     active_chunks: ActiveChunks,
-    chunk_metadata_helper: BufferSyncHelper<u8>,
+    chunk_metadata_helper: BufferSyncHelper<ChunkMeta>,
     chunk_metadata_buf: wgpu::Buffer,
     block_type_helper: BufferSyncHelper<u16>,
     block_type_buf: wgpu::Buffer,
@@ -99,14 +101,12 @@ struct ChunkBatchRenderState {
 }
 
 #[repr(C)]
-#[derive(Debug, Clone, AsBytes, FromBytes)]
+#[derive(Debug, Clone, Copy, AsBytes, FromBytes)]
 struct ChunkMeta {
     offset: [f32; 3],
-    // padding to align offset and neighbor indices to 16 bytes
     _padding0: [f32; 1],
     neighbor_indices: [i32; 6],
     active: u32,
-    // padding to align struct to 16 bytes
     _padding1: i32,
 }
 
@@ -115,10 +115,10 @@ impl BlocksRenderState {
         self.chunk_batch.set_visible_size(params.visible_size);
     }
 
-    pub fn new(init: BlocksRenderInit, device: &wgpu::Device) -> Self {
+    pub fn new(init: BlocksRenderInit, device: &wgpu::Device, queue: &wgpu::Queue) -> Self {
         let cube = mesh::cube::Cube::new();
 
-        let compute_stage = {
+        let mut compute_stage = {
             let uniforms = ComputeUniforms {
                 visible_box_origin: Point3::origin(),
                 visible_box_limit: Point3::origin(),
@@ -344,9 +344,23 @@ impl BlocksRenderState {
             }
         };
 
+        let mut chunk_batch = ChunkBatchRenderState::new(device, init.view_params.visible_size);
+        let mut needs_compute_pass = false;
+
+        if let Some(active_view_box) = init.active_view_box {
+            compute_stage.uniforms.update_view_box(active_view_box);
+            if chunk_batch.update_view_box(active_view_box, init.world) {
+                needs_compute_pass = true;
+            }
+        }
+
+        if chunk_batch.update_buffers(queue, init.world) {
+            needs_compute_pass = true;
+        }
+
         Self {
-            needs_compute_pass: false,
-            chunk_batch: ChunkBatchRenderState::new(device, init.view_params.visible_size),
+            needs_compute_pass,
+            chunk_batch, 
             compute_stage,
             render_stage,
         }
@@ -363,29 +377,11 @@ impl BlocksRenderState {
         self.render_stage.uniforms.camera_pos = frame_render.uniforms.camera_pos;
 
         if self.needs_compute_pass {
-            log::info!("Running compute pass");
+            log::debug!("Running compute pass");
             self.compute_pass(frame_render, encoder);
             self.needs_compute_pass = false;
         }
         self.render_pass(frame_render, encoder);
-    }
-
-    pub fn init(
-        &mut self,
-        queue: &wgpu::Queue,
-        world: &World,
-        active_view_box: Option<Bounds<i32>>,
-    ) {
-        if let Some(active_view_box) = active_view_box {
-            self.compute_stage.uniforms.update_view_box(active_view_box);
-            if self.chunk_batch.update_view_box(active_view_box, world) {
-                self.needs_compute_pass = true;
-            }
-        }
-
-        if self.chunk_batch.update_buffers(queue, world) {
-            self.needs_compute_pass = true;
-        }
     }
 
     pub fn update(
@@ -497,8 +493,8 @@ impl BlocksRenderState {
 
 impl ChunkBatchRenderState {
     const fn max_batch_chunks() -> usize {
-        let block_types_mb = 8;
-        (1024 * 1024 * block_types_mb) / index_utils::chunk_size_total()
+        let block_types_mb = 32;
+        (1024 * 1024 * block_types_mb / 2) / index_utils::chunk_size_total()
     }
 
     const fn max_batch_blocks() -> usize {
@@ -525,14 +521,16 @@ impl ChunkBatchRenderState {
         let active_chunks = ActiveChunks::new(max_visible_chunks as usize);
 
         let block_type_helper = BufferSyncHelper::new(BufferSyncHelperDesc {
+            label: "block types",
             buffer_len: Self::max_batch_blocks(),
             max_chunk_len: index_utils::chunk_size_total(),
             usage: wgpu::BufferUsage::STORAGE | wgpu::BufferUsage::COPY_DST,
         });
 
         let chunk_metadata_helper = BufferSyncHelper::new(BufferSyncHelperDesc {
-            buffer_len: Self::metadata_size() * Self::max_batch_chunks(),
-            max_chunk_len: Self::metadata_size(),
+            label: "chunk metadata",
+            buffer_len: Self::max_batch_chunks(),
+            max_chunk_len: 1,
             usage: wgpu::BufferUsage::STORAGE | wgpu::BufferUsage::COPY_DST,
         });
 
@@ -540,6 +538,7 @@ impl ChunkBatchRenderState {
             let vertex = InstancedBuffer::new(
                 device,
                 InstancedBufferDesc {
+                    label: "block vertices",
                     instance_len: 6 * VERTEX_STRIDE as usize * index_utils::chunk_size_total(),
                     n_instances: Self::max_batch_chunks(),
                     usage: wgpu::BufferUsage::STORAGE | wgpu::BufferUsage::VERTEX,
@@ -549,6 +548,7 @@ impl ChunkBatchRenderState {
             let indirect = InstancedBuffer::new(
                 device,
                 InstancedBufferDesc {
+                    label: "block indirect",
                     instance_len: 4 * 4,
                     n_instances: Self::max_batch_chunks(),
                     usage: wgpu::BufferUsage::STORAGE | wgpu::BufferUsage::INDIRECT,
@@ -558,6 +558,7 @@ impl ChunkBatchRenderState {
             let globals = InstancedBuffer::new(
                 device,
                 InstancedBufferDesc {
+                    label: "compute globals",
                     instance_len: 8,
                     n_instances: 1,
                     usage: wgpu::BufferUsage::STORAGE
@@ -731,8 +732,8 @@ impl ChunkBatchRenderState {
             } else {
                 // if a chunk was deleted, write inactive metadata
                 let meta = ChunkMeta::empty();
-                fill_chunk_metadatas.seek(index * Self::metadata_size());
-                fill_chunk_metadatas.advance(meta.as_bytes());
+                fill_chunk_metadatas.seek(index);
+                fill_chunk_metadatas.advance(&[meta]);
             }
         }
 
@@ -745,8 +746,8 @@ impl ChunkBatchRenderState {
 
             for (&point, index, _) in self.active_chunks.iter() {
                 let meta = Self::make_chunk_meta(&self.active_chunks, point);
-                fill_chunk_metadatas.seek(index * Self::metadata_size());
-                fill_chunk_metadatas.advance(meta.as_bytes());
+                fill_chunk_metadatas.seek(index);
+                fill_chunk_metadatas.advance(&[meta]);
             }
         }
 
@@ -839,6 +840,7 @@ impl BufferSyncable for RenderUniforms {
 impl IntoBufferSynced for RenderUniforms {
     fn buffer_sync_desc(&self) -> BufferSyncHelperDesc {
         BufferSyncHelperDesc {
+            label: "render uniforms",
             buffer_len: 16 + 16 + 16 + 4,
             max_chunk_len: std::mem::size_of::<Matrix4<f32>>(),
             usage: wgpu::BufferUsage::UNIFORM | wgpu::BufferUsage::COPY_DST,
@@ -860,6 +862,7 @@ impl BufferSyncable for RenderLocals {
 impl IntoBufferSynced for RenderLocals {
     fn buffer_sync_desc(&self) -> BufferSyncHelperDesc {
         BufferSyncHelperDesc {
+            label: "render locals",
             buffer_len: std::mem::size_of::<Self>(),
             max_chunk_len: std::mem::size_of::<Self>(),
             usage: wgpu::BufferUsage::STORAGE | wgpu::BufferUsage::COPY_DST,
@@ -898,6 +901,7 @@ impl IntoBufferSynced for ComputeUniforms {
         let full_len = (4 + 4) * 4 + face_len;
 
         BufferSyncHelperDesc {
+            label: "compute uniforms",
             buffer_len: full_len,
             max_chunk_len: full_len,
             usage: wgpu::BufferUsage::STORAGE | wgpu::BufferUsage::COPY_DST,
