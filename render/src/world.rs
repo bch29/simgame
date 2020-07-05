@@ -11,11 +11,20 @@ mod blocks;
 
 const LOOK_AT_DIR: Vector3<f32> = Vector3::new(1., 1., -2.);
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ViewParams {
     pub camera_pos: Point3<f32>,
     pub z_level: i32,
     pub visible_size: Vector3<i32>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ViewState {
+    pub params: ViewParams,
+
+    pub proj: Matrix4<f32>,
+    pub view: Matrix4<f32>,
+    pub model: Matrix4<f32>,
 }
 
 pub struct Shaders<R> {
@@ -36,37 +45,25 @@ pub struct WorldRenderInit<'a> {
 pub struct WorldRenderState {
     render_blocks: blocks::BlocksRenderState,
 
-    view_params: ViewParams,
+    view_state: ViewState,
     rotation: Matrix4<f32>,
-    uniforms: Uniforms,
+
     // /// Contains textures for each block type.
     // /// Dimensions are 16x16xN, where N is number of block types.
     // block_master_texture: wgpu::TextureView
-}
-
-pub struct Uniforms {
-    pub proj: Matrix4<f32>,
-    pub view: Matrix4<f32>,
-    pub model: Matrix4<f32>,
-    pub camera_pos: Point3<f32>,
 }
 
 pub struct FrameRender<'a> {
     pub queue: &'a wgpu::Queue,
     pub device: &'a wgpu::Device,
     pub frame: &'a wgpu::SwapChainFrame,
-    pub uniforms: &'a Uniforms,
+    pub view_state: &'a ViewState,
 }
 
 impl WorldRenderState {
     pub fn set_view(&mut self, params: ViewParams) {
-        if params == self.view_params {
-            return;
-        }
-
+        self.view_state.params = params;
         self.render_blocks.set_view(&params);
-        self.uniforms.update_view_params(&params);
-        self.view_params = params;
     }
 
     pub fn new(init: WorldRenderInit, device: &wgpu::Device, queue: &wgpu::Queue) -> Result<Self> {
@@ -88,28 +85,21 @@ impl WorldRenderState {
             usage: wgpu::TextureUsage::OUTPUT_ATTACHMENT,
         });
 
-        let mut uniforms = Uniforms {
+        let view_state = ViewState {
+            params: init.view_params,
             proj: OPENGL_TO_WGPU_MATRIX
                 * cgmath::perspective(Deg(70f32), init.aspect_ratio, 1.0, 1000.0),
             view: Matrix4::look_at_dir(Point3::new(0., 0., 0.), LOOK_AT_DIR, Vector3::unit_z()),
             model: Matrix4::<f32>::identity(),
-            camera_pos: Point3::origin(),
         };
-        uniforms.update_view_params(&init.view_params);
 
         let render_blocks = blocks::BlocksRenderState::new(
             blocks::BlocksRenderInit {
                 shaders: &shaders,
-                view_params: &init.view_params,
+                view_state: &view_state,
                 aspect_ratio: init.aspect_ratio,
                 depth_texture: &depth_texture,
-                uniforms: &uniforms,
                 world: init.world,
-                active_view_box: Self::calculate_view_box(
-                    uniforms.camera_pos,
-                    &init.view_params,
-                    init.world,
-                ),
             },
             device,
             queue
@@ -118,8 +108,7 @@ impl WorldRenderState {
         Ok(WorldRenderState {
             render_blocks,
             rotation: Matrix4::identity(),
-            view_params: init.view_params,
-            uniforms,
+            view_state,
         })
     }
 
@@ -130,26 +119,31 @@ impl WorldRenderState {
         frame: &wgpu::SwapChainFrame,
         encoder: &mut wgpu::CommandEncoder,
     ) {
-        self.uniforms.model = self.rotation;
+        self.view_state.model = self.rotation;
 
         let render = FrameRender {
             queue,
             device,
             frame,
-            uniforms: &self.uniforms,
+            view_state: &self.view_state,
         };
         self.render_blocks.render_frame(&render, encoder);
     }
 
+    pub fn update(&mut self, queue: &wgpu::Queue, world: &World, diff: &UpdatedWorldState) {
+        self.render_blocks.update(queue, world, diff, &self.view_state);
+    }
+}
+
+impl ViewParams {
     /// Calculates the box containing chunks that will be rendered according to current view.
-    fn calculate_view_box(
-        camera_pos: Point3<f32>,
-        view_params: &ViewParams,
+    pub fn calculate_view_box(
+        &self,
         world: &World,
     ) -> Option<Bounds<i32>> {
-        let mut center = camera_pos + 60. * LOOK_AT_DIR;
-        center.z = view_params.z_level as f32 - 0.5;
-        let size = convert_vec!(view_params.visible_size, f32);
+        let mut center = self.camera_pos + 60. * LOOK_AT_DIR;
+        center.z = self.z_level as f32 - 0.5;
+        let size = convert_vec!(self.visible_size, f32);
         let float_bounds = Bounds::new(center - 0.5 * size, size);
         let world_bounds_limit = world.blocks.bounds().limit();
         let positive_box =
@@ -161,13 +155,6 @@ impl WorldRenderState {
             )
         })
     }
-
-    pub fn update(&mut self, queue: &wgpu::Queue, world: &World, diff: &UpdatedWorldState) {
-        let active_view_box =
-            Self::calculate_view_box(self.uniforms.camera_pos, &self.view_params, world);
-        self.render_blocks
-            .update(queue, world, diff, active_view_box);
-    }
 }
 
 impl Default for ViewParams {
@@ -177,12 +164,6 @@ impl Default for ViewParams {
             z_level: 0,
             visible_size: Vector3::new(1, 1, 1),
         }
-    }
-}
-
-impl Uniforms {
-    fn update_view_params(&mut self, params: &ViewParams) {
-        self.camera_pos = params.camera_pos;
     }
 }
 

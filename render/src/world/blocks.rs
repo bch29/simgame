@@ -1,8 +1,4 @@
-#![allow(unused_variables)]
-#![allow(dead_code)]
-#![allow(unused_imports)]
-
-use cgmath::{ElementWise, EuclideanSpace, Matrix4, Point3, Vector3};
+use cgmath::{ElementWise, EuclideanSpace, Point3, Vector3};
 use zerocopy::{AsBytes, FromBytes};
 
 use simgame_core::{
@@ -19,23 +15,12 @@ use crate::buffer_util::{
 use crate::mesh;
 use crate::world::{self, Shaders, ViewParams};
 
-/// ### GLSL definition:
-/// ```
-/// struct Vertex {
-///   uint localBlockIndex;
-///   uint vertexId;
-/// };
-/// ```
-const VERTEX_STRIDE: u64 = 4;
-
 pub struct BlocksRenderInit<'a> {
     pub shaders: &'a Shaders<wgpu::ShaderModule>,
-    pub view_params: &'a ViewParams,
     pub aspect_ratio: f32,
     pub depth_texture: &'a wgpu::Texture,
-    pub uniforms: &'a world::Uniforms,
+    pub view_state: &'a world::ViewState,
     pub world: &'a World,
-    pub active_view_box: Option<Bounds<i32>>,
 }
 
 pub struct BlocksRenderState {
@@ -47,7 +32,7 @@ pub struct BlocksRenderState {
 
 pub struct ComputeStage {
     pipeline: wgpu::ComputePipeline,
-    uniforms: BufferSyncedData<ComputeUniforms, u8>,
+    uniforms: BufferSyncedData<ComputeUniforms, ComputeUniforms>,
     bind_group_layout: wgpu::BindGroupLayout,
 }
 
@@ -55,29 +40,32 @@ pub struct RenderStage {
     pipeline: wgpu::RenderPipeline,
     bind_group_layout: wgpu::BindGroupLayout,
     depth_texture: wgpu::TextureView,
-
-    uniforms: BufferSyncedData<RenderUniforms, f32>,
-    locals: BufferSyncedData<RenderLocals, u8>,
+    uniforms: BufferSyncedData<RenderUniforms, RenderUniforms>,
+    locals: BufferSyncedData<RenderLocals, RenderLocals>,
 }
 
 #[repr(C)]
-#[derive(Debug, Clone, Copy, AsBytes, FromBytes)]
+#[derive(Debug, Clone, Copy, AsBytes, FromBytes, Default)]
 struct RenderLocals {
-    cube_faces: [mesh::cube::Face; 6],
+    cube: mesh::cube::Cube,
 }
 
+#[derive(Debug, Clone, Copy, AsBytes, FromBytes)]
 #[repr(C)]
 struct RenderUniforms {
-    proj: Matrix4<f32>,
-    view: Matrix4<f32>,
-    model: Matrix4<f32>,
-    camera_pos: Point3<f32>,
+    proj: [[f32; 4]; 4],
+    view: [[f32; 4]; 4],
+    model: [[f32; 4]; 4],
+    camera_pos: [f32; 3],
 }
 
 #[repr(C)]
+#[derive(Debug, Clone, Copy, AsBytes, FromBytes, Default)]
 struct ComputeUniforms {
-    visible_box_origin: Point3<f32>,
-    visible_box_limit: Point3<f32>,
+    visible_box_origin: [f32; 3],
+    _padding0: f32,
+    visible_box_limit: [f32; 3],
+    _padding1: f32,
     cube: mesh::cube::Cube,
 }
 
@@ -101,7 +89,7 @@ struct ChunkBatchRenderState {
 }
 
 #[repr(C)]
-#[derive(Debug, Clone, Copy, AsBytes, FromBytes)]
+#[derive(Debug, Clone, Copy, AsBytes, FromBytes, Default)]
 struct ChunkMeta {
     offset: [f32; 3],
     _padding0: [f32; 1],
@@ -118,13 +106,10 @@ impl BlocksRenderState {
     pub fn new(init: BlocksRenderInit, device: &wgpu::Device, queue: &wgpu::Queue) -> Self {
         let cube = mesh::cube::Cube::new();
 
-        let mut compute_stage = {
-            let uniforms = ComputeUniforms {
-                visible_box_origin: Point3::origin(),
-                visible_box_limit: Point3::origin(),
-                cube,
-            }
-            .into_buffer_synced(device);
+        let compute_stage = {
+            let uniforms =
+                ComputeUniforms::new(init.view_state.params.calculate_view_box(init.world), cube)
+                    .into_buffer_synced(device);
 
             let bind_group_layout =
                 device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -315,18 +300,9 @@ impl BlocksRenderState {
                 alpha_to_coverage_enabled: false,
             });
 
-            let uniforms = RenderUniforms {
-                proj: init.uniforms.proj,
-                view: init.uniforms.view,
-                model: init.uniforms.view,
-                camera_pos: init.uniforms.camera_pos,
-            }
-            .into_buffer_synced(device);
+            let locals = RenderLocals { cube }.into_buffer_synced(device);
 
-            let locals = RenderLocals {
-                cube_faces: cube.faces,
-            }
-            .into_buffer_synced(device);
+            let uniforms = RenderUniforms::new(&init.view_state).into_buffer_synced(device);
 
             RenderStage {
                 pipeline,
@@ -337,11 +313,11 @@ impl BlocksRenderState {
             }
         };
 
-        let mut chunk_batch = ChunkBatchRenderState::new(device, init.view_params.visible_size);
+        let mut chunk_batch =
+            ChunkBatchRenderState::new(device, init.view_state.params.visible_size);
         let mut needs_compute_pass = false;
 
-        if let Some(active_view_box) = init.active_view_box {
-            compute_stage.uniforms.update_view_box(active_view_box);
+        if let Some(active_view_box) = init.view_state.params.calculate_view_box(init.world) {
             if chunk_batch.update_view_box(active_view_box, init.world) {
                 needs_compute_pass = true;
             }
@@ -364,11 +340,6 @@ impl BlocksRenderState {
         frame_render: &world::FrameRender,
         encoder: &mut wgpu::CommandEncoder,
     ) {
-        self.render_stage.uniforms.proj = frame_render.uniforms.proj;
-        self.render_stage.uniforms.model = frame_render.uniforms.model;
-        self.render_stage.uniforms.view = frame_render.uniforms.view;
-        self.render_stage.uniforms.camera_pos = frame_render.uniforms.camera_pos;
-
         if self.needs_compute_pass {
             log::debug!("Running compute pass");
             self.compute_pass(frame_render, encoder);
@@ -382,10 +353,11 @@ impl BlocksRenderState {
         queue: &wgpu::Queue,
         world: &World,
         diff: &UpdatedWorldState,
-        active_view_box: Option<Bounds<i32>>,
+        view_state: &world::ViewState
     ) {
-        if let Some(active_view_box) = active_view_box {
+        if let Some(active_view_box) = view_state.params.calculate_view_box(world) {
             self.compute_stage.uniforms.update_view_box(active_view_box);
+
             if self.chunk_batch.update_view_box(active_view_box, world) {
                 self.needs_compute_pass = true;
             }
@@ -397,6 +369,8 @@ impl BlocksRenderState {
         if self.chunk_batch.update_buffers(queue, world) {
             self.needs_compute_pass = true;
         }
+
+        *self.render_stage.uniforms = RenderUniforms::new(view_state);
     }
 
     fn compute_pass(
@@ -404,10 +378,9 @@ impl BlocksRenderState {
         frame_render: &world::FrameRender,
         encoder: &mut wgpu::CommandEncoder,
     ) {
-        self.compute_stage.uniforms.sync(frame_render.queue);
-
         let bufs = &self.chunk_batch.compute_shader_buffers;
 
+        self.compute_stage.uniforms.sync(frame_render.queue);
         // reset compute shader globals to 0
         bufs.globals.clear(frame_render.queue);
 
@@ -498,10 +471,6 @@ impl ChunkBatchRenderState {
 
     const fn max_batch_blocks() -> usize {
         Self::max_batch_chunks() * index_utils::chunk_size_total()
-    }
-
-    const fn metadata_size() -> usize {
-        std::mem::size_of::<ChunkMeta>()
     }
 
     fn count_chunks(&self) -> usize {
@@ -725,7 +694,7 @@ impl ChunkBatchRenderState {
                 fill_block_types.advance(chunk_data);
             } else {
                 // if a chunk was deleted, write inactive metadata
-                let meta = ChunkMeta::empty();
+                let meta = ChunkMeta::default();
                 fill_chunk_metadatas.seek(index);
                 fill_chunk_metadatas.advance(&[meta]);
             }
@@ -811,19 +780,22 @@ impl ChunkBatchRenderState {
     }
 }
 
+impl RenderUniforms {
+    fn new(view_state: &world::ViewState) -> Self {
+        Self {
+            proj: view_state.proj.into(),
+            model: view_state.model.into(),
+            view: view_state.view.into(),
+            camera_pos: view_state.params.camera_pos.into(),
+        }
+    }
+}
+
 impl BufferSyncable for RenderUniforms {
-    type Item = f32;
+    type Item = RenderUniforms;
 
     fn sync<'a>(&self, fill_buffer: &mut FillBuffer<'a, Self::Item>) {
-        let proj: &[f32; 16] = self.proj.as_ref();
-        let view: &[f32; 16] = self.view.as_ref();
-        let model: &[f32; 16] = self.model.as_ref();
-        let camera_pos: &[f32; 3] = self.camera_pos.as_ref();
-
-        fill_buffer.advance(proj);
-        fill_buffer.advance(view);
-        fill_buffer.advance(model);
-        fill_buffer.advance(camera_pos);
+        fill_buffer.advance(&[*self]);
     }
 }
 
@@ -831,18 +803,18 @@ impl IntoBufferSynced for RenderUniforms {
     fn buffer_sync_desc(&self) -> BufferSyncHelperDesc {
         BufferSyncHelperDesc {
             label: "render uniforms",
-            buffer_len: 16 + 16 + 16 + 4,
-            max_chunk_len: std::mem::size_of::<Matrix4<f32>>(),
+            buffer_len: 1,
+            max_chunk_len: 1,
             usage: wgpu::BufferUsage::UNIFORM | wgpu::BufferUsage::COPY_DST,
         }
     }
 }
 
 impl BufferSyncable for RenderLocals {
-    type Item = u8;
+    type Item = RenderLocals;
 
     fn sync<'a>(&self, fill_buffer: &mut FillBuffer<'a, Self::Item>) {
-        fill_buffer.advance(self.as_bytes());
+        fill_buffer.advance(&[*self]);
     }
 }
 
@@ -850,57 +822,50 @@ impl IntoBufferSynced for RenderLocals {
     fn buffer_sync_desc(&self) -> BufferSyncHelperDesc {
         BufferSyncHelperDesc {
             label: "render locals",
-            buffer_len: std::mem::size_of::<Self>(),
-            max_chunk_len: std::mem::size_of::<Self>(),
+            buffer_len: 1,
+            max_chunk_len: 1,
             usage: wgpu::BufferUsage::STORAGE | wgpu::BufferUsage::COPY_DST,
         }
     }
 }
 
 impl ComputeUniforms {
+    fn new(view_box: Option<Bounds<i32>>, cube: mesh::cube::Cube) -> Self {
+        let view_box = match view_box {
+            Some(x) => x,
+            None => Bounds::new(Point3::new(0, 0, 0), Vector3::new(0, 0, 0)),
+        };
+
+        Self {
+            visible_box_origin: convert_point!(view_box.origin(), f32).into(),
+            _padding0: 0f32,
+            visible_box_limit: convert_point!(view_box.limit(), f32).into(),
+            _padding1: 0f32,
+            cube,
+        }
+    }
+
     fn update_view_box(&mut self, view_box: Bounds<i32>) {
-        self.visible_box_origin = convert_point!(view_box.origin(), f32);
-        self.visible_box_limit = convert_point!(view_box.limit(), f32);
+        self.visible_box_origin = convert_point!(view_box.origin(), f32).into();
+        self.visible_box_limit = convert_point!(view_box.limit(), f32).into();
     }
 }
 
 impl BufferSyncable for ComputeUniforms {
-    type Item = u8;
+    type Item = ComputeUniforms;
 
     fn sync<'a>(&self, fill_buffer: &mut FillBuffer<'a, Self::Item>) {
-        let visible_box_origin = self.visible_box_origin.as_ref() as &[f32; 3];
-        let visible_box_limit = self.visible_box_limit.as_ref() as &[f32; 3];
-
-        fill_buffer.advance(visible_box_origin.as_bytes());
-        fill_buffer.advance(0f32.as_bytes());
-        fill_buffer.advance(visible_box_limit.as_bytes());
-        fill_buffer.advance(0f32.as_bytes());
-        fill_buffer.advance(self.cube.faces.as_bytes());
+        fill_buffer.advance(&[*self]);
     }
 }
 
 impl IntoBufferSynced for ComputeUniforms {
     fn buffer_sync_desc(&self) -> BufferSyncHelperDesc {
-        let face_len = 6 * std::mem::size_of::<mesh::cube::Face>();
-        let full_len = (4 + 4) * 4 + face_len;
-
         BufferSyncHelperDesc {
             label: "compute uniforms",
-            buffer_len: full_len,
-            max_chunk_len: full_len,
+            buffer_len: 1,
+            max_chunk_len: 1,
             usage: wgpu::BufferUsage::STORAGE | wgpu::BufferUsage::COPY_DST,
-        }
-    }
-}
-
-impl ChunkMeta {
-    fn empty() -> Self {
-        Self {
-            offset: Point3::new(0.0, 0.0, 0.0).into(),
-            _padding0: [0.0],
-            neighbor_indices: [0, 0, 0, 0, 0, 0],
-            active: 0,
-            _padding1: 0,
         }
     }
 }

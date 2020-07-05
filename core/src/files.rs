@@ -46,11 +46,13 @@ impl FileContext {
     }
 
     pub fn load(data_root: PathBuf) -> Result<Self> {
-        log::warn!("current dir is {:?}", std::env::current_dir());
+        log::info!("working directory is {:?}", std::env::current_dir()?);
 
         let core_settings: CoreSettings = {
             let mut core_settings_path = data_root.clone();
             core_settings_path.push(CORE_SETTINGS_FILE_NAME);
+            log::info!("loading core settings from {:?}", core_settings_path);
+
             let file = std::fs::File::open(&core_settings_path).context(format!(
                 "Opening core settings file {}",
                 core_settings_path.to_string_lossy()
@@ -192,9 +194,11 @@ impl FileContext {
             ));
         }
 
+        log::info!("loading world metadata from {:?}", meta_path);
         let meta_file = std::fs::File::open(meta_path.as_path())
             .context("Opening world meta file for saved game")?;
         let meta = Self::load_world_meta(meta_file)?;
+        log::info!("loading world blocks from {:?}", data_path);
         let data_file = std::fs::File::open(data_path.as_path())
             .context("Opening block data file for saved game")?;
         let result = Self::load_world_blocks_data(&meta, data_file)?;

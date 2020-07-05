@@ -31,7 +31,10 @@ enum Action {
         #[structopt(short = "t", long)]
         graphics_trace_path: Option<PathBuf>,
     },
-    DebugRender,
+    DebugRender {
+        #[structopt(short = "t", long)]
+        graphics_trace_path: Option<PathBuf>,
+    },
 }
 
 #[derive(Debug, StructOpt)]
@@ -74,10 +77,10 @@ fn run(opt: Opts) -> Result<()> {
             save_name,
             graphics_trace_path.as_ref().map(|p| p.as_path()),
         )),
-        Action::DebugRender => {
+        Action::DebugRender { graphics_trace_path } => {
             let blocks = FileContext::load_debug_world_blocks()?;
             info!("Loaded debug world: {:?}", blocks.debug_summary());
-            smol::run(run_world(World::from_blocks(blocks), None))
+            smol::run(run_world(World::from_blocks(blocks), graphics_trace_path.as_ref().map(|p| p.as_path())))
         }
     }
 }

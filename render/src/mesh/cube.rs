@@ -2,7 +2,7 @@ use crate::mesh::{Mesh, Vertex};
 
 use zerocopy::{AsBytes, FromBytes};
 
-#[derive(Clone, Copy, Debug, AsBytes, FromBytes)]
+#[derive(Clone, Copy, Debug, AsBytes, FromBytes, Default)]
 #[repr(C)]
 pub struct Face {
     normal: [f32; 4],
@@ -12,7 +12,7 @@ pub struct Face {
     vertex_tex_coords: [[f32; 2]; 4],
 }
 
-#[derive(Clone, Copy, Debug, AsBytes, FromBytes)]
+#[derive(Clone, Copy, Debug, AsBytes, FromBytes, Default)]
 #[repr(C)]
 pub struct Cube {
     pub faces: [Face; 6],
