@@ -11,7 +11,7 @@ use winit::{
 use simgame_core::world::{UpdatedWorldState, World};
 
 use crate::world;
-use crate::{RenderInit, RenderState, WorldRenderInit};
+use crate::{RenderInit, RenderParams, RenderState, WorldRenderInit};
 
 const GAME_STEP_MILLIS: u64 = 10;
 const RENDER_INTERVAL_MILLIS: u64 = 1000 / 120;
@@ -64,9 +64,7 @@ struct ControlState {
     visible_height_state: AccelControlState,
 }
 
-pub fn build_window(
-    event_loop: &EventLoop<()>,
-) -> Result<winit::window::Window> {
+pub fn build_window(event_loop: &EventLoop<()>) -> Result<winit::window::Window> {
     let builder = winit::window::WindowBuilder::new()
         .with_inner_size(winit::dpi::LogicalSize {
             width: 1920.0,
@@ -76,7 +74,11 @@ pub fn build_window(
     Ok(builder.build(event_loop)?)
 }
 
-pub async fn test_render(mut world: World, shaders: crate::WorldShaders<&[u32]>) -> Result<()> {
+pub async fn test_render<'a>(
+    mut world: World,
+    params: RenderParams<'a>,
+    shaders: crate::WorldShaders<&'a [u32]>,
+) -> Result<()> {
     let event_loop = EventLoop::new();
 
     let window = build_window(&event_loop)?;
@@ -99,11 +101,11 @@ pub async fn test_render(mut world: World, shaders: crate::WorldShaders<&[u32]>)
             width: win_size.0,
             height: win_size.1,
             world: &world,
-            view_params: view_state.clone()
+            view_params: view_state.clone(),
         },
     };
 
-    let mut render_state = RenderState::new(render_init).await?;
+    let mut render_state = RenderState::new(params, render_init).await?;
 
     use event::{Event, VirtualKeyCode, WindowEvent};
 

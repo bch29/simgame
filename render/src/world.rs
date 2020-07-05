@@ -75,7 +75,7 @@ impl WorldRenderState {
         })?;
 
         let depth_texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("simgame_render::world::WorldRenderState/depth"),
+            label: Some("world depth texture"),
             size: wgpu::Extent3d {
                 width: init.width,
                 height: init.height,

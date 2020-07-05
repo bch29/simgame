@@ -111,6 +111,15 @@ checksum = "f8aac770f1885fd7e387acedd76065302551364496e46b3dd00860b2f8359b9d"
 
 [[package]]
 name = "base64"
+version = "0.10.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0b25d992356d2eb0ed82172f5248873db5560c4721f564b13cb5193bda5e668e"
+dependencies = [
+ "byteorder",
+]
+
+[[package]]
+name = "base64"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b41b7ea54a0c9d92199de89e20e58d49f02f8e699814ef3fdf266f6f748d15c7"
@@ -1468,12 +1477,23 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "26412eb97c6b088a6997e05f69403a802a92d520de2f8e63c2b65f9e0f47c4e8"
 
 [[package]]
+name = "ron"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2ece421e0c4129b90e4a35b6f625e472e96c552136f5093a2f4fa2bbb75a62d5"
+dependencies = [
+ "base64 0.10.1",
+ "bitflags",
+ "serde",
+]
+
+[[package]]
 name = "rust-argon2"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2bc8af4bda8e1ff4932523b94d3dd20ee30a87232323eda55903ffd71d2fb017"
 dependencies = [
- "base64",
+ "base64 0.11.0",
  "blake2b_simd",
  "constant_time_eq",
  "crossbeam-utils",
@@ -2117,6 +2137,8 @@ dependencies = [
  "naga",
  "parking_lot",
  "raw-window-handle",
+ "ron",
+ "serde",
  "smallvec",
  "spirv_headers",
  "tracing",
@@ -2130,6 +2152,7 @@ version = "0.5.0"
 source = "git+https://github.com/gfx-rs/wgpu?rev=43c67ac59c2dedaa4d78601bc460aab7c3257973#43c67ac59c2dedaa4d78601bc460aab7c3257973"
 dependencies = [
  "bitflags",
+ "serde",
 ]
 
 [[package]]

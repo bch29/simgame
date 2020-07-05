@@ -128,7 +128,7 @@ impl BlocksRenderState {
 
             let bind_group_layout =
                 device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                    label: Some("simgame_render::world::WorldRenderState/compute/input_layout"),
+                    label: Some("blocks compute layout"),
                     bindings: &[
                         // Uniforms
                         wgpu::BindGroupLayoutEntry::new(
@@ -215,7 +215,7 @@ impl BlocksRenderState {
         let render_stage = {
             let bind_group_layout =
                 device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                    label: Some("simgame_render::world::WorldRenderState/vertex/layout"),
+                    label: Some("blocks vertex layout"),
                     bindings: &[
                         // Uniforms
                         wgpu::BindGroupLayoutEntry::new(

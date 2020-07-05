@@ -21,6 +21,10 @@ pub struct RenderInit<'a, W> {
     pub physical_win_size: (u32, u32),
 }
 
+pub struct RenderParams<'a> {
+    pub trace_path: Option<&'a std::path::Path>
+}
+
 pub struct RenderState {
     device: wgpu::Device,
     swap_chain: wgpu::SwapChain,
@@ -29,11 +33,7 @@ pub struct RenderState {
 }
 
 impl RenderState {
-    pub fn set_world_view(&mut self, params: world::ViewParams) {
-        self.world.set_view(params);
-    }
-
-    pub async fn new<'a, W>(init: RenderInit<'a, W>) -> Result<Self>
+    pub async fn new<'a, W>(params: RenderParams<'a>, init: RenderInit<'a, W>) -> Result<Self>
     where
         W: HasRawWindowHandle,
     {
@@ -59,7 +59,7 @@ impl RenderState {
                     shader_validation: false,
                     limits: wgpu::Limits::default()
                 },
-                None,
+                params.trace_path,
             )
             .await
             .map_err(|err| anyhow!("{:?}", err))?;
@@ -83,6 +83,10 @@ impl RenderState {
             queue,
             device,
         })
+    }
+
+    pub fn set_world_view(&mut self, params: world::ViewParams) {
+        self.world.set_view(params);
     }
 
     pub fn render_frame(&mut self) {
