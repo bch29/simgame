@@ -9,38 +9,18 @@ use winit::{
 };
 
 use simgame_core::world::{UpdatedWorldState, World};
+use simgame_core::{convert_point, convert_vec};
 
 use crate::world;
 use crate::{RenderInit, RenderParams, RenderState, WorldRenderInit};
 
 const GAME_STEP_MILLIS: u64 = 10;
+const GAME_STEP_SECONDS: f64 = GAME_STEP_MILLIS as f64 / 1000.0;
 const RENDER_INTERVAL_MILLIS: u64 = 1000 / 120;
 
-const INITIAL_VISIBLE_SIZE: Vector3<i32> = Vector3::new(128, 128, 64);
+const INITIAL_VISIBLE_SIZE: Vector3<i32> = Vector3::new(512, 512, 32);
 const INITIAL_CAMERA_POS: Point3<f32> = Point3::new(0f32, 0f32, 20f32);
-const INITIAL_Z_LEVEL: i32 = 32;
-
-#[derive(Debug, Clone)]
-pub struct AccelControlParams {
-    pub initial_step: f64,
-    pub delay_ticks: u64,
-    pub acceleration_per_tick: f64,
-    pub max_speed: Option<f64>,
-    pub max_value: Option<f64>,
-    pub min_value: Option<f64>,
-}
-
-struct AccelControlState {
-    // parameters
-    params: AccelControlParams,
-
-    // state
-    direction: i32,
-    initial_step_required: bool,
-    delay_ticks_remaining: u64,
-    current_speed: f64,
-    current_value: f64,
-}
+const INITIAL_Z_LEVEL: i32 = 0;
 
 struct TimingParams {
     window_len: usize,
@@ -58,12 +38,36 @@ struct TimeTracker {
 }
 
 struct ControlState {
-    forward: i32,
-    right: i32,
-    up: i32,
+    camera_dir: Vector3<i32>,
 
-    z_level_state: AccelControlState,
-    visible_height_state: AccelControlState,
+    camera_pan: AccelControlState,
+    camera_height: AccelControlState,
+
+    z_level: AccelControlState,
+    visible_height: AccelControlState,
+}
+
+#[derive(Debug, Clone)]
+pub struct AccelControlParams {
+    pub initial_step: f64,
+    pub delay_seconds: f64,
+    pub acceleration: f64,
+    pub decay: f64,
+    pub max_speed: Option<f64>,
+    pub max_value: Option<Point3<f64>>,
+    pub min_value: Option<Point3<f64>>,
+}
+
+struct AccelControlState {
+    // parameters
+    params: AccelControlParams,
+
+    // state
+    direction: Option<Vector3<f64>>,
+    initial_step_required: bool,
+    delay_seconds_remaining: f64,
+    current_vel: Vector3<f64>,
+    current_value: Point3<f64>,
 }
 
 pub fn build_window(event_loop: &EventLoop<()>) -> Result<winit::window::Window> {
@@ -183,29 +187,51 @@ pub async fn test_render<'a>(
 impl ControlState {
     fn new() -> Self {
         let base_accel_params = AccelControlParams {
-            initial_step: 1.0,
-            delay_ticks: 50,
-            acceleration_per_tick: 0.01,
-            max_speed: Some(2.0),
+            initial_step: 0.0,
+            delay_seconds: 0.0,
+            acceleration: 1.0,
+            decay: 0.0,
+            max_speed: None,
             max_value: None,
             min_value: None,
         };
 
         ControlState {
-            forward: 0,
-            right: 0,
-            up: 0,
-            z_level_state: AccelControlState::new(
-                INITIAL_Z_LEVEL as f64,
+            camera_dir: Vector3::zero(),
+            camera_pan: AccelControlState::new(
+                convert_point!(INITIAL_CAMERA_POS, f64),
                 AccelControlParams {
-                    min_value: Some(0.0),
+                    acceleration: 8.0,
+                    decay: 5.0,
                     ..base_accel_params
                 },
             ),
-            visible_height_state: AccelControlState::new(
-                INITIAL_VISIBLE_SIZE.z as f64,
+            camera_height: AccelControlState::new(
+                convert_point!(INITIAL_CAMERA_POS, f64),
                 AccelControlParams {
-                    min_value: Some(1.0),
+                    acceleration: 8.0,
+                    decay: 5.0,
+                    ..base_accel_params
+                },
+            ),
+
+            z_level: AccelControlState::new(
+                Point3::new(0.0, 0.0, INITIAL_Z_LEVEL as f64),
+                AccelControlParams {
+                    min_value: Some(Point3::new(0.0, 0.0, 0.0)),
+                    delay_seconds: 0.5,
+                    initial_step: 1.0,
+                    max_speed: Some(2.0),
+                    ..base_accel_params
+                },
+            ),
+            visible_height: AccelControlState::new(
+                Point3::new(0.0, 0.0, INITIAL_VISIBLE_SIZE.z as f64),
+                AccelControlParams {
+                    min_value: Some(Point3::new(0.0, 0.0, 1.0)),
+                    delay_seconds: 0.5,
+                    initial_step: 1.0,
+                    max_speed: Some(2.0),
                     ..base_accel_params
                 },
             ),
@@ -221,27 +247,60 @@ impl ControlState {
                 ..
             } => {
                 let mag = self.state_to_mag(state);
+                let mag_z = if mag == 0 {
+                    None
+                } else {
+                    Some(Vector3::new(0.0, 0.0, mag as f64))
+                };
+                let neg_mag_z = mag_z.map(|v| Vector3::zero() - v);
+
                 match key {
-                    VirtualKeyCode::W => self.forward = mag,
-                    VirtualKeyCode::S => self.forward = -mag,
-                    VirtualKeyCode::D => self.right = mag,
-                    VirtualKeyCode::A => self.right = -mag,
-                    VirtualKeyCode::K => self.up = mag,
-                    VirtualKeyCode::J => self.up = -mag,
-                    VirtualKeyCode::I => self.z_level_state.set_direction(mag),
-                    VirtualKeyCode::U => self.z_level_state.set_direction(-mag),
-                    VirtualKeyCode::M => self.visible_height_state.set_direction(mag),
-                    VirtualKeyCode::N => self.visible_height_state.set_direction(-mag),
+                    VirtualKeyCode::D => self.camera_dir.x = mag,
+                    VirtualKeyCode::A => self.camera_dir.x = -mag,
+                    VirtualKeyCode::W => self.camera_dir.y = mag,
+                    VirtualKeyCode::S => self.camera_dir.y = -mag,
+                    VirtualKeyCode::K => self.camera_dir.z = mag,
+                    VirtualKeyCode::J => self.camera_dir.z = -mag,
+                    VirtualKeyCode::I => self.z_level.set_direction(mag_z),
+                    VirtualKeyCode::U => self.z_level.set_direction(neg_mag_z),
+                    VirtualKeyCode::M => self.visible_height.set_direction(mag_z),
+                    VirtualKeyCode::N => self.visible_height.set_direction(neg_mag_z),
                     _ => {}
                 }
             }
             _ => {}
         }
+
+        let normalize_camera_axis = |value: &mut i32| {
+            if *value > 1 {
+                *value = 1
+            } else if *value < -1 {
+                *value = -1
+            }
+        };
+        normalize_camera_axis(&mut self.camera_dir.x);
+        normalize_camera_axis(&mut self.camera_dir.y);
+        normalize_camera_axis(&mut self.camera_dir.z);
+
+        self.camera_pan.set_direction(Some(Self::pan_direction(self.camera_dir)));
+
+        let height_dir = Vector3::new(0.0, 0.0, self.camera_dir.z as f64);
+        self.camera_height.set_direction(Some(height_dir));
+    }
+
+    fn pan_direction(direction: Vector3<i32>) -> Vector3<f64> {
+        let forward_step = Vector3::new(1., 1., 0.).normalize();
+        let right_step = Vector3::new(1., -1., 0.).normalize();
+
+        let mut dir = Vector3::zero();
+        dir += forward_step * direction.y as f64;
+        dir += right_step * direction.x as f64;
+        dir
     }
 
     fn clear_key_states(&mut self) {
-        self.z_level_state.set_direction(0);
-        self.visible_height_state.set_direction(0);
+        self.z_level.set_direction(None);
+        self.visible_height.set_direction(None);
     }
 
     fn state_to_mag(&self, state: event::ElementState) -> i32 {
@@ -251,97 +310,109 @@ impl ControlState {
         }
     }
 
-    fn camera_delta(&self) -> Vector3<f32> {
-        let speed = 0.4;
-        let forward_step = Vector3::new(1., 1., 0.).normalize();
-        let right_step = Vector3::new(1., -1., 0.).normalize();
-        let up_step = Vector3::new(0., 0., 1.).normalize();
-
-        let mut dir = Vector3::zero();
-
-        dir += forward_step * self.forward as f32;
-        dir += right_step * self.right as f32;
-        dir += up_step * self.up as f32;
-
-        if dir.magnitude() > 0.01 {
-            dir.normalize() * speed
-        } else {
-            Vector3::zero()
-        }
-    }
-
     pub fn tick(&mut self, view_state: &mut world::ViewParams) {
-        self.z_level_state.tick();
-        self.visible_height_state.tick();
+        self.camera_pan.tick(GAME_STEP_SECONDS);
+        self.camera_height.tick(GAME_STEP_SECONDS);
+        self.z_level.tick(GAME_STEP_SECONDS);
+        self.visible_height.tick(GAME_STEP_SECONDS);
 
-        view_state.camera_pos += self.camera_delta();
-        view_state.z_level = self.z_level_state.value().round() as i32;
-        view_state.visible_size.z = self.visible_height_state.value().round() as i32;
+        view_state.camera_pos.x = self.camera_pan.value().x as f32;
+        view_state.camera_pos.y = self.camera_pan.value().y as f32;
+        view_state.camera_pos.z = self.camera_height.value().z as f32;
+
+        view_state.z_level = self.z_level.value().z.round() as i32;
+        view_state.visible_size.z = self.visible_height.value().z.round() as i32;
     }
 }
 
 impl AccelControlState {
-    fn new(initial_value: f64, params: AccelControlParams) -> Self {
+    fn new(initial_value: Point3<f64>, params: AccelControlParams) -> Self {
         Self {
             params,
 
-            direction: 0,
+            direction: None,
             initial_step_required: false,
-            delay_ticks_remaining: 0,
-            current_speed: 0.0,
+            delay_seconds_remaining: 0.0,
+            current_vel: Vector3::zero(),
             current_value: initial_value,
         }
     }
 
-    fn tick(&mut self) {
-        let mut offset = 0.0;
+    fn tick(&mut self, interval: f64) {
+        let direction = match self.direction {
+            Some(x) => x,
+            None => Vector3::zero(),
+        };
+
+        let mut offset = Vector3::zero();
         if self.initial_step_required {
-            offset += self.params.initial_step;
+            offset += self.params.initial_step * direction;
             self.initial_step_required = false;
         }
 
-        if self.delay_ticks_remaining > 0 {
-            self.delay_ticks_remaining -= 1;
+        if self.delay_seconds_remaining > 0.0 {
+            self.delay_seconds_remaining -= interval;
         } else {
-            self.current_speed += self.params.acceleration_per_tick;
+            self.current_vel += self.params.acceleration * interval * direction;
         }
 
         if let Some(max_speed) = self.params.max_speed {
-            if self.current_speed > max_speed {
-                self.current_speed = max_speed
+            if self.current_vel.magnitude() > max_speed {
+                self.current_vel = self.current_vel.normalize_to(max_speed)
             }
         }
 
-        offset += self.current_speed;
-        offset *= self.direction as f64;
-        self.current_value += offset;
+        self.current_value += self.current_vel + offset;
+        self.current_vel -= self.current_vel * self.params.decay * interval;
 
         if let Some(max_value) = self.params.max_value {
-            if self.current_value > max_value {
-                self.current_value = max_value;
+            if self.current_value.x > max_value.x {
+                self.current_value.x = max_value.x;
+            }
+            if self.current_value.y > max_value.y {
+                self.current_value.y = max_value.y;
+            }
+            if self.current_value.z > max_value.z {
+                self.current_value.z = max_value.z;
             }
         }
 
         if let Some(min_value) = self.params.min_value {
-            if self.current_value < min_value {
-                self.current_value = min_value;
+            if self.current_value.x < min_value.x {
+                self.current_value.x = min_value.x;
+            }
+            if self.current_value.y < min_value.y {
+                self.current_value.y = min_value.y;
+            }
+            if self.current_value.z < min_value.z {
+                self.current_value.z = min_value.z;
             }
         }
     }
 
-    fn value(&self) -> f64 {
+    fn value(&self) -> Point3<f64> {
         self.current_value
     }
 
-    fn set_direction(&mut self, direction: i32) {
+    fn set_direction(&mut self, direction: Option<Vector3<f64>>) {
         if direction == self.direction {
             return;
         }
 
-        self.direction = direction;
+        if direction.is_none() {
+            self.current_vel = Vector3::zero();
+        }
+
+        self.direction = direction.map(|d| {
+            if d.magnitude() > 0.01 {
+                d.normalize()
+            } else {
+                Vector3::zero()
+            }
+        });
+
         self.initial_step_required = true;
-        self.delay_ticks_remaining = self.params.delay_ticks;
-        self.current_speed = 0.0;
+        self.delay_seconds_remaining = self.params.delay_seconds;
     }
 }
 

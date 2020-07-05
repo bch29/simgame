@@ -270,7 +270,7 @@ impl BlocksRenderState {
                 }),
                 rasterization_state: Some(wgpu::RasterizationStateDescriptor {
                     front_face: wgpu::FrontFace::Ccw,
-                    cull_mode: wgpu::CullMode::None,
+                    cull_mode: wgpu::CullMode::Back,
                     depth_bias: 0,
                     depth_bias_slope_scale: 0.0,
                     depth_bias_clamp: 0.0,
@@ -465,7 +465,7 @@ impl BlocksRenderState {
 
 impl ChunkBatchRenderState {
     const fn max_batch_chunks() -> usize {
-        let block_types_mb = 32;
+        let block_types_mb = 128;
         (1024 * 1024 * block_types_mb / 2) / index_utils::chunk_size_total()
     }
 
@@ -783,10 +783,10 @@ impl ChunkBatchRenderState {
 impl RenderUniforms {
     fn new(view_state: &world::ViewState) -> Self {
         Self {
-            proj: view_state.proj.into(),
-            model: view_state.model.into(),
-            view: view_state.view.into(),
-            camera_pos: view_state.params.camera_pos.into(),
+            proj: view_state.proj().into(),
+            model: view_state.model().into(),
+            view: view_state.view().into(),
+            camera_pos: view_state.params().camera_pos.into(),
         }
     }
 }

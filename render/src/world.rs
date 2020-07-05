@@ -1,5 +1,5 @@
 use anyhow::Result;
-use cgmath::{Deg, EuclideanSpace, Matrix4, Point3, SquareMatrix, Vector3};
+use cgmath::{Deg, EuclideanSpace, InnerSpace, Matrix4, Point3, SquareMatrix, Vector3};
 
 use simgame_core::{
     convert_point, convert_vec,
@@ -9,7 +9,7 @@ use simgame_core::{
 
 mod blocks;
 
-const LOOK_AT_DIR: Vector3<f32> = Vector3::new(1., 1., -2.);
+const LOOK_AT_DIR: Vector3<f32> = Vector3::new(1., 1., -3.);
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ViewParams {
@@ -20,11 +20,12 @@ pub struct ViewParams {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ViewState {
-    pub params: ViewParams,
+    params: ViewParams,
 
-    pub proj: Matrix4<f32>,
-    pub view: Matrix4<f32>,
-    pub model: Matrix4<f32>,
+    proj: Matrix4<f32>,
+    view: Matrix4<f32>,
+
+    rotation: Matrix4<f32>,
 }
 
 pub struct Shaders<R> {
@@ -46,8 +47,6 @@ pub struct WorldRenderState {
     render_blocks: blocks::BlocksRenderState,
 
     view_state: ViewState,
-    rotation: Matrix4<f32>,
-
     // /// Contains textures for each block type.
     // /// Dimensions are 16x16xN, where N is number of block types.
     // block_master_texture: wgpu::TextureView
@@ -90,7 +89,7 @@ impl WorldRenderState {
             proj: OPENGL_TO_WGPU_MATRIX
                 * cgmath::perspective(Deg(70f32), init.aspect_ratio, 1.0, 1000.0),
             view: Matrix4::look_at_dir(Point3::new(0., 0., 0.), LOOK_AT_DIR, Vector3::unit_z()),
-            model: Matrix4::<f32>::identity(),
+            rotation: Matrix4::identity(),
         };
 
         let render_blocks = blocks::BlocksRenderState::new(
@@ -102,12 +101,11 @@ impl WorldRenderState {
                 world: init.world,
             },
             device,
-            queue
+            queue,
         );
 
         Ok(WorldRenderState {
             render_blocks,
-            rotation: Matrix4::identity(),
             view_state,
         })
     }
@@ -119,8 +117,6 @@ impl WorldRenderState {
         frame: &wgpu::SwapChainFrame,
         encoder: &mut wgpu::CommandEncoder,
     ) {
-        self.view_state.model = self.rotation;
-
         let render = FrameRender {
             queue,
             device,
@@ -131,20 +127,23 @@ impl WorldRenderState {
     }
 
     pub fn update(&mut self, queue: &wgpu::Queue, world: &World, diff: &UpdatedWorldState) {
-        self.render_blocks.update(queue, world, diff, &self.view_state);
+        self.render_blocks
+            .update(queue, world, diff, &self.view_state);
     }
 }
 
 impl ViewParams {
-    /// Calculates the box containing chunks that will be rendered according to current view.
-    pub fn calculate_view_box(
-        &self,
-        world: &World,
-    ) -> Option<Bounds<i32>> {
-        let mut center = self.camera_pos + 60. * LOOK_AT_DIR;
-        center.z = self.z_level as f32 - 0.5;
+    /// Calculates the box containing blocks that will be rendered according to current view.
+    pub fn calculate_view_box(&self, world: &World) -> Option<Bounds<i32>> {
+        // center x and y 60 blocks in front of the camera
+        let mut center = self.camera_pos + 60. * LOOK_AT_DIR.normalize();
+
+        // z_level is the topmost visible level
+        center.z = self.z_level as f32 + 1.0 - self.visible_size.z as f32 / 2.0;
+
         let size = convert_vec!(self.visible_size, f32);
         let float_bounds = Bounds::new(center - 0.5 * size, size);
+
         let world_bounds_limit = world.blocks.bounds().limit();
         let positive_box =
             Bounds::from_limit(Point3::origin(), convert_point!(world_bounds_limit, f32));
@@ -164,6 +163,26 @@ impl Default for ViewParams {
             z_level: 0,
             visible_size: Vector3::new(1, 1, 1),
         }
+    }
+}
+
+impl ViewState {
+    pub fn params(&self) -> ViewParams {
+        self.params
+    }
+
+    pub fn proj(&self) -> Matrix4<f32> {
+        self.proj
+    }
+
+    pub fn view(&self) -> Matrix4<f32> {
+        self.view
+    }
+
+    pub fn model(&self) -> Matrix4<f32> {
+        let translation =
+            Matrix4::from_translation(Vector3::new(0.0, 0.0, -self.params.z_level as f32));
+        translation * self.rotation
     }
 }
 
