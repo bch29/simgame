@@ -493,7 +493,7 @@ impl BlocksRenderState {
 
 impl ChunkBatchRenderState {
     const fn max_batch_chunks() -> usize {
-        let block_types_mb = 32;
+        let block_types_mb = 4;
         (1024 * 1024 * block_types_mb / 2) / index_utils::chunk_size_total()
     }
 
@@ -539,7 +539,7 @@ impl ChunkBatchRenderState {
                 device,
                 InstancedBufferDesc {
                     label: "block vertices",
-                    instance_len: 6 * VERTEX_STRIDE as usize * index_utils::chunk_size_total(),
+                    instance_len: 36 * VERTEX_STRIDE as usize * index_utils::chunk_size_total(),
                     n_instances: Self::max_batch_chunks(),
                     usage: wgpu::BufferUsage::STORAGE | wgpu::BufferUsage::VERTEX,
                 },

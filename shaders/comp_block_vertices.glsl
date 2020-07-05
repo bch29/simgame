@@ -258,7 +258,7 @@ void main() {
   memoryBarrierShared();
 
   /* uint startChunkIx_g = atomicAdd(g_TotalFaceCount, s_LocalFaceCount); */
-  uint startChunkIx_g = info.addr.w * CHUNK_SIZE_XYZ;
+  uint startChunkIx_g = 6 * info.addr.w * CHUNK_SIZE_XYZ;
 
   IndirectCommand command;
   command.count = 6 * s_LocalFaceCount;

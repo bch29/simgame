@@ -263,6 +263,11 @@ impl<T: BaseNum> Bounds<T> {
         })
     }
 
+    #[inline]
+    pub fn volume(self) -> T {
+        self.size.x * self.size.y * self.size.z
+    }
+
     pub fn diff(self, other: Bounds<T>) -> BoundsDiff<T> {
         BoundsDiff {
             lhs: self,
