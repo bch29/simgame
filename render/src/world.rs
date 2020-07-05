@@ -9,7 +9,7 @@ use simgame_core::{
 
 mod blocks;
 
-const LOOK_AT_DIR: Vector3<f32> = Vector3::new(1., 1., -3.);
+const LOOK_AT_DIR: Vector3<f32> = Vector3::new(1., 1., -2.);
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ViewParams {

@@ -6,14 +6,23 @@ const uint CHUNK_SIZE_XYZ = CHUNK_SIZE_XY * CHUNK_SIZE_Z;
 const float scale = 1.0;
 const float half_scale = scale / 2.;
 
-layout(location = 0) in uint a_BlockIndex;
-layout(location = 1) in uint a_VertexId;
-
 layout(location = 0) out vec2 v_TexCoord;
 layout(location = 1) out vec3 v_Normal;
 layout(location = 2) out vec4 v_Pos;
 layout(location = 3) out uint v_BlockType;
 layout(location = 4) out vec3 v_CameraPos;
+
+struct Attributes {
+  // mesh data
+  vec4 pos;
+  vec4 normal;
+  vec2 texCoord;
+
+  // chunk/block data
+  ivec4 blockAddr;
+  vec3 chunkOffset;
+  uint blockType;
+};
 
 struct CubeFace {
   vec4 normal;
@@ -46,6 +55,10 @@ layout(set = 0, binding = 2) readonly buffer BlockTypes {
 
 layout(set = 0, binding = 3) readonly buffer ChunkMetadataArr {
   ChunkMetadata[] b_ChunkMetadata;
+};
+
+layout(set = 0, binding = 4) readonly buffer FacePairs {
+  uint[] b_FacePairs;
 };
 
 /* 
@@ -93,30 +106,95 @@ mat4 fullModelMatrix(ivec4 blockAddr, vec3 chunkOffset) {
   return u_Model * translation_matrix(offset.xyz) * rescale;
 }
 
-void main() {
-  ivec4 blockAddr = decodeBlockIndex(a_BlockIndex);
-  ChunkMetadata chunkMeta = b_ChunkMetadata[blockAddr.w];
+// Based on shader inputs, decode and look up actual attributes for the vertex that we are to
+// produce.  If this function returns false then the vertex should be dropped.
+bool decodeAttributes(out Attributes attrs) {
+  // gl_VertexID encodes chunk index and index of vertex within face pair
+  uint chunkIndex = gl_VertexIndex / 12;
 
-  vec3 blockOffset = chunkMeta.offset.xyz;
+  uint pairVertexId = gl_VertexIndex % 12;
 
-  uint faceId = a_VertexId / 6;
-  uint faceVertexId = a_VertexId % 6;
-  
+  uint pairData = b_FacePairs[gl_InstanceIndex];
+
+  uint enabledFaces = pairData >> 26;
+  uint pairBit = (pairVertexId / 6) & 1; // 0 for first face in pair, 1 for second
+
+  uint faceVertexId = (pairVertexId - 6 * pairBit) % 6;
+
+  // If pairBit is 0, faceId is the position of the first set bit in enabledFaces, 
+  // otherwise it is the position of the second set bit.
+  // If pairBit is 1 and there is no second set bit, hide the vertex.
+  uint faceId;
+  for (faceId = 0; faceId < 6; faceId++) {
+    bool faceEnabled = (enabledFaces & (1 << faceId)) > 0;
+    if (!faceEnabled)
+      continue;
+
+    if (pairBit == 1) {
+      // if pairBit is 1 then we want the second enabled face
+      pairBit = 0;
+      continue;
+    }
+
+    break;
+  }
+
+  if (faceId == 6)
+    // didn't find an enabled face, return failure
+    return false;
+
+  // NO DEBUG
+  // look up mesh data
   CubeFace face = b_CubeFaces[faceId];
-  vec4 a_Normal = face.normal;
-  vec4 a_Pos = face.vertexLocs[faceVertexId];
-  vec2 a_TexCoord = face.vertexTexCoords[faceVertexId];
+  uint faceVertexIndex = face.indices[faceVertexId];
+  attrs.normal = face.normal;
+  attrs.pos = face.vertexLocs[faceVertexIndex];
+  attrs.texCoord = face.vertexTexCoords[faceVertexIndex];
+
+  // look up block/chunk data
+  uint blockIndexMask = (1 << 26) - 1;
+  uint blockIndex = chunkIndex * CHUNK_SIZE_XYZ + (pairData & blockIndexMask);
+  ivec4 blockAddr = decodeBlockIndex(blockIndex);
+
+  ChunkMetadata chunkMeta = b_ChunkMetadata[chunkIndex];
+  attrs.blockAddr = blockAddr;
+  attrs.chunkOffset = chunkMeta.offset.xyz;
+  attrs.blockType = blockTypeAtIndex(blockIndex);
+
+  return true;
+}
+
+mat4 identity() {
+  return mat4(
+      1.0, 0.0, 0.0, 0.0,
+      0.0, 1.0, 0.0, 0.0,
+      0.0, 0.0, 1.0, 0.0,
+      0.0, 0.0, 0.0, 1.0);
+}
+
+void main() {
+  Attributes attrs;
+  if (!decodeAttributes(attrs)) {
+    return;
+  }
 
   mat4 view = u_View * translation_matrix(-u_CameraPos.xyz);
-  mat4 model = fullModelMatrix(blockAddr, blockOffset);
+  mat4 model = fullModelMatrix(attrs.blockAddr, attrs.chunkOffset);
+  mat4 proj = u_Projection;
+  /* mat4 view = identity(); */
+  /* mat4 model = identity(); */
+  /* mat4 proj = identity(); */
 
   v_CameraPos = u_CameraPos.xyz;
-  v_TexCoord = a_TexCoord;
-  v_Pos = model * a_Pos;
-  v_Normal = (u_Model * a_Normal).xyz;
+  v_TexCoord = attrs.texCoord;
+  v_Pos = model * attrs.pos;
+  v_Normal = (model * attrs.normal).xyz;
 
-  gl_Position = u_Projection * view * v_Pos;
-  v_BlockType = blockTypeAtIndex(a_BlockIndex);
+  gl_Position = proj * view * v_Pos;
+  v_BlockType = attrs.blockType;
 }
+
+/* void main() { */
+/* } */
 
 // vi: ft=c

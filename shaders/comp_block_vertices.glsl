@@ -35,14 +35,6 @@ struct ChunkMetadata {
   int padding;
 };
 
-struct Vertex {
-  uint blockIndex;
-
-  // identifies where on the cube the vertex lies:
-  // faceId * 4 + faceVertexId
-  uint vertexId;
-};
-
 struct IndirectCommand {
   uint count;
   uint instanceCount;
@@ -71,8 +63,8 @@ layout(set = 0, binding = 2) readonly buffer ChunkMetadataArr {
   ChunkMetadata[] b_ChunkMetadata;
 };
 
-layout(set = 0, binding = 3) buffer OutputVertices {
-  Vertex[] c_OutputVertices;
+layout(set = 0, binding = 3) buffer OutputFacePairs {
+  uint[] c_OutputFacePairs;
 };
 
 layout(set = 0, binding = 5) buffer IndirectCommands {
@@ -85,7 +77,7 @@ layout(set = 0, binding = 6) buffer FaceCounts {
 };
 
 // keeps track of the number of faces produced by this work group so far
-shared uint s_LocalFaceCount;
+shared uint s_LocalOutputCount;
 
 uint encodeBlockIndex(uvec4 pos)
 {
@@ -102,6 +94,27 @@ uint encodeBlockIndex(uvec4 pos)
     return 0;
 
   return pos.x + pos.y * CHUNK_SIZE_X + pos.z * CHUNK_SIZE_XY + pos.w * CHUNK_SIZE_XYZ;
+}
+
+uint encodeFacePair(ivec4 blockAddr, int faceId0, int faceId1) {
+  // leave out chunk id as because that comes from base instance
+  uint blockIndex = encodeBlockIndex(uvec4(blockAddr.xyz, 0));
+
+  uint faceBit0;
+  uint faceBit1;
+
+  if (faceId0 == -1)
+    faceBit0 = 0;
+  else
+    faceBit0 = (1 << faceId0);
+
+  if (faceId1 == -1)
+    faceBit1 = 0;
+  else
+    faceBit1 = (1 << faceId1);
+
+  uint enabledFaces = faceBit0 | faceBit1;
+  return (enabledFaces << 26) + blockIndex;
 }
 
 /*
@@ -182,11 +195,9 @@ bool isBlockVisible(ivec4 blockAddr, int blockType)
 }
 
 struct BlockInfo {
-  uint visibleFaceCount;
   ivec4 addr;
-  int blockType;
+  uint visibleFaceCount;
   bool[6] visibleFaces;
-  ivec4[6] neighborAddrs;
 };
 
 
@@ -194,9 +205,9 @@ BlockInfo getBlockInfo(ivec4 blockAddr) {
   BlockInfo res;
   res.addr = blockAddr;
   res.visibleFaceCount = 0;
-  res.blockType = getBlockType(blockAddr);
+  int blockType = getBlockType(blockAddr);
 
-  if (!isBlockVisible(blockAddr, res.blockType))
+  if (!isBlockVisible(blockAddr, blockType))
     return res;
 
   for (uint faceIx = 0; faceIx < 6; faceIx++) {
@@ -204,10 +215,9 @@ BlockInfo getBlockInfo(ivec4 blockAddr) {
     ivec4 neighborAddr = neighborBlockAddr(blockAddr, face.normal.xyz);
     int neighborBlockType = getBlockType(neighborAddr);
 
-    // No point in rendering a face if it is invisible or its neighbor covers it completely.
+    // do not render a face if its neighbor covers it completely.
     bool faceVisible = !isBlockVisible(neighborAddr, neighborBlockType);
     if (faceVisible) {
-      res.neighborAddrs[faceIx] = neighborAddr;
       res.visibleFaceCount += 1;
     }
 
@@ -218,57 +228,174 @@ BlockInfo getBlockInfo(ivec4 blockAddr) {
 }
 
 
-void pushVertices(in BlockInfo info, uint startChunkIx_g, uint faceIx_l) {
-  ChunkMetadata chunkMeta = b_ChunkMetadata[info.addr.w];
+void pushFaces(in BlockInfo info, uint startChunkIx_g, uint pairIx_l) {
+  int prevFaceId = -1;
 
-  for (uint faceId = 0; faceId < 6; faceId++) {
+  for (int faceId = 0; faceId < 6; faceId++) {
     if (!info.visibleFaces[faceId])
       continue;
 
-    CubeFace face = u_CubeFaces[faceId];
-    ivec4 neighborAddr = info.neighborAddrs[faceId];
-
-    uint faceIx_g = startChunkIx_g + faceIx_l;
-    uint outVertexStart = 6 * faceIx_g;
-
-    for (uint faceIndexIx = 0; faceIndexIx < 6; faceIndexIx++) {
-      uint faceVertexId = face.indices[faceIndexIx];
-      Vertex vert;
-      vert.blockIndex = encodeBlockIndex(uvec4(info.addr));
-      vert.vertexId = faceId * 6 + faceVertexId;
-      c_OutputVertices[outVertexStart + faceIndexIx] = vert;
+    // wait until we have two faces to encode
+    if (prevFaceId == -1) {
+      prevFaceId = faceId;
+      continue;
     }
 
-    faceIx_l += 1;
+    c_OutputFacePairs[startChunkIx_g + pairIx_l] =
+      encodeFacePair(info.addr, prevFaceId, faceId);
+
+    prevFaceId = -1;
+    pairIx_l += 1;
   }
+
+  // push an extra partial pair if there were an odd number of visible faces
+  if (prevFaceId != -1) {
+    c_OutputFacePairs[startChunkIx_g + pairIx_l] =
+      encodeFacePair(info.addr, prevFaceId, -1);
+  }
+}
+
+void pushDebugCommands2() {
+  BlockInfo info;
+
+  uint startChunkIx_g = 3 * CHUNK_SIZE_XYZ * info.addr.w;
+  uint pairIx_l = 0;
+
+  for (uint z = 0; z < 4; z++) {
+    for (uint y = 0; y < 16; y++) {
+      for (uint x = 0; x < 16; x++) {
+        info = getBlockInfo(ivec4(x, y, z, gl_WorkGroupID.x));
+        pushFaces(info, startChunkIx_g, pairIx_l);
+        pairIx_l += (1 + info.visibleFaceCount) / 2;
+      }
+    }
+  }
+
+  IndirectCommand command;
+  command.count = 12; // 12 vertices per pair of faces
+  command.instanceCount = pairIx_l;
+  command.first = 12 * gl_WorkGroupID.x; // (gl_VertexID / 12) encodes chunk index in vertex shader
+  command.baseInstance = startChunkIx_g;
+  c_IndirectCommands[gl_WorkGroupID.x] = command;
+}
+
+void pushDebugCommands() {
+  IndirectCommand command;
+  uint cmdIx = 0;
+  uint pairIx;
+
+  pairIx = 3 * CHUNK_SIZE_XYZ * cmdIx;
+  c_OutputFacePairs[pairIx] = encodeFacePair(ivec4(0, 0, 0, 0), 0, 1);
+  pairIx += 1;
+  c_OutputFacePairs[pairIx] = encodeFacePair(ivec4(0, 1, 0, 0), 2, 3);
+  pairIx += 1;
+  c_OutputFacePairs[pairIx] = encodeFacePair(ivec4(1, 0, 0, 0), 4, 5);
+  pairIx += 1;
+  c_OutputFacePairs[pairIx] = encodeFacePair(ivec4(0, 0, 1, 0), 4, -1);
+  pairIx += 1;
+  c_OutputFacePairs[pairIx] = encodeFacePair(ivec4(2, 0, 0, 0), 4, 5);
+  pairIx += 1;
+  c_OutputFacePairs[pairIx] = encodeFacePair(ivec4(3, 0, 0, 0), 4, 5);
+  pairIx += 1;
+  c_OutputFacePairs[pairIx] = encodeFacePair(ivec4(4, 0, 0, 0), 4, 5);
+  pairIx += 1;
+  c_OutputFacePairs[pairIx] = encodeFacePair(ivec4(4, 0, 0, 0), 1, 3);
+  pairIx += 1;
+  c_OutputFacePairs[pairIx] = encodeFacePair(ivec4(5, 0, 0, 0), 4, 5);
+  pairIx += 1;
+  c_OutputFacePairs[pairIx] = encodeFacePair(ivec4(6, 0, 0, 0), 4, 5);
+  pairIx += 1;
+  c_OutputFacePairs[pairIx] = encodeFacePair(ivec4(7, 0, 0, 0), 4, 5);
+  pairIx += 1;
+
+  command.count = 12;
+  command.instanceCount = pairIx - 3 * CHUNK_SIZE_XYZ * cmdIx;
+  command.first = 12 * cmdIx;
+  command.baseInstance = 3 * CHUNK_SIZE_XYZ * cmdIx;
+  c_IndirectCommands[cmdIx] = command;
+  cmdIx += 1;
+
+  pairIx = 3 * CHUNK_SIZE_XYZ * cmdIx;
+  c_OutputFacePairs[pairIx] = encodeFacePair(ivec4(0, 0, 0, 0), 0, 1);
+  pairIx += 1;
+  c_OutputFacePairs[pairIx] = encodeFacePair(ivec4(0, 1, 0, 0), 2, 3);
+  pairIx += 1;
+  c_OutputFacePairs[pairIx] = encodeFacePair(ivec4(1, 0, 0, 0), 4, 5);
+  pairIx += 1;
+  c_OutputFacePairs[pairIx] = encodeFacePair(ivec4(0, 0, 1, 0), 4, 5);
+  pairIx += 1;
+
+  command.count = 12;
+  command.instanceCount = pairIx - 3 * CHUNK_SIZE_XYZ * cmdIx;
+  command.first = 12 * cmdIx;
+  command.baseInstance = 3 * CHUNK_SIZE_XYZ * cmdIx;
+  c_IndirectCommands[cmdIx] = command;
+  cmdIx += 1;
+
+  pairIx = 3 * CHUNK_SIZE_XYZ * cmdIx;
+  c_OutputFacePairs[pairIx] = encodeFacePair(ivec4(0, 0, 0, 0), 0, 1);
+  pairIx += 1;
+  c_OutputFacePairs[pairIx] = encodeFacePair(ivec4(0, 1, 0, 0), 2, 3);
+  pairIx += 1;
+  c_OutputFacePairs[pairIx] = encodeFacePair(ivec4(1, 0, 0, 0), 4, 5);
+  pairIx += 1;
+  c_OutputFacePairs[pairIx] = encodeFacePair(ivec4(0, 0, 1, 0), 4, 5);
+  pairIx += 1;
+
+  command.count = 12;
+  command.instanceCount = pairIx - 3 * CHUNK_SIZE_XYZ * cmdIx;
+  command.first = 12 * cmdIx;
+  command.baseInstance = 3 * CHUNK_SIZE_XYZ * cmdIx;
+  c_IndirectCommands[cmdIx] = command;
+  cmdIx += 1;
+
+  pairIx = 3 * CHUNK_SIZE_XYZ * cmdIx;
+  c_OutputFacePairs[pairIx] = encodeFacePair(ivec4(0, 0, 0, 0), 0, 1);
+  pairIx += 1;
+  c_OutputFacePairs[pairIx] = encodeFacePair(ivec4(0, 1, 0, 0), 2, 3);
+  pairIx += 1;
+  c_OutputFacePairs[pairIx] = encodeFacePair(ivec4(1, 0, 0, 0), 4, 5);
+  pairIx += 1;
+  c_OutputFacePairs[pairIx] = encodeFacePair(ivec4(0, 0, 1, 0), 4, 5);
+  pairIx += 1;
+
+  command.count = 12;
+  command.instanceCount = pairIx - 3 * CHUNK_SIZE_XYZ * cmdIx;
+  command.first = 12 * cmdIx;
+  command.baseInstance = 3 * CHUNK_SIZE_XYZ * cmdIx;
+  c_IndirectCommands[cmdIx] = command;
+  cmdIx += 1;
 }
 
 void main() {
   // gl_LocalInvocationID is block pos within chunk, gl_WorkGroupID.x is chunk index
   ivec4 blockAddr = ivec4(gl_LocalInvocationID, gl_WorkGroupID.x);
-
-  s_LocalFaceCount = 0;
-  barrier(); // ensure s_LocalFaceCount is set to 0 in all invocations in the work group
-  memoryBarrierShared();
-
   BlockInfo info = getBlockInfo(blockAddr);
-  uint faceIx_l = atomicAdd(s_LocalFaceCount, info.visibleFaceCount);
+  // round up because e.g. 5 faces need 2 full pairs and an incomplete pair
+  uint visiblePairCount = (1 + info.visibleFaceCount) / 2;
 
-  barrier(); // wait for s_LocalFaceCount to get its final value
+  s_LocalOutputCount = 0;
+  barrier(); // ensure s_LocalOutputCount is set to 0 in all invocations in the work group
   memoryBarrierShared();
+  uint pairIx_l = atomicAdd(s_LocalOutputCount, visiblePairCount);
 
-  /* uint startChunkIx_g = atomicAdd(g_TotalFaceCount, s_LocalFaceCount); */
-  uint startChunkIx_g = 6 * info.addr.w * CHUNK_SIZE_XYZ;
+  uint startChunkIx_g = 3 * CHUNK_SIZE_XYZ * info.addr.w;
+
+  if (visiblePairCount != 0)
+    pushFaces(info, startChunkIx_g, pairIx_l);
+
+  barrier(); // wait for s_LocalOutputCount to get its final value
+  memoryBarrierShared();
 
   IndirectCommand command;
-  command.count = 6 * s_LocalFaceCount;
-  command.instanceCount = 1;
-  command.first = 6 * startChunkIx_g;
-  command.baseInstance = 0;
-  c_IndirectCommands[gl_WorkGroupID.x] = command;
+  command.count = 12; // 12 vertices per pair of faces
+  command.instanceCount = s_LocalOutputCount;
+  command.first = 12 * info.addr.w; // (gl_VertexID / 12) encodes chunk index in vertex shader
+  command.baseInstance = startChunkIx_g;
+  c_IndirectCommands[info.addr.w] = command;
 
-  if (info.visibleFaceCount != 0)
-    pushVertices(info, startChunkIx_g, faceIx_l);
+  /* // DEBUG */
+  /* pushDebugCommands2(); */
 
   // ensure buffer writes are flushed
   memoryBarrierBuffer();

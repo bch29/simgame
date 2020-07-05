@@ -16,8 +16,8 @@ use crate::{RenderInit, RenderParams, RenderState, WorldRenderInit};
 const GAME_STEP_MILLIS: u64 = 10;
 const RENDER_INTERVAL_MILLIS: u64 = 1000 / 120;
 
-const INITIAL_VISIBLE_SIZE: Vector3<i32> = Vector3::new(64, 64, 64);
-const INITIAL_CAMERA_POS: Point3<f32> = Point3::new(0f32, 0f32, 64f32);
+const INITIAL_VISIBLE_SIZE: Vector3<i32> = Vector3::new(128, 128, 64);
+const INITIAL_CAMERA_POS: Point3<f32> = Point3::new(0f32, 0f32, 20f32);
 const INITIAL_Z_LEVEL: i32 = 32;
 
 #[derive(Debug, Clone)]

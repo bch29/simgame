@@ -26,7 +26,7 @@ use crate::world::{self, Shaders, ViewParams};
 ///   uint vertexId;
 /// };
 /// ```
-const VERTEX_STRIDE: u64 = 4 + 4;
+const VERTEX_STRIDE: u64 = 4;
 
 pub struct BlocksRenderInit<'a> {
     pub shaders: &'a Shaders<wgpu::ShaderModule>,
@@ -35,7 +35,7 @@ pub struct BlocksRenderInit<'a> {
     pub depth_texture: &'a wgpu::Texture,
     pub uniforms: &'a world::Uniforms,
     pub world: &'a World,
-    pub active_view_box: Option<Bounds<i32>>
+    pub active_view_box: Option<Bounds<i32>>,
 }
 
 pub struct BlocksRenderState {
@@ -84,7 +84,7 @@ struct ComputeUniforms {
 type ActiveChunks = crate::stable_map::StableMap<Point3<i32>, ()>;
 
 struct ComputeShaderBuffers {
-    vertex: InstancedBuffer,
+    faces: InstancedBuffer,
     indirect: InstancedBuffer,
     globals: InstancedBuffer,
 }
@@ -256,6 +256,16 @@ impl BlocksRenderState {
                                 min_binding_size: None,
                             },
                         ),
+                        // Faces
+                        wgpu::BindGroupLayoutEntry::new(
+                            4,
+                            wgpu::ShaderStage::VERTEX,
+                            wgpu::BindingType::StorageBuffer {
+                                dynamic: false,
+                                readonly: true,
+                                min_binding_size: None,
+                            },
+                        ),
                     ],
                 });
 
@@ -298,24 +308,7 @@ impl BlocksRenderState {
                 }),
                 vertex_state: wgpu::VertexStateDescriptor {
                     index_format: wgpu::IndexFormat::Uint16,
-                    vertex_buffers: &[wgpu::VertexBufferDescriptor {
-                        stride: VERTEX_STRIDE,
-                        step_mode: wgpu::InputStepMode::Vertex,
-                        attributes: &[
-                            // localBlockIndex
-                            wgpu::VertexAttributeDescriptor {
-                                format: wgpu::VertexFormat::Uint,
-                                offset: 0,
-                                shader_location: 0,
-                            },
-                            // vertexId
-                            wgpu::VertexAttributeDescriptor {
-                                format: wgpu::VertexFormat::Uint,
-                                offset: 4,
-                                shader_location: 1,
-                            },
-                        ],
-                    }],
+                    vertex_buffers: &[],
                 },
                 sample_count: 1,
                 sample_mask: !0,
@@ -360,7 +353,7 @@ impl BlocksRenderState {
 
         Self {
             needs_compute_pass,
-            chunk_batch, 
+            chunk_batch,
             compute_stage,
             render_stage,
         }
@@ -406,7 +399,11 @@ impl BlocksRenderState {
         }
     }
 
-    fn compute_pass(&mut self, frame_render: &world::FrameRender, encoder: &mut wgpu::CommandEncoder) {
+    fn compute_pass(
+        &mut self,
+        frame_render: &world::FrameRender,
+        encoder: &mut wgpu::CommandEncoder,
+    ) {
         self.compute_stage.uniforms.sync(frame_render.queue);
 
         let bufs = &self.chunk_batch.compute_shader_buffers;
@@ -414,18 +411,20 @@ impl BlocksRenderState {
         // reset compute shader globals to 0
         bufs.globals.clear(frame_render.queue);
 
-        let bind_group = frame_render.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: None,
-            layout: &self.compute_stage.bind_group_layout,
-            bindings: &[
-                self.compute_stage.uniforms.as_binding(0),
-                self.chunk_batch.block_type_binding(1),
-                self.chunk_batch.chunk_metadata_binding(2),
-                bufs.vertex.as_binding(3),
-                bufs.indirect.as_binding(5),
-                bufs.globals.as_binding(6),
-            ],
-        });
+        let bind_group = frame_render
+            .device
+            .create_bind_group(&wgpu::BindGroupDescriptor {
+                label: None,
+                layout: &self.compute_stage.bind_group_layout,
+                bindings: &[
+                    self.compute_stage.uniforms.as_binding(0),
+                    self.chunk_batch.block_type_binding(1),
+                    self.chunk_batch.chunk_metadata_binding(2),
+                    bufs.faces.as_binding(3),
+                    bufs.indirect.as_binding(5),
+                    bufs.globals.as_binding(6),
+                ],
+            });
 
         let mut cpass = encoder.begin_compute_pass();
 
@@ -444,16 +443,19 @@ impl BlocksRenderState {
         self.render_stage.uniforms.sync(frame_render.queue);
         self.render_stage.locals.sync(frame_render.queue);
 
-        let bind_group = frame_render.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: None,
-            layout: &self.render_stage.bind_group_layout,
-            bindings: &[
-                self.render_stage.uniforms.as_binding(0),
-                self.render_stage.locals.as_binding(1),
-                self.chunk_batch.block_type_binding(2),
-                self.chunk_batch.chunk_metadata_binding(3),
-            ],
-        });
+        let bind_group = frame_render
+            .device
+            .create_bind_group(&wgpu::BindGroupDescriptor {
+                label: None,
+                layout: &self.render_stage.bind_group_layout,
+                bindings: &[
+                    self.render_stage.uniforms.as_binding(0),
+                    self.render_stage.locals.as_binding(1),
+                    self.chunk_batch.block_type_binding(2),
+                    self.chunk_batch.chunk_metadata_binding(3),
+                    self.chunk_batch.compute_shader_buffers.faces.as_binding(4),
+                ],
+            });
 
         let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             color_attachments: &[wgpu::RenderPassColorAttachmentDescriptor {
@@ -477,10 +479,7 @@ impl BlocksRenderState {
         rpass.set_bind_group(0, &bind_group, &[]);
 
         let bufs = &self.chunk_batch.compute_shader_buffers;
-        let vertex_buf = &bufs.vertex;
         let indirect_buf = &bufs.indirect;
-
-        rpass.set_vertex_buffer(0, vertex_buf.buffer().slice(..));
 
         for (_, chunk_index, _) in self.chunk_batch.active_chunks.iter() {
             rpass.draw_indirect(
@@ -493,7 +492,7 @@ impl BlocksRenderState {
 
 impl ChunkBatchRenderState {
     const fn max_batch_chunks() -> usize {
-        let block_types_mb = 4;
+        let block_types_mb = 32;
         (1024 * 1024 * block_types_mb / 2) / index_utils::chunk_size_total()
     }
 
@@ -535,13 +534,13 @@ impl ChunkBatchRenderState {
         });
 
         let compute_shader_buffers = {
-            let vertex = InstancedBuffer::new(
+            let faces = InstancedBuffer::new(
                 device,
                 InstancedBufferDesc {
-                    label: "block vertices",
-                    instance_len: 36 * VERTEX_STRIDE as usize * index_utils::chunk_size_total(),
+                    label: "block faces",
+                    instance_len: 4 * 3 as usize * index_utils::chunk_size_total(),
                     n_instances: Self::max_batch_chunks(),
-                    usage: wgpu::BufferUsage::STORAGE | wgpu::BufferUsage::VERTEX,
+                    usage: wgpu::BufferUsage::STORAGE,
                 },
             );
 
@@ -561,13 +560,12 @@ impl ChunkBatchRenderState {
                     label: "compute globals",
                     instance_len: 8,
                     n_instances: 1,
-                    usage: wgpu::BufferUsage::STORAGE
-                        | wgpu::BufferUsage::COPY_DST,
+                    usage: wgpu::BufferUsage::STORAGE | wgpu::BufferUsage::COPY_DST,
                 },
             );
 
             ComputeShaderBuffers {
-                vertex,
+                faces,
                 indirect,
                 globals,
             }
@@ -704,11 +702,7 @@ impl ChunkBatchRenderState {
         }
     }
 
-    fn update_buffers(
-        &mut self,
-        queue: &wgpu::Queue,
-        world: &World,
-    ) -> bool {
+    fn update_buffers(&mut self, queue: &wgpu::Queue, world: &World) -> bool {
         let mut any_updates = false;
 
         let mut fill_block_types =
@@ -737,8 +731,6 @@ impl ChunkBatchRenderState {
             }
         }
 
-        fill_block_types.finish();
-
         if any_updates {
             // If any chunks have been updated, update metadata for every chunk. In theory we only
             // need to update new/deleted chunks and those with neighbours that are new/deleted.
@@ -751,6 +743,7 @@ impl ChunkBatchRenderState {
             }
         }
 
+        fill_block_types.finish();
         fill_chunk_metadatas.finish();
 
         any_updates
@@ -821,10 +814,7 @@ impl ChunkBatchRenderState {
 impl BufferSyncable for RenderUniforms {
     type Item = f32;
 
-    fn sync<'a>(
-        &self,
-        fill_buffer: &mut FillBuffer<'a, Self::Item>,
-    ) {
+    fn sync<'a>(&self, fill_buffer: &mut FillBuffer<'a, Self::Item>) {
         let proj: &[f32; 16] = self.proj.as_ref();
         let view: &[f32; 16] = self.view.as_ref();
         let model: &[f32; 16] = self.model.as_ref();
@@ -851,10 +841,7 @@ impl IntoBufferSynced for RenderUniforms {
 impl BufferSyncable for RenderLocals {
     type Item = u8;
 
-    fn sync<'a>(
-        &self,
-        fill_buffer: &mut FillBuffer<'a, Self::Item>,
-    ) {
+    fn sync<'a>(&self, fill_buffer: &mut FillBuffer<'a, Self::Item>) {
         fill_buffer.advance(self.as_bytes());
     }
 }
@@ -880,10 +867,7 @@ impl ComputeUniforms {
 impl BufferSyncable for ComputeUniforms {
     type Item = u8;
 
-    fn sync<'a>(
-        &self,
-        fill_buffer: &mut FillBuffer<'a, Self::Item>,
-    ) {
+    fn sync<'a>(&self, fill_buffer: &mut FillBuffer<'a, Self::Item>) {
         let visible_box_origin = self.visible_box_origin.as_ref() as &[f32; 3];
         let visible_box_limit = self.visible_box_limit.as_ref() as &[f32; 3];
 
