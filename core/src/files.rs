@@ -1,7 +1,7 @@
 use anyhow::{anyhow, bail, Context, Result};
 use directories::UserDirs;
 use serde::{Deserialize, Serialize};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use crate::block::WorldBlockData;
 use crate::settings::{CoreSettings, Settings};
@@ -46,6 +46,8 @@ impl FileContext {
     }
 
     pub fn load(data_root: PathBuf) -> Result<Self> {
+        log::warn!("current dir is {:?}", std::env::current_dir());
+
         let core_settings: CoreSettings = {
             let mut core_settings_path = data_root.clone();
             core_settings_path.push(CORE_SETTINGS_FILE_NAME);
@@ -143,6 +145,15 @@ impl FileContext {
         Ok(())
     }
 
+    pub fn load_debug_world_blocks() -> Result<WorldBlockData> {
+        let meta_bytes = include_bytes!("data/debug_saves/small/world_meta.yaml");
+        let block_data_bytes = include_bytes!("data/debug_saves/small/world_block_data.dat");
+
+        let meta = Self::load_world_meta(&meta_bytes[..])?;
+        let result = Self::load_world_blocks_data(&meta, &block_data_bytes[..])?;
+        Ok(result)
+    }
+
     pub fn load_world_blocks(&self, save_name: &str) -> Result<WorldBlockData> {
         let save_dir = self.get_save_dir(save_name);
         if !save_dir.is_dir() {
@@ -181,24 +192,23 @@ impl FileContext {
             ));
         }
 
-        let meta = self.load_world_meta(meta_path.as_path())?;
-        let result = self.load_world_blocks_data(&meta, data_path.as_path())?;
+        let meta_file = std::fs::File::open(meta_path.as_path())
+            .context("Opening world meta file for saved game")?;
+        let meta = Self::load_world_meta(meta_file)?;
+        let data_file = std::fs::File::open(data_path.as_path())
+            .context("Opening block data file for saved game")?;
+        let result = Self::load_world_blocks_data(&meta, data_file)?;
         Ok(result)
     }
 
-    pub fn load_world_meta(&self, file_path: &Path) -> Result<WorldMeta> {
-        let file =
-            std::fs::File::open(&file_path).context("Opening world meta file for saved game")?;
+    pub fn load_world_meta<R: std::io::Read>(file: R) -> Result<WorldMeta> {
         Ok(serde_yaml::from_reader(file).context("Parsing world meta file for saved game")?)
     }
 
-    pub fn load_world_blocks_data(
-        &self,
-        meta: &WorldMeta,
-        file_path: &Path,
-    ) -> Result<WorldBlockData> {
-        let file =
-            std::fs::File::open(&file_path).context("Opening block data file for saved game")?;
+    pub fn load_world_blocks_data<R>(meta: &WorldMeta, file: R) -> Result<WorldBlockData>
+    where
+        R: std::io::Read,
+    {
         let mut decompressed =
             lz4::Decoder::new(file).context("Initializing decoder for block data file")?;
 

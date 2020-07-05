@@ -28,9 +28,10 @@ enum Action {
         #[structopt(short, long)]
         save_name: String,
 
-        #[structopt(short="t", long)]
+        #[structopt(short = "t", long)]
         graphics_trace_path: Option<PathBuf>,
     },
+    DebugRender,
 }
 
 #[derive(Debug, StructOpt)]
@@ -57,19 +58,27 @@ fn run(opt: Opts) -> Result<()> {
         Some(data_root) => data_root,
     };
 
-    let ctx = FileContext::load(data_root)?;
-    ctx.ensure_directories()?;
+    let ctx = || -> Result<FileContext> {
+        let ctx = FileContext::load(data_root)?;
+        ctx.ensure_directories()?;
+        Ok(ctx)
+    };
 
     match &opt.action {
-        Action::GenerateWorld { options } => run_generate(&ctx, options),
+        Action::GenerateWorld { options } => run_generate(&ctx()?, options),
         Action::LoadWorld {
             save_name,
             graphics_trace_path,
         } => smol::run(run_load_world(
-            &ctx,
+            &ctx()?,
             save_name,
             graphics_trace_path.as_ref().map(|p| p.as_path()),
         )),
+        Action::DebugRender => {
+            let blocks = FileContext::load_debug_world_blocks()?;
+            info!("Loaded debug world: {:?}", blocks.debug_summary());
+            smol::run(run_world(World::from_blocks(blocks), None))
+        }
     }
 }
 
@@ -78,6 +87,15 @@ async fn run_load_world(
     save_name: &str,
     graphics_trace_path: Option<&std::path::Path>,
 ) -> Result<()> {
+    let blocks = ctx.load_world_blocks(save_name)?;
+    info!("Loaded world: {:?}", blocks.debug_summary());
+
+    let world = World::from_blocks(blocks);
+
+    run_world(world, graphics_trace_path).await
+}
+
+async fn run_world(world: World, graphics_trace_path: Option<&std::path::Path>) -> Result<()> {
     let mut shader_compiler = simgame_shaders::Compiler::new(simgame_shaders::CompileParams {
         chunk_size: index_utils::chunk_size().into(),
     })?;
@@ -87,16 +105,11 @@ async fn run_load_world(
     let comp_shader =
         shader_compiler.compile_compute("shaders/comp_block_vertices.glsl".as_ref())?;
 
-    let blocks = ctx.load_world_blocks(save_name)?;
-    info!("Loaded world: {:?}", blocks.debug_summary());
-
     let shaders = simgame_render::WorldShaders {
         vert: vert_shader.as_ref(),
         frag: frag_shader.as_ref(),
         comp: comp_shader.as_ref(),
     };
-
-    let world = World::from_blocks(blocks);
 
     let params = simgame_render::RenderParams {
         trace_path: graphics_trace_path,

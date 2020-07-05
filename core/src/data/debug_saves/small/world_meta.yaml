@@ -1,0 +1,10 @@
+---
+world_bounds:
+  origin:
+    x: 0
+    y: 0
+    z: 0
+  size:
+    x: 256
+    y: 256
+    z: 64
