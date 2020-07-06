@@ -182,8 +182,18 @@ impl FileContext {
     pub fn load_settings(&self) -> Result<Settings> {
         let mut fp = self.settings_root.clone();
         fp.push(USER_SETTINGS_FILE_NAME);
-        let file = std::fs::File::open(&fp).context("Opening settings file")?;
-        Ok(serde_yaml::from_reader(file).context("Parsing settings file")?)
+
+        if fp.is_file() {
+            log::info!("Loading settings from {:?}", fp);
+            let file = std::fs::File::open(&fp).context("Opening settings file")?;
+            Ok(serde_yaml::from_reader(file).context("Parsing settings file")?)
+        } else {
+            log::info!("Creating default settings file {:?}", fp);
+            let settings = Settings::default();
+            let file = std::fs::File::create(&fp).context("Creating settings file")?;
+            serde_yaml::to_writer(file, &settings).context("Serializing settings")?;
+            Ok(settings)
+        }
     }
 
     fn get_save_dir(&self, save_name: &str) -> PathBuf {

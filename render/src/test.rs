@@ -8,19 +8,14 @@ use winit::{
     event_loop::{ControlFlow, EventLoop},
 };
 
-use simgame_core::world::{UpdatedWorldState, World};
 use simgame_core::convert_point;
+pub use simgame_core::settings::RenderTestParams;
+use simgame_core::world::{UpdatedWorldState, World};
+
+use crate::world::visible_size_to_chunks;
 
 use crate::world;
 use crate::{RenderInit, RenderParams, RenderState, WorldRenderInit};
-
-const GAME_STEP_MILLIS: u64 = 10;
-const GAME_STEP_SECONDS: f64 = GAME_STEP_MILLIS as f64 / 1000.0;
-const RENDER_INTERVAL_MILLIS: u64 = 1000 / 120;
-
-const INITIAL_VISIBLE_SIZE: Vector3<i32> = Vector3::new(512, 512, 32);
-const INITIAL_CAMERA_POS: Point3<f32> = Point3::new(0f32, 0f32, 20f32);
-const INITIAL_Z_LEVEL: i32 = 0;
 
 struct TimingParams {
     window_len: usize,
@@ -45,6 +40,8 @@ struct ControlState {
 
     z_level: AccelControlState,
     visible_height: AccelControlState,
+
+    max_visible_chunks: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -80,9 +77,22 @@ pub fn build_window(event_loop: &EventLoop<()>) -> Result<winit::window::Window>
     Ok(builder.build(event_loop)?)
 }
 
+fn restrict_visible_size(max_chunks: usize, mut visible_size: Vector3<i32>) -> Vector3<i32> {
+    let chunk_size = visible_size_to_chunks(visible_size);
+    let max_z_chunks = max_chunks as i32 / (chunk_size.x * chunk_size.y) - 1;
+    let max_z_blocks = simgame_core::block::index_utils::chunk_size().z as i32 * max_z_chunks;
+
+    if visible_size.z > max_z_blocks {
+        visible_size.z = max_z_blocks;
+    }
+
+    return visible_size;
+}
+
 pub async fn test_render<'a>(
     mut world: World,
-    params: RenderParams<'a>,
+    test_params: RenderTestParams,
+    render_params: RenderParams<'a>,
     shaders: crate::WorldShaders<&'a [u32]>,
 ) -> Result<()> {
     let event_loop = EventLoop::new();
@@ -92,10 +102,27 @@ pub async fn test_render<'a>(
     let physical_win_size = window.inner_size();
     let win_size: (u32, u32) = physical_win_size.into();
 
+    let visible_size = restrict_visible_size(
+        test_params.max_visible_chunks,
+        test_params.initial_visible_size,
+    );
+
+    if visible_size != test_params.initial_visible_size {
+        let new_visible_chunks = visible_size_to_chunks(visible_size);
+        log::warn!(
+            "Initial visible size of {:?} would exceed max_visible_chunks setting of {}. Decreasing to {:?}. This will use {} out of {} chunks.",
+            test_params.initial_visible_size,
+            test_params.max_visible_chunks,
+            visible_size,
+            new_visible_chunks.x * new_visible_chunks.y * new_visible_chunks.z,
+            test_params.max_visible_chunks
+        );
+    }
+
     let mut view_state = world::ViewParams {
-        camera_pos: INITIAL_CAMERA_POS,
-        z_level: INITIAL_Z_LEVEL,
-        visible_size: INITIAL_VISIBLE_SIZE,
+        camera_pos: test_params.initial_camera_pos,
+        z_level: test_params.initial_z_level,
+        visible_size,
     };
 
     let render_init = RenderInit {
@@ -108,20 +135,23 @@ pub async fn test_render<'a>(
             height: win_size.1,
             world: &world,
             view_params: view_state.clone(),
+            max_visible_chunks: test_params.max_visible_chunks,
         },
     };
 
-    let mut render_state = RenderState::new(params, render_init).await?;
+    let mut render_state = RenderState::new(render_params.clone(), render_init).await?;
 
     use event::{Event, VirtualKeyCode, WindowEvent};
 
-    let mut control_state = ControlState::new();
+    let mut control_state = ControlState::new(&test_params);
 
     let mut time_tracker = TimeTracker::new(
         TimingParams {
             window_len: 30,
-            tick_size: Duration::from_millis(GAME_STEP_MILLIS),
-            render_interval: Duration::from_millis(RENDER_INTERVAL_MILLIS),
+            tick_size: Duration::from_millis(test_params.game_step_millis),
+            render_interval: Duration::from_millis(
+                1000 / test_params.fixed_refresh_rate.unwrap_or(60),
+            ),
         },
         Instant::now(),
     );
@@ -177,7 +207,10 @@ pub async fn test_render<'a>(
 
         for _tick_time in time_tracker.tick(Instant::now()) {
             world.tick(&mut world_diff);
-            control_state.tick(&mut view_state);
+            control_state.tick(
+                test_params.game_step_millis as f64 / 1000.0,
+                &mut view_state,
+            );
         }
 
         render_state.set_world_view(view_state.clone());
@@ -185,7 +218,7 @@ pub async fn test_render<'a>(
 }
 
 impl ControlState {
-    fn new() -> Self {
+    fn new(params: &RenderTestParams) -> Self {
         let base_accel_params = AccelControlParams {
             initial_step: 0.0,
             delay_seconds: 0.0,
@@ -197,9 +230,10 @@ impl ControlState {
         };
 
         ControlState {
+            max_visible_chunks: params.max_visible_chunks,
             camera_dir: Vector3::zero(),
             camera_pan: AccelControlState::new(
-                convert_point!(INITIAL_CAMERA_POS, f64),
+                convert_point!(params.initial_camera_pos, f64),
                 AccelControlParams {
                     acceleration: 8.0,
                     decay: 5.0,
@@ -207,7 +241,7 @@ impl ControlState {
                 },
             ),
             camera_height: AccelControlState::new(
-                convert_point!(INITIAL_CAMERA_POS, f64),
+                convert_point!(params.initial_camera_pos, f64),
                 AccelControlParams {
                     acceleration: 8.0,
                     decay: 5.0,
@@ -216,7 +250,7 @@ impl ControlState {
             ),
 
             z_level: AccelControlState::new(
-                Point3::new(0.0, 0.0, INITIAL_Z_LEVEL as f64),
+                Point3::new(0.0, 0.0, params.initial_z_level as f64),
                 AccelControlParams {
                     min_value: Some(Point3::new(0.0, 0.0, 0.0)),
                     delay_seconds: 0.5,
@@ -226,7 +260,7 @@ impl ControlState {
                 },
             ),
             visible_height: AccelControlState::new(
-                Point3::new(0.0, 0.0, INITIAL_VISIBLE_SIZE.z as f64),
+                Point3::new(0.0, 0.0, params.initial_visible_size.z as f64),
                 AccelControlParams {
                     min_value: Some(Point3::new(0.0, 0.0, 1.0)),
                     delay_seconds: 0.5,
@@ -282,7 +316,8 @@ impl ControlState {
         normalize_camera_axis(&mut self.camera_dir.y);
         normalize_camera_axis(&mut self.camera_dir.z);
 
-        self.camera_pan.set_direction(Some(Self::pan_direction(self.camera_dir)));
+        self.camera_pan
+            .set_direction(Some(Self::pan_direction(self.camera_dir)));
 
         let height_dir = Vector3::new(0.0, 0.0, self.camera_dir.z as f64);
         self.camera_height.set_direction(Some(height_dir));
@@ -310,11 +345,11 @@ impl ControlState {
         }
     }
 
-    pub fn tick(&mut self, view_state: &mut world::ViewParams) {
-        self.camera_pan.tick(GAME_STEP_SECONDS);
-        self.camera_height.tick(GAME_STEP_SECONDS);
-        self.z_level.tick(GAME_STEP_SECONDS);
-        self.visible_height.tick(GAME_STEP_SECONDS);
+    pub fn tick(&mut self, elapsed: f64, view_state: &mut world::ViewParams) {
+        self.camera_pan.tick(elapsed);
+        self.camera_height.tick(elapsed);
+        self.z_level.tick(elapsed);
+        self.visible_height.tick(elapsed);
 
         view_state.camera_pos.x = self.camera_pan.value().x as f32;
         view_state.camera_pos.y = self.camera_pan.value().y as f32;
@@ -322,6 +357,18 @@ impl ControlState {
 
         view_state.z_level = self.z_level.value().z.round() as i32;
         view_state.visible_size.z = self.visible_height.value().z.round() as i32;
+
+        let visible_size = restrict_visible_size(self.max_visible_chunks, view_state.visible_size);
+        if visible_size != view_state.visible_size {
+            log::warn!(
+                "Tried to increase visible size to {:?} which would exceed max_visible_chunks setting of {}. Decreasing to {:?}.",
+                view_state.visible_size,
+                self.max_visible_chunks,
+                visible_size
+            );
+            view_state.visible_size = visible_size;
+            self.visible_height.value_mut().z = visible_size.z as f64;
+        }
     }
 }
 
@@ -392,6 +439,10 @@ impl AccelControlState {
 
     fn value(&self) -> Point3<f64> {
         self.current_value
+    }
+
+    fn value_mut(&mut self) -> &mut Point3<f64> {
+        &mut self.current_value
     }
 
     fn set_direction(&mut self, direction: Option<Vector3<f64>>) {

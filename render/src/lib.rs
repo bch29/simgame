@@ -15,14 +15,16 @@ pub use world::WorldRenderInit;
 
 // TODO: UI rendering pipeline
 
+#[derive(Debug)]
 pub struct RenderInit<'a, W> {
     pub window: &'a W,
     pub world: WorldRenderInit<'a>,
     pub physical_win_size: (u32, u32),
 }
 
+#[derive(Debug, Clone)]
 pub struct RenderParams<'a> {
-    pub trace_path: Option<&'a std::path::Path>
+    pub trace_path: Option<&'a std::path::Path>,
 }
 
 pub struct RenderState {

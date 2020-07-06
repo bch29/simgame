@@ -9,6 +9,8 @@ use simgame_core::{
 
 mod blocks;
 
+pub use blocks::visible_size_to_chunks;
+
 const LOOK_AT_DIR: Vector3<f32> = Vector3::new(1., 1., -3.);
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -28,12 +30,14 @@ pub struct ViewState {
     rotation: Matrix4<f32>,
 }
 
+#[derive(Debug, Clone)]
 pub struct Shaders<R> {
     pub vert: R,
     pub frag: R,
     pub comp: R,
 }
 
+#[derive(Debug)]
 pub struct WorldRenderInit<'a> {
     pub shaders: Shaders<&'a [u32]>,
     pub aspect_ratio: f32,
@@ -41,6 +45,7 @@ pub struct WorldRenderInit<'a> {
     pub height: u32,
     pub view_params: ViewParams,
     pub world: &'a World,
+    pub max_visible_chunks: usize
 }
 
 pub struct WorldRenderState {
@@ -99,6 +104,7 @@ impl WorldRenderState {
                 aspect_ratio: init.aspect_ratio,
                 depth_texture: &depth_texture,
                 world: init.world,
+                max_visible_chunks: init.max_visible_chunks
             },
             device,
             queue,

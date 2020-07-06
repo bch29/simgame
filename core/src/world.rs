@@ -10,6 +10,7 @@ use rand::Rng;
 use crate::util::Bounds;
 use crate::block::{index_utils, Block, WorldBlockData};
 
+#[derive(Debug)]
 pub struct World {
     pub blocks: WorldBlockData,
     rng: rand::rngs::ThreadRng,
@@ -17,6 +18,7 @@ pub struct World {
     filled_blocks: i32,
 }
 
+#[derive(Debug)]
 pub struct UpdatedWorldState {
     pub modified_chunks: HashSet<Point3<usize>>,
 }
@@ -55,8 +57,8 @@ impl World {
 
     pub fn modify_filled_blocks(&mut self, delta: i32, updated_state: &mut UpdatedWorldState) {
         self.filled_blocks += delta * 8;
-        if self.filled_blocks <= 0 {
-            self.filled_blocks = 0
+        if self.filled_blocks < 1 {
+            self.filled_blocks = 1
         } else if self.filled_blocks >= index_utils::chunk_size_total() as i32 {
             self.filled_blocks = index_utils::chunk_size_total() as i32
         }

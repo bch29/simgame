@@ -91,6 +91,8 @@ fn run(opt: Opts) -> Result<()> {
 async fn run_render_world(ctx: &FileContext, options: &RenderWorldOpts) -> Result<()> {
     let shaders = load_shaders(&ctx, &options.shader_opts)?;
 
+    let settings = ctx.load_settings()?;
+
     let blocks = match &options.save_name {
         Some(save_name) => ctx.load_world_blocks(save_name)?,
         None => FileContext::load_debug_world_blocks()?,
@@ -105,7 +107,8 @@ async fn run_render_world(ctx: &FileContext, options: &RenderWorldOpts) -> Resul
         trace_path: options.graphics_trace_path.as_ref().map(|p| p.as_path()),
     };
 
-    simgame_render::test::test_render(world, params, ref_shaders).await
+    simgame_render::test::test_render(world, settings.render_test_params, params, ref_shaders)
+        .await
 }
 
 fn run_generate(ctx: &FileContext, options: &GenerateWorldOpts) -> Result<()> {
