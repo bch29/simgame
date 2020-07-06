@@ -1,7 +1,9 @@
 use anyhow::{anyhow, bail, Context, Result};
+use byteorder::{ReadBytesExt, WriteBytesExt};
 use directories::UserDirs;
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::io::Read;
+use std::path::{Path, PathBuf};
 
 use crate::block::WorldBlockData;
 use crate::settings::{CoreSettings, Settings};
@@ -11,6 +13,8 @@ const CORE_SETTINGS_FILE_NAME: &str = "core_config.yaml";
 const USER_SETTINGS_FILE_NAME: &str = "settings.yaml";
 const SAVE_DIR_NAME: &str = "saves";
 const SETTINGS_DIR_NAME: &str = "settings";
+const SHADER_SPIRV_DIR_NAME: &str = "shader_spirv";
+const SHADER_SRC_DIR_NAME: &str = "shader_src";
 
 pub struct FileContext {
     /// Game engine settings.
@@ -22,11 +26,27 @@ pub struct FileContext {
     /// Root directory for game data files, which are not meant to change except in
     /// development or modding.
     pub data_root: PathBuf,
+    /// Root directory for compiled shaders.
+    pub shader_spirv_root: PathBuf,
+    /// Root directory for shader source code.
+    pub shader_src_root: PathBuf,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct WorldMeta {
     world_bounds: Bounds<usize>,
+}
+
+#[derive(Debug)]
+pub enum ShaderLoadAction<F>
+{
+    /// Load cached shaders. Return failure if there is no cached shader.
+    CachedOnly,
+    /// Try to load cached shaders. If there is no cached shader, compile from source and write to
+    /// cache.
+    CachedOrCompile(F),
+    /// Ignore any cached shaders. Compile from source and write to cache.
+    CompileOnly(F),
 }
 
 impl FileContext {
@@ -37,11 +57,19 @@ impl FileContext {
         let mut settings_root = user_data_root.clone();
         settings_root.push(SETTINGS_DIR_NAME);
 
+        let mut shader_spirv_root = data_root.clone();
+        shader_spirv_root.push(SHADER_SPIRV_DIR_NAME);
+
+        let mut shader_src_root = data_root.clone();
+        shader_src_root.push(SHADER_SRC_DIR_NAME);
+
         FileContext {
             core_settings,
             data_root,
             save_root,
             settings_root,
+            shader_spirv_root,
+            shader_src_root,
         }
     }
 
@@ -73,6 +101,69 @@ impl FileContext {
         Ok(FileContext::new(core_settings, data_root, user_data_root))
     }
 
+    pub fn load_shader<T, F>(
+        &self,
+        name: &'static str,
+        shader_type: T,
+        load_action: &mut ShaderLoadAction<F>,
+    ) -> Result<Vec<u32>>
+    where
+        F: FnMut(&Path, T) -> Result<Vec<u32>>,
+    {
+        let src_name = format!("{}.glsl", name);
+        let spirv_name = format!("{}.glsl.spirv", name);
+
+        let mut src_path = PathBuf::new();
+        src_path.push(&self.shader_src_root);
+        src_path.push(src_name);
+
+        let mut spirv_path = PathBuf::new();
+        spirv_path.push(&self.shader_spirv_root);
+        spirv_path.push(spirv_name);
+
+        let load_spirv = || -> Result<Vec<u32>> {
+            let mut file = std::fs::File::open(&spirv_path)?;
+            let mut bytes = Vec::new();
+            file.read_to_end(&mut bytes)?;
+
+            let mut words = Vec::with_capacity(bytes.len() / 4);
+            words.extend(std::iter::repeat(0).take(bytes.len() / 4));
+            bytes
+                .as_slice()
+                .read_u32_into::<byteorder::LittleEndian>(&mut words)?;
+            log::info!("Loaded precompiled shader: {:?}", spirv_path);
+            Ok(words)
+        };
+
+        let save_spirv = |words| -> Result<()> {
+            log::info!("Saving compiled shader: {:?}", spirv_path);
+            let mut file = std::fs::File::create(&spirv_path)?;
+            for &word in words {
+                file.write_u32::<byteorder::LittleEndian>(word)?;
+            }
+            Ok(())
+        };
+
+        match load_action {
+            ShaderLoadAction::CachedOnly => load_spirv(),
+            ShaderLoadAction::CompileOnly(compile) => {
+                log::info!("Compiling shader from source: {:?}", src_path);
+                let result = compile(src_path.as_path(), shader_type)?;
+                save_spirv(&result[..])?;
+                Ok(result)
+            }
+            ShaderLoadAction::CachedOrCompile(compile) => match load_spirv() {
+                Ok(result) => Ok(result),
+                Err(_) => {
+                    log::info!("Compiling shader from source: {:?}", src_path);
+                    let result = compile(src_path.as_path(), shader_type)?;
+                    save_spirv(&result[..])?;
+                    Ok(result)
+                }
+            },
+        }
+    }
+
     pub fn ensure_directories(&self) -> Result<()> {
         std::fs::create_dir_all(&self.save_root)?;
         std::fs::create_dir_all(&self.settings_root)?;
@@ -82,6 +173,8 @@ impl FileContext {
                 self.data_root.to_string_lossy()
             );
         }
+
+        std::fs::create_dir_all(&self.shader_spirv_root)?;
 
         Ok(())
     }

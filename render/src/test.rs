@@ -9,7 +9,7 @@ use winit::{
 };
 
 use simgame_core::world::{UpdatedWorldState, World};
-use simgame_core::{convert_point, convert_vec};
+use simgame_core::convert_point;
 
 use crate::world;
 use crate::{RenderInit, RenderParams, RenderState, WorldRenderInit};

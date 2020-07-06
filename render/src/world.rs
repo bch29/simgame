@@ -187,25 +187,25 @@ impl ViewState {
 }
 
 impl<R> Shaders<R> {
-    pub fn map<R2, F>(self, mut f: F) -> Shaders<R2>
+    pub fn map<'a, R2, F>(&'a self, mut f: F) -> Shaders<R2>
     where
-        F: FnMut(R) -> R2,
+        F: FnMut(&'a R) -> R2,
     {
         Shaders {
-            vert: f(self.vert),
-            frag: f(self.frag),
-            comp: f(self.comp),
+            vert: f(&self.vert),
+            frag: f(&self.frag),
+            comp: f(&self.comp),
         }
     }
 
-    pub fn map_result<E, R2, F>(self, mut f: F) -> std::result::Result<Shaders<R2>, E>
+    pub fn map_result<'a, E, R2, F>(&'a self, mut f: F) -> std::result::Result<Shaders<R2>, E>
     where
-        F: FnMut(R) -> std::result::Result<R2, E>,
+        F: FnMut(&'a R) -> std::result::Result<R2, E>,
     {
         Ok(Shaders {
-            vert: f(self.vert)?,
-            frag: f(self.frag)?,
-            comp: f(self.comp)?,
+            vert: f(&self.vert)?,
+            frag: f(&self.frag)?,
+            comp: f(&self.comp)?,
         })
     }
 }

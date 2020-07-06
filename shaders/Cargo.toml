@@ -4,7 +4,10 @@ version = "0.1.0"
 authors = ["Bradley Hardy <bradleyhardy@live.com>"]
 edition = "2018"
 
+[features]
+shader-compiler = ["shaderc"]
+
 [dependencies]
-shaderc = "*"
+shaderc = { version = "*", optional = true }
 anyhow = "*"
 log = "*"
