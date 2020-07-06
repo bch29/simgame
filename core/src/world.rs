@@ -39,10 +39,17 @@ impl World {
             return;
         }
 
-        let bounds: Bounds<usize> =
-            Bounds::new(Point3::new(32, 32, 0), Vector3::new(16, 16, 1024));
+        let bounds: Vec<Bounds<usize>> = vec![
+            Bounds::new(Point3::new(32, 32, 0), Vector3::new(16, 16, 1024)),
+            Bounds::new(Point3::new(100, 100, 0), Vector3::new(17, 33, 400)),
+            Bounds::new(Point3::new(200, 200, 0), Vector3::new(8, 5, 1024)),
+            Bounds::new(Point3::new(60, 100, 0), Vector3::new(16, 16, 1024)),
+            Bounds::new(Point3::new(0, 400, 0), Vector3::new(3000, 4, 8000)),
+        ];
 
-        for _ in 0..64 {
+        for _ in 0..256 {
+            let bounds = bounds[self.rng.gen::<usize>() % bounds.len()];
+
             let point = bounds.origin()
                 + Vector3 {
                     x: self.rng.gen::<usize>() % bounds.size().x,
