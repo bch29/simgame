@@ -25,7 +25,8 @@ pub struct RenderTestParams {
     pub initial_visible_size: Vector3<i32>,
     pub initial_camera_pos: Point3<f32>,
     pub initial_z_level: i32,
-    pub max_visible_chunks: usize
+    pub max_visible_chunks: usize,
+    pub look_at_dir: Vector3<f32>,
 }
 
 impl Default for RenderTestParams {
@@ -36,7 +37,8 @@ impl Default for RenderTestParams {
             initial_visible_size: Vector3::new(128, 128, 32),
             initial_camera_pos: Point3::new(-20.0, -20.0, 20.0),
             initial_z_level: 20,
-            max_visible_chunks: 1024 * 16
+            max_visible_chunks: 1024 * 16,
+            look_at_dir: Vector3::new(1., 1., -6.),
         }
     }
 }

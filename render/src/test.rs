@@ -123,6 +123,7 @@ pub async fn test_render<'a>(
         camera_pos: test_params.initial_camera_pos,
         z_level: test_params.initial_z_level,
         visible_size,
+        look_at_dir: test_params.look_at_dir
     };
 
     let render_init = RenderInit {

@@ -34,6 +34,12 @@ pub struct RenderState {
     world: world::WorldRenderState,
 }
 
+pub struct DeviceResult {
+    pub device: wgpu::Device,
+    pub queue: wgpu::Queue,
+    pub multi_draw_enabled: bool,
+}
+
 impl RenderState {
     pub async fn new<'a, W>(params: RenderParams<'a>, init: RenderInit<'a, W>) -> Result<Self>
     where
@@ -54,17 +60,8 @@ impl RenderState {
             .await
             .ok_or_else(|| anyhow!("Failed to request wgpu::Adaptor"))?;
 
-        let (device, queue) = adapter
-            .request_device(
-                &wgpu::DeviceDescriptor {
-                    features: wgpu::Features::MULTI_DRAW_INDIRECT,
-                    shader_validation: false,
-                    limits: wgpu::Limits::default()
-                },
-                params.trace_path,
-            )
-            .await
-            .map_err(|err| anyhow!("{:?}", err))?;
+        let device_result = Self::request_device(&params, &adapter).await?;
+        let device = &device_result.device;
 
         let swap_chain = device.create_swap_chain(
             &surface,
@@ -77,14 +74,73 @@ impl RenderState {
             },
         );
 
-        let world_render_state = world::WorldRenderState::new(init.world, &device, &queue)?;
+        let world_render_state = world::WorldRenderState::new(init.world, &device_result)?;
 
         Ok(RenderState {
             swap_chain,
             world: world_render_state,
-            queue,
-            device,
+            queue: device_result.queue,
+            device: device_result.device,
         })
+    }
+
+    async fn request_device<'a>(
+        params: &RenderParams<'a>,
+        adapter: &wgpu::Adapter,
+    ) -> Result<DeviceResult> {
+        let result = adapter
+            .request_device(
+                &wgpu::DeviceDescriptor {
+                    features: wgpu::Features::MULTI_DRAW_INDIRECT,
+                    shader_validation: false,
+                    limits: wgpu::Limits::default(),
+                },
+                params.trace_path,
+            )
+            .await;
+
+        match result {
+            Ok((device, queue)) => {
+                log::info!("MULTI_DRAW_INDIRECT is enabled");
+                return Ok(DeviceResult {
+                    device,
+                    queue,
+                    multi_draw_enabled: true,
+                })
+            }
+            Err(e) => {
+                log::warn!(
+                    "Failed to get device with MULTI_DRAW_INDIRECT support: {:?}",
+                    e
+                );
+            }
+        };
+
+        let result = adapter
+            .request_device(
+                &wgpu::DeviceDescriptor {
+                    features: wgpu::Features::empty(),
+                    shader_validation: false,
+                    limits: wgpu::Limits::default(),
+                },
+                params.trace_path,
+            )
+            .await;
+
+        match result {
+            Ok((device, queue)) => {
+                return Ok(DeviceResult {
+                    device,
+                    queue,
+                    multi_draw_enabled: true,
+                })
+            }
+            Err(e) => {
+                log::warn!("Failed to get fallback device {:?}", e);
+            }
+        }
+
+        Err(anyhow!("Failed to request wgpu::Adaptor"))
     }
 
     pub fn set_world_view(&mut self, params: world::ViewParams) {
@@ -100,7 +156,8 @@ impl RenderState {
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
 
-        self.world.render_frame(&self.queue, &self.device, &frame, &mut encoder);
+        self.world
+            .render_frame(&self.queue, &self.device, &frame, &mut encoder);
         self.queue.submit(std::iter::once(encoder.finish()));
     }
 

@@ -25,9 +25,11 @@ pub struct BlocksRenderInit<'a> {
     pub view_state: &'a world::ViewState,
     pub world: &'a World,
     pub max_visible_chunks: usize,
+    pub multi_draw_enabled: bool,
 }
 
 pub struct BlocksRenderState {
+    multi_draw_enabled: bool,
     needs_compute_pass: bool,
     chunk_batch: ChunkBatchRenderState,
     compute_stage: ComputeStage,
@@ -342,6 +344,7 @@ impl BlocksRenderState {
         }
 
         Self {
+            multi_draw_enabled: init.multi_draw_enabled,
             needs_compute_pass,
             chunk_batch,
             compute_stage,
@@ -468,11 +471,19 @@ impl BlocksRenderState {
         let bufs = &self.chunk_batch.compute_shader_buffers;
         let indirect_buf = &bufs.indirect;
 
-        for (_, chunk_index, _) in self.chunk_batch.active_chunks.iter() {
-            rpass.draw_indirect(
+        if self.multi_draw_enabled {
+            rpass.multi_draw_indirect(
                 &indirect_buf.buffer(),
-                indirect_buf.instance_offset(chunk_index),
+                0,
+                self.chunk_batch.active_chunks.capacity() as u32,
             );
+        } else {
+            for (_, chunk_index, _) in self.chunk_batch.active_chunks.iter() {
+                rpass.draw_indirect(
+                    &indirect_buf.buffer(),
+                    indirect_buf.instance_offset(chunk_index),
+                );
+            }
         }
     }
 }
@@ -756,13 +767,16 @@ struct ChunkMetaTracker {
 }
 
 struct EndlessVec<T> {
-    data: Vec<T>
+    data: Vec<T>,
 }
 
-impl<T> EndlessVec<T> where T: Default + Clone {
+impl<T> EndlessVec<T>
+where
+    T: Default + Clone,
+{
     pub fn new(initial_len: usize) -> Self {
         Self {
-            data: Vec::with_capacity(initial_len)
+            data: Vec::with_capacity(initial_len),
         }
     }
 
@@ -776,8 +790,8 @@ impl<T> EndlessVec<T> where T: Default + Clone {
 
     pub fn set(&mut self, index: usize, value: T) {
         if index >= self.data.len() {
-            self.data.extend(
-                std::iter::repeat(T::default()).take(1 + index - self.data.len()));
+            self.data
+                .extend(std::iter::repeat(T::default()).take(1 + index - self.data.len()));
         }
 
         self.data[index] = value;
@@ -856,9 +870,7 @@ impl ChunkMetaTracker {
             self.chunk_metas.set(index, chunk_meta);
         }
 
-        self.new_metas
-            .iter()
-            .map(|(index, meta)| (*index, *meta))
+        self.new_metas.iter().map(|(index, meta)| (*index, *meta))
     }
 
     fn make_chunk_meta(active_chunks: &ActiveChunks, p: Point3<i32>) -> ChunkMeta {

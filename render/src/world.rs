@@ -11,22 +11,18 @@ mod blocks;
 
 pub use blocks::visible_size_to_chunks;
 
-const LOOK_AT_DIR: Vector3<f32> = Vector3::new(1., 1., -3.);
-
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ViewParams {
     pub camera_pos: Point3<f32>,
     pub z_level: i32,
     pub visible_size: Vector3<i32>,
+    pub look_at_dir: Vector3<f32>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ViewState {
     params: ViewParams,
-
     proj: Matrix4<f32>,
-    view: Matrix4<f32>,
-
     rotation: Matrix4<f32>,
 }
 
@@ -45,7 +41,7 @@ pub struct WorldRenderInit<'a> {
     pub height: u32,
     pub view_params: ViewParams,
     pub world: &'a World,
-    pub max_visible_chunks: usize
+    pub max_visible_chunks: usize,
 }
 
 pub struct WorldRenderState {
@@ -70,7 +66,13 @@ impl WorldRenderState {
         self.render_blocks.set_view(&params);
     }
 
-    pub fn new(init: WorldRenderInit, device: &wgpu::Device, queue: &wgpu::Queue) -> Result<Self> {
+    pub fn new(init: WorldRenderInit, device_result: &crate::DeviceResult) -> Result<Self> {
+        let crate::DeviceResult {
+            device,
+            queue,
+            multi_draw_enabled,
+        } = device_result;
+
         let shaders = init.shaders.map_result::<std::io::Error, _, _>(|stream| {
             Ok(device.create_shader_module(wgpu::ShaderModuleSource::SpirV(stream)))
         })?;
@@ -93,7 +95,6 @@ impl WorldRenderState {
             params: init.view_params,
             proj: OPENGL_TO_WGPU_MATRIX
                 * cgmath::perspective(Deg(70f32), init.aspect_ratio, 1.0, 1000.0),
-            view: Matrix4::look_at_dir(Point3::new(0., 0., 0.), LOOK_AT_DIR, Vector3::unit_z()),
             rotation: Matrix4::identity(),
         };
 
@@ -104,7 +105,8 @@ impl WorldRenderState {
                 aspect_ratio: init.aspect_ratio,
                 depth_texture: &depth_texture,
                 world: init.world,
-                max_visible_chunks: init.max_visible_chunks
+                max_visible_chunks: init.max_visible_chunks,
+                multi_draw_enabled: *multi_draw_enabled,
             },
             device,
             queue,
@@ -142,7 +144,7 @@ impl ViewParams {
     /// Calculates the box containing blocks that will be rendered according to current view.
     pub fn calculate_view_box(&self, world: &World) -> Option<Bounds<i32>> {
         // center x and y 60 blocks in front of the camera
-        let mut center = self.camera_pos + 60. * LOOK_AT_DIR.normalize();
+        let mut center = self.camera_pos + 60. * self.look_at_dir.normalize();
 
         // z_level is the topmost visible level
         center.z = self.z_level as f32 + 1.0 - self.visible_size.z as f32 / 2.0;
@@ -168,6 +170,7 @@ impl Default for ViewParams {
             camera_pos: Point3::new(0., 0., 0.),
             z_level: 0,
             visible_size: Vector3::new(1, 1, 1),
+            look_at_dir: Vector3::new(1.0, 1.0, -6.0),
         }
     }
 }
@@ -182,7 +185,11 @@ impl ViewState {
     }
 
     pub fn view(&self) -> Matrix4<f32> {
-        self.view
+        Matrix4::look_at_dir(
+            Point3::new(0., 0., 0.),
+            self.params().look_at_dir,
+            Vector3::unit_z(),
+        )
     }
 
     pub fn model(&self) -> Matrix4<f32> {
