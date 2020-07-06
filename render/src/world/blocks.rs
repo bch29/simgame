@@ -1,3 +1,5 @@
+use std::collections::{HashMap, HashSet};
+
 use cgmath::{ElementWise, EuclideanSpace, Point3, Vector3};
 use zerocopy::{AsBytes, FromBytes};
 
@@ -13,6 +15,7 @@ use crate::buffer_util::{
     InstancedBuffer, InstancedBufferDesc, IntoBufferSynced,
 };
 use crate::mesh;
+use crate::stable_map::StableMap;
 use crate::world::{self, Shaders, ViewParams};
 
 pub struct BlocksRenderInit<'a> {
@@ -70,7 +73,7 @@ struct ComputeUniforms {
     cube: mesh::cube::Cube,
 }
 
-type ActiveChunks = crate::stable_map::StableMap<Point3<i32>, ()>;
+type ActiveChunks = StableMap<Point3<i32>, ()>;
 
 struct ComputeShaderBuffers {
     faces: InstancedBuffer,
@@ -80,6 +83,8 @@ struct ComputeShaderBuffers {
 
 struct ChunkBatchRenderState {
     active_chunks: ActiveChunks,
+    meta_tracker: ChunkMetaTracker,
+
     chunk_metadata_helper: BufferSyncHelper<ChunkMeta>,
     chunk_metadata_buf: wgpu::Buffer,
     block_type_helper: BufferSyncHelper<u16>,
@@ -91,7 +96,7 @@ struct ChunkBatchRenderState {
 }
 
 #[repr(C)]
-#[derive(Debug, Clone, Copy, AsBytes, FromBytes, Default)]
+#[derive(Debug, Clone, Copy, AsBytes, FromBytes, Default, PartialEq)]
 struct ChunkMeta {
     offset: [f32; 3],
     _padding0: [f32; 1],
@@ -101,9 +106,7 @@ struct ChunkMeta {
 }
 
 pub fn visible_size_to_chunks(visible_size: Vector3<i32>) -> Vector3<i32> {
-     visible_size
-        .div_up(&convert_vec!(index_utils::chunk_size(), i32))
-        + Vector3::new(1, 1, 1)
+    visible_size.div_up(&convert_vec!(index_utils::chunk_size(), i32)) + Vector3::new(1, 1, 1)
 }
 
 impl BlocksRenderState {
@@ -546,6 +549,7 @@ impl ChunkBatchRenderState {
         };
 
         ChunkBatchRenderState {
+            meta_tracker: ChunkMetaTracker::with_capacity(active_chunks.capacity()),
             active_chunks,
             block_type_buf: block_type_helper.make_buffer(device),
             block_type_helper,
@@ -553,7 +557,7 @@ impl ChunkBatchRenderState {
             chunk_metadata_helper,
             active_view_box: None,
             compute_shader_buffers,
-            max_visible_chunks
+            max_visible_chunks,
         }
     }
 
@@ -686,34 +690,35 @@ impl ChunkBatchRenderState {
             self.chunk_metadata_helper
                 .begin_fill_buffer(queue, &self.chunk_metadata_buf, 0);
 
+        self.meta_tracker.reset();
+
+        let diff = self.active_chunks.take_diff();
+        let active_chunks = diff.inner();
+
         // Copy chunk data to GPU buffers for only the chunks that have changed since last time
         // buffers were updated.
-        for (index, opt_point) in self.active_chunks.take_diff().changed_entries().into_iter() {
+        for (index, opt_point) in diff.changed_entries().into_iter() {
             any_updates = true;
 
-            if let Some((&p, _)) = opt_point {
-                let chunk = world.blocks.chunks().get(convert_point!(p, usize)).unwrap();
+            if let Some((&point, _)) = opt_point {
+                self.meta_tracker.modify(point, index, active_chunks);
+
+                let chunk = world
+                    .blocks
+                    .chunks()
+                    .get(convert_point!(point, usize))
+                    .unwrap();
                 let chunk_data = block::blocks_to_u16(&chunk.blocks);
                 fill_block_types.seek(index * index_utils::chunk_size_total());
                 fill_block_types.advance(chunk_data);
             } else {
-                // if a chunk was deleted, write inactive metadata
-                let meta = ChunkMeta::default();
-                fill_chunk_metadatas.seek(index);
-                fill_chunk_metadatas.advance(&[meta]);
+                self.meta_tracker.remove(index)
             }
         }
 
-        if any_updates {
-            // If any chunks have been updated, update metadata for every chunk. In theory we only
-            // need to update new/deleted chunks and those with neighbours that are new/deleted.
-            // Updating everything doesn't cost too much though.
-
-            for (&point, index, _) in self.active_chunks.iter() {
-                let meta = Self::make_chunk_meta(&self.active_chunks, point);
-                fill_chunk_metadatas.seek(index);
-                fill_chunk_metadatas.advance(&[meta]);
-            }
+        for (index, meta) in self.meta_tracker.update(&active_chunks) {
+            fill_chunk_metadatas.seek(index);
+            fill_chunk_metadatas.advance(&[meta]);
         }
 
         fill_block_types.finish();
@@ -730,6 +735,130 @@ impl ChunkBatchRenderState {
     fn chunk_metadata_binding(&self, index: u32) -> wgpu::Binding {
         self.chunk_metadata_helper
             .as_binding(index, &self.chunk_metadata_buf, 0)
+    }
+
+    #[allow(dead_code)]
+    fn debug_get_active_key_ixes(&self) -> Vec<(usize, Point3<i32>)> {
+        let mut active_keys: Vec<_> = self
+            .active_chunks
+            .keys_ixes()
+            .map(|(&p, i)| (i, p))
+            .collect();
+        active_keys.sort_by_key(|&(i, p)| (i, p.x, p.y, p.z));
+        active_keys
+    }
+}
+
+struct ChunkMetaTracker {
+    touched: HashSet<usize>,
+    chunk_metas: EndlessVec<ChunkMeta>,
+    new_metas: HashMap<usize, ChunkMeta>,
+}
+
+struct EndlessVec<T> {
+    data: Vec<T>
+}
+
+impl<T> EndlessVec<T> where T: Default + Clone {
+    pub fn new(initial_len: usize) -> Self {
+        Self {
+            data: Vec::with_capacity(initial_len)
+        }
+    }
+
+    pub fn get(&self, index: usize) -> T {
+        if index < self.data.len() {
+            self.data[index].clone()
+        } else {
+            T::default()
+        }
+    }
+
+    pub fn set(&mut self, index: usize, value: T) {
+        if index >= self.data.len() {
+            self.data.extend(
+                std::iter::repeat(T::default()).take(1 + index - self.data.len()));
+        }
+
+        self.data[index] = value;
+    }
+}
+
+impl ChunkMetaTracker {
+    fn with_capacity(capacity: usize) -> Self {
+        Self {
+            touched: HashSet::with_capacity(capacity),
+            chunk_metas: EndlessVec::new(capacity),
+            new_metas: HashMap::with_capacity(capacity),
+        }
+    }
+
+    fn reset(&mut self) {
+        self.touched.clear();
+        self.new_metas.clear();
+    }
+
+    fn touch_neighbors(touched: &mut HashSet<usize>, meta: &ChunkMeta) {
+        if meta.active == 0 {
+            return;
+        }
+
+        for &neighbor_index in &meta.neighbor_indices {
+            if neighbor_index != -1 {
+                touched.insert(neighbor_index as usize);
+            }
+        }
+    }
+
+    fn modify(&mut self, point: Point3<i32>, index: usize, active_chunks: &ActiveChunks) {
+        let old_meta = self.chunk_metas.get(index);
+        if old_meta.active == 1 {
+            let old_point: Point3<f32> = old_meta.offset.into();
+            let old_point = convert_point!(old_point, i32);
+
+            if old_point == point {
+                // an updated chunk whose location has not changed does no trigger any metadata
+                // updates
+                return;
+            }
+
+            Self::touch_neighbors(&mut self.touched, &old_meta);
+        } else {
+            let new_meta = Self::make_chunk_meta(active_chunks, point);
+            Self::touch_neighbors(&mut self.touched, &new_meta);
+            self.new_metas.insert(index, new_meta);
+        }
+    }
+
+    fn remove(&mut self, index: usize) {
+        let old_meta = self.chunk_metas.get(index);
+        Self::touch_neighbors(&mut self.touched, &old_meta);
+        self.new_metas.insert(index, ChunkMeta::default());
+    }
+
+    fn update<'a>(
+        &'a mut self,
+        active_chunks: &ActiveChunks,
+    ) -> impl Iterator<Item = (usize, ChunkMeta)> + 'a {
+        for &index in &self.touched {
+            if self.new_metas.contains_key(&index) {
+                continue;
+            }
+
+            let (&point, _) = active_chunks
+                .index(index)
+                .expect("touched chunk without new_metas entry was deleted");
+            self.new_metas
+                .insert(index, Self::make_chunk_meta(active_chunks, point));
+        }
+
+        for (&index, &chunk_meta) in &self.new_metas {
+            self.chunk_metas.set(index, chunk_meta);
+        }
+
+        self.new_metas
+            .iter()
+            .map(|(index, meta)| (*index, *meta))
     }
 
     fn make_chunk_meta(active_chunks: &ActiveChunks, p: Point3<i32>) -> ChunkMeta {
@@ -770,17 +899,6 @@ impl ChunkBatchRenderState {
             active: 1,
             _padding1: 0,
         }
-    }
-
-    #[allow(dead_code)]
-    fn debug_get_active_key_ixes(&self) -> Vec<(usize, Point3<i32>)> {
-        let mut active_keys: Vec<_> = self
-            .active_chunks
-            .keys_ixes()
-            .map(|(&p, i)| (i, p))
-            .collect();
-        active_keys.sort_by_key(|&(i, p)| (i, p.x, p.y, p.z));
-        active_keys
     }
 }
 
