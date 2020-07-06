@@ -7,7 +7,6 @@ use structopt::StructOpt;
 use simgame_core::files::FileContext;
 use simgame_core::world::World;
 use simgame_core::worldgen;
-// use simgame::settings::{CoreSettings, Settings};
 
 #[derive(Debug, StructOpt)]
 struct Opts {
@@ -29,32 +28,33 @@ struct ShaderOpts {
 struct ShaderOpts {}
 
 #[derive(Debug, StructOpt)]
-enum Action {
-    GenerateWorld {
-        #[structopt(flatten)]
-        options: GenerateWorldOptions,
-    },
-    LoadWorld {
-        #[structopt(short, long)]
-        save_name: String,
+struct RenderWorldOpts {
+    #[structopt(short, long)]
+    save_name: Option<String>,
 
-        #[structopt(short = "t", long)]
-        graphics_trace_path: Option<PathBuf>,
+    #[structopt(short = "t", long)]
+    graphics_trace_path: Option<PathBuf>,
 
-        #[structopt(flatten)]
-        shader_opts: ShaderOpts,
-    },
-    DebugRender {
-        #[structopt(short = "t", long)]
-        graphics_trace_path: Option<PathBuf>,
-
-        #[structopt(flatten)]
-        shader_opts: ShaderOpts,
-    },
+    #[structopt(flatten)]
+    shader_opts: ShaderOpts,
 }
 
 #[derive(Debug, StructOpt)]
-struct GenerateWorldOptions {
+enum Action {
+    GenerateWorld {
+        #[structopt(flatten)]
+        options: GenerateWorldOpts,
+    },
+    RenderWorld {
+        #[structopt(flatten)]
+        options: RenderWorldOpts,
+    },
+    #[cfg(feature = "shader-compiler")]
+    CompileShaders,
+}
+
+#[derive(Debug, StructOpt)]
+struct GenerateWorldOpts {
     #[structopt(short, long)]
     save_name: String,
     #[structopt(short = "x", long)]
@@ -82,64 +82,33 @@ fn run(opt: Opts) -> Result<()> {
 
     match &opt.action {
         Action::GenerateWorld { options } => run_generate(&ctx, options),
-        Action::LoadWorld {
-            save_name,
-            graphics_trace_path,
-            shader_opts,
-        } => smol::run(run_load_world(
-            &ctx,
-            save_name,
-            graphics_trace_path.as_ref().map(|p| p.as_path()),
-            &shader_opts,
-        )),
-        Action::DebugRender {
-            graphics_trace_path,
-            shader_opts,
-        } => {
-            let blocks = FileContext::load_debug_world_blocks()?;
-            info!("Loaded debug world: {:?}", blocks.debug_summary());
-            smol::run(run_world(
-                &ctx,
-                World::from_blocks(blocks),
-                graphics_trace_path.as_ref().map(|p| p.as_path()),
-                &shader_opts,
-            ))
-        }
+        Action::RenderWorld { options } => smol::run(run_render_world(&ctx, &options)),
+        #[cfg(feature = "shader-compiler")]
+        Action::CompileShaders => run_compile_shaders(&ctx),
     }
 }
 
-async fn run_load_world(
-    ctx: &FileContext,
-    save_name: &str,
-    graphics_trace_path: Option<&std::path::Path>,
-    shader_opts: &ShaderOpts,
-) -> Result<()> {
-    let blocks = ctx.load_world_blocks(save_name)?;
+async fn run_render_world(ctx: &FileContext, options: &RenderWorldOpts) -> Result<()> {
+    let shaders = load_shaders(&ctx, &options.shader_opts)?;
+
+    let blocks = match &options.save_name {
+        Some(save_name) => ctx.load_world_blocks(save_name)?,
+        None => FileContext::load_debug_world_blocks()?,
+    };
     info!("Loaded world: {:?}", blocks.debug_summary());
 
     let world = World::from_blocks(blocks);
 
-    run_world(ctx, world, graphics_trace_path, shader_opts).await
-}
-
-async fn run_world(
-    ctx: &FileContext,
-    world: World,
-    graphics_trace_path: Option<&std::path::Path>,
-    shader_opts: &ShaderOpts,
-) -> Result<()> {
-    let shaders = load_shaders(ctx, shader_opts)?;
-
     let ref_shaders: simgame_render::WorldShaders<&[u32]> = shaders.map(|x| &x[..]);
 
     let params = simgame_render::RenderParams {
-        trace_path: graphics_trace_path,
+        trace_path: options.graphics_trace_path.as_ref().map(|p| p.as_path()),
     };
 
     simgame_render::test::test_render(world, params, ref_shaders).await
 }
 
-fn run_generate(ctx: &FileContext, options: &GenerateWorldOptions) -> Result<()> {
+fn run_generate(ctx: &FileContext, options: &GenerateWorldOpts) -> Result<()> {
     let config = worldgen::GenerateWorldConfig {
         size: cgmath::Vector3::new(options.size_x, options.size_y, options.size_z),
     };
@@ -149,6 +118,17 @@ fn run_generate(ctx: &FileContext, options: &GenerateWorldOptions) -> Result<()>
     info!("Saving");
     ctx.save_world_blocks(options.save_name.as_str(), &blocks)?;
 
+    Ok(())
+}
+
+#[cfg(feature = "shader-compiler")]
+fn run_compile_shaders(ctx: &FileContext) -> Result<()> {
+    load_shaders(
+        &ctx,
+        &ShaderOpts {
+            force_shader_compile: true,
+        },
+    )?;
     Ok(())
 }
 
@@ -182,7 +162,7 @@ fn load_shaders(
     ctx: &FileContext,
     shader_opts: &ShaderOpts,
 ) -> Result<simgame_render::WorldShaders<Vec<u32>>> {
-    use simgame_shaders::{Compiler, CompileParams, ShaderKind};
+    use simgame_shaders::{CompileParams, Compiler, ShaderKind};
 
     let mut shader_compiler = Compiler::new(CompileParams {
         chunk_size: simgame_core::block::index_utils::chunk_size().into(),
