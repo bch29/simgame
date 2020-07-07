@@ -8,9 +8,9 @@ use winit::{
     event_loop::{ControlFlow, EventLoop},
 };
 
-use simgame_core::{convert_point, convert_vec};
 pub use simgame_core::settings::RenderTestParams;
 use simgame_core::world::{UpdatedWorldState, World};
+use simgame_core::{convert_point, convert_vec};
 
 use crate::world::visible_size_to_chunks;
 
@@ -20,7 +20,7 @@ use crate::{RenderInit, RenderParams, RenderState, WorldRenderInit};
 struct TimingParams {
     window_len: usize,
     tick_size: Duration,
-    render_interval: Duration,
+    render_interval: Option<Duration>,
 }
 
 struct TimeTracker {
@@ -46,7 +46,7 @@ struct ControlState {
 }
 
 #[derive(Debug, Clone)]
-pub struct AccelControlParams {
+struct AccelControlParams {
     pub initial_step: f64,
     pub delay_seconds: f64,
     pub acceleration: f64,
@@ -68,7 +68,7 @@ struct AccelControlState {
     current_value: Point3<f64>,
 }
 
-pub fn build_window(event_loop: &EventLoop<()>) -> Result<winit::window::Window> {
+fn build_window(event_loop: &EventLoop<()>) -> Result<winit::window::Window> {
     let builder = winit::window::WindowBuilder::new()
         .with_inner_size(winit::dpi::LogicalSize {
             width: 1920.0,
@@ -124,7 +124,7 @@ pub async fn test_render<'a>(
         camera_pos: test_params.initial_camera_pos,
         z_level: test_params.initial_z_level,
         visible_size,
-        look_at_dir: test_params.look_at_dir
+        look_at_dir: test_params.look_at_dir,
     };
 
     let render_init = RenderInit {
@@ -151,9 +151,9 @@ pub async fn test_render<'a>(
         TimingParams {
             window_len: 30,
             tick_size: Duration::from_millis(test_params.game_step_millis),
-            render_interval: Duration::from_millis(
-                1000 / test_params.fixed_refresh_rate.unwrap_or(60),
-            ),
+            render_interval: test_params
+                .fixed_refresh_rate
+                .map(|rate| Duration::from_millis(1000 / rate)),
         },
         Instant::now(),
     );
@@ -501,7 +501,7 @@ impl TimeTracker {
             .map(move |tick_ix| start_time + tick_size * (tick_ix as u32))
     }
 
-    fn sample(&mut self, now: Instant) {
+    pub fn sample(&mut self, now: Instant) {
         let elapsed = now.duration_since(self.prev_sample_time);
         while self.samples.len() >= self.params.window_len {
             self.samples.pop_front();
@@ -511,7 +511,12 @@ impl TimeTracker {
     }
 
     pub fn check_render(&mut self, now: Instant) -> bool {
-        if now.duration_since(self.prev_render_time) > self.params.render_interval {
+        if let Some(render_interval) = self.params.render_interval {
+            if now.duration_since(self.prev_render_time) > render_interval {
+                self.prev_render_time = now;
+                return true;
+            }
+        } else {
             self.prev_render_time = now;
             return true;
         }

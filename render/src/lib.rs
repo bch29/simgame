@@ -5,9 +5,8 @@ use simgame_core::world::{UpdatedWorldState, World};
 
 pub mod buffer_util;
 pub mod mesh;
-pub mod stable_map;
+mod stable_map;
 pub mod test;
-mod triangulate;
 mod world;
 
 pub use world::Shaders as WorldShaders;
@@ -15,7 +14,8 @@ pub use world::WorldRenderInit;
 
 // TODO: UI rendering pipeline
 
-pub type OwnedWorldShaders = WorldShaders<Vec<u32>>;
+pub type WorldShaderData = WorldShaders<Vec<u32>>;
+pub(crate) type LoadedWorldShaders = WorldShaders<wgpu::ShaderModule>;
 
 #[derive(Debug)]
 pub struct RenderInit<'a, W> {
@@ -108,7 +108,7 @@ impl RenderState {
                     device,
                     queue,
                     multi_draw_enabled: true,
-                })
+                });
             }
             Err(e) => {
                 log::warn!(

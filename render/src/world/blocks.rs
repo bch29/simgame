@@ -14,12 +14,13 @@ use crate::buffer_util::{
     BufferSyncHelper, BufferSyncHelperDesc, BufferSyncable, BufferSyncedData, FillBuffer,
     InstancedBuffer, InstancedBufferDesc, IntoBufferSynced,
 };
-use crate::mesh;
+use crate::LoadedWorldShaders;
+use crate::mesh::cube::Cube;
 use crate::stable_map::StableMap;
-use crate::world::{self, Shaders, ViewParams};
+use crate::world::{self, ViewParams};
 
 pub struct BlocksRenderInit<'a> {
-    pub shaders: &'a Shaders<wgpu::ShaderModule>,
+    pub shaders: &'a LoadedWorldShaders,
     pub aspect_ratio: f32,
     pub depth_texture: &'a wgpu::Texture,
     pub view_state: &'a world::ViewState,
@@ -31,18 +32,20 @@ pub struct BlocksRenderInit<'a> {
 pub struct BlocksRenderState {
     multi_draw_enabled: bool,
     needs_compute_pass: bool,
-    chunk_batch: ChunkBatchRenderState,
+    chunk_state: ChunkState,
     compute_stage: ComputeStage,
     render_stage: RenderStage,
+
+    geometry_buffers: GeometryBuffers,
 }
 
-pub struct ComputeStage {
+struct ComputeStage {
     pipeline: wgpu::ComputePipeline,
     uniforms: BufferSyncedData<ComputeUniforms, ComputeUniforms>,
     bind_group_layout: wgpu::BindGroupLayout,
 }
 
-pub struct RenderStage {
+struct RenderStage {
     pipeline: wgpu::RenderPipeline,
     bind_group_layout: wgpu::BindGroupLayout,
     depth_texture: wgpu::TextureView,
@@ -53,7 +56,7 @@ pub struct RenderStage {
 #[repr(C)]
 #[derive(Debug, Clone, Copy, AsBytes, FromBytes, Default)]
 struct RenderLocals {
-    cube: mesh::cube::Cube,
+    cube: Cube,
 }
 
 #[derive(Debug, Clone, Copy, AsBytes, FromBytes)]
@@ -72,18 +75,18 @@ struct ComputeUniforms {
     _padding0: f32,
     visible_box_limit: [f32; 3],
     _padding1: f32,
-    cube: mesh::cube::Cube,
+    cube: Cube,
 }
 
 type ActiveChunks = StableMap<Point3<i32>, ()>;
 
-struct ComputeShaderBuffers {
+struct GeometryBuffers {
     faces: InstancedBuffer,
     indirect: InstancedBuffer,
     globals: InstancedBuffer,
 }
 
-struct ChunkBatchRenderState {
+struct ChunkState {
     active_chunks: ActiveChunks,
     meta_tracker: ChunkMetaTracker,
 
@@ -93,8 +96,6 @@ struct ChunkBatchRenderState {
     block_type_buf: wgpu::Buffer,
     active_view_box: Option<Bounds<i32>>,
     max_visible_chunks: usize,
-
-    compute_shader_buffers: ComputeShaderBuffers,
 }
 
 #[repr(C)]
@@ -107,17 +108,13 @@ struct ChunkMeta {
     _padding1: i32,
 }
 
-pub fn visible_size_to_chunks(visible_size: Vector3<i32>) -> Vector3<i32> {
-    visible_size.div_up(&convert_vec!(index_utils::chunk_size(), i32)) + Vector3::new(1, 1, 1)
-}
-
 impl BlocksRenderState {
     pub fn set_view(&mut self, params: &ViewParams) {
-        self.chunk_batch.set_visible_size(params.visible_size);
+        self.chunk_state.set_visible_size(params.visible_size);
     }
 
     pub fn new(init: BlocksRenderInit, device: &wgpu::Device, queue: &wgpu::Queue) -> Self {
-        let cube = mesh::cube::Cube::new();
+        let cube = Cube::new();
 
         let compute_stage = {
             let uniforms =
@@ -326,7 +323,45 @@ impl BlocksRenderState {
             }
         };
 
-        let mut chunk_batch = ChunkBatchRenderState::new(
+        let geometry_buffers = {
+            let faces = InstancedBuffer::new(
+                device,
+                InstancedBufferDesc {
+                    label: "block faces",
+                    instance_len: 4 * 3 as usize * index_utils::chunk_size_total(),
+                    n_instances: init.max_visible_chunks,
+                    usage: wgpu::BufferUsage::STORAGE,
+                },
+            );
+
+            let indirect = InstancedBuffer::new(
+                device,
+                InstancedBufferDesc {
+                    label: "block indirect",
+                    instance_len: 4 * 4,
+                    n_instances: init.max_visible_chunks,
+                    usage: wgpu::BufferUsage::STORAGE | wgpu::BufferUsage::INDIRECT,
+                },
+            );
+
+            let globals = InstancedBuffer::new(
+                device,
+                InstancedBufferDesc {
+                    label: "compute globals",
+                    instance_len: 8,
+                    n_instances: 1,
+                    usage: wgpu::BufferUsage::STORAGE | wgpu::BufferUsage::COPY_DST,
+                },
+            );
+
+            GeometryBuffers {
+                faces,
+                indirect,
+                globals,
+            }
+        };
+
+        let mut chunk_state = ChunkState::new(
             device,
             init.max_visible_chunks,
             init.view_state.params.visible_size,
@@ -334,21 +369,22 @@ impl BlocksRenderState {
         let mut needs_compute_pass = false;
 
         if let Some(active_view_box) = init.view_state.params.calculate_view_box(init.world) {
-            if chunk_batch.update_view_box(active_view_box, init.world) {
+            if chunk_state.update_view_box(active_view_box, init.world) {
                 needs_compute_pass = true;
             }
         }
 
-        if chunk_batch.update_buffers(queue, init.world) {
+        if chunk_state.update_buffers(queue, init.world) {
             needs_compute_pass = true;
         }
 
         Self {
             multi_draw_enabled: init.multi_draw_enabled,
             needs_compute_pass,
-            chunk_batch,
+            chunk_state,
             compute_stage,
             render_stage,
+            geometry_buffers,
         }
     }
 
@@ -375,15 +411,15 @@ impl BlocksRenderState {
         if let Some(active_view_box) = view_state.params.calculate_view_box(world) {
             self.compute_stage.uniforms.update_view_box(active_view_box);
 
-            if self.chunk_batch.update_view_box(active_view_box, world) {
+            if self.chunk_state.update_view_box(active_view_box, world) {
                 self.needs_compute_pass = true;
             }
-        } else if self.chunk_batch.clear_view_box() {
+        } else if self.chunk_state.clear_view_box() {
             self.needs_compute_pass = true;
         }
 
-        self.chunk_batch.apply_chunk_diff(world, diff);
-        if self.chunk_batch.update_buffers(queue, world) {
+        self.chunk_state.apply_chunk_diff(world, diff);
+        if self.chunk_state.update_buffers(queue, world) {
             self.needs_compute_pass = true;
         }
 
@@ -395,7 +431,7 @@ impl BlocksRenderState {
         frame_render: &world::FrameRender,
         encoder: &mut wgpu::CommandEncoder,
     ) {
-        let bufs = &self.chunk_batch.compute_shader_buffers;
+        let bufs = &self.geometry_buffers;
 
         self.compute_stage.uniforms.sync(frame_render.queue);
         // reset compute shader globals to 0
@@ -408,8 +444,8 @@ impl BlocksRenderState {
                 layout: &self.compute_stage.bind_group_layout,
                 bindings: &[
                     self.compute_stage.uniforms.as_binding(0),
-                    self.chunk_batch.block_type_binding(1),
-                    self.chunk_batch.chunk_metadata_binding(2),
+                    self.chunk_state.block_type_binding(1),
+                    self.chunk_state.chunk_metadata_binding(2),
                     bufs.faces.as_binding(3),
                     bufs.indirect.as_binding(5),
                     bufs.globals.as_binding(6),
@@ -420,7 +456,7 @@ impl BlocksRenderState {
 
         cpass.set_pipeline(&self.compute_stage.pipeline);
         cpass.set_bind_group(0, &bind_group, &[]);
-        cpass.dispatch(self.chunk_batch.count_chunks() as u32, 1, 1);
+        cpass.dispatch(self.chunk_state.count_chunks() as u32, 1, 1);
     }
 
     fn render_pass(
@@ -441,9 +477,9 @@ impl BlocksRenderState {
                 bindings: &[
                     self.render_stage.uniforms.as_binding(0),
                     self.render_stage.locals.as_binding(1),
-                    self.chunk_batch.block_type_binding(2),
-                    self.chunk_batch.chunk_metadata_binding(3),
-                    self.chunk_batch.compute_shader_buffers.faces.as_binding(4),
+                    self.chunk_state.block_type_binding(2),
+                    self.chunk_state.chunk_metadata_binding(3),
+                    self.geometry_buffers.faces.as_binding(4),
                 ],
             });
 
@@ -468,17 +504,17 @@ impl BlocksRenderState {
         rpass.set_pipeline(&self.render_stage.pipeline);
         rpass.set_bind_group(0, &bind_group, &[]);
 
-        let bufs = &self.chunk_batch.compute_shader_buffers;
+        let bufs = &self.geometry_buffers;
         let indirect_buf = &bufs.indirect;
 
         if self.multi_draw_enabled {
             rpass.multi_draw_indirect(
                 &indirect_buf.buffer(),
                 0,
-                self.chunk_batch.active_chunks.capacity() as u32,
+                self.chunk_state.active_chunks.capacity() as u32,
             );
         } else {
-            for (_, chunk_index, _) in self.chunk_batch.active_chunks.iter() {
+            for (_, chunk_index, _) in self.chunk_state.active_chunks.iter() {
                 rpass.draw_indirect(
                     &indirect_buf.buffer(),
                     indirect_buf.instance_offset(chunk_index),
@@ -488,7 +524,7 @@ impl BlocksRenderState {
     }
 }
 
-impl ChunkBatchRenderState {
+impl ChunkState {
     fn count_chunks(&self) -> usize {
         self.active_chunks.capacity()
     }
@@ -521,45 +557,7 @@ impl ChunkBatchRenderState {
             usage: wgpu::BufferUsage::STORAGE | wgpu::BufferUsage::COPY_DST,
         });
 
-        let compute_shader_buffers = {
-            let faces = InstancedBuffer::new(
-                device,
-                InstancedBufferDesc {
-                    label: "block faces",
-                    instance_len: 4 * 3 as usize * index_utils::chunk_size_total(),
-                    n_instances: max_visible_chunks,
-                    usage: wgpu::BufferUsage::STORAGE,
-                },
-            );
-
-            let indirect = InstancedBuffer::new(
-                device,
-                InstancedBufferDesc {
-                    label: "block indirect",
-                    instance_len: 4 * 4,
-                    n_instances: max_visible_chunks,
-                    usage: wgpu::BufferUsage::STORAGE | wgpu::BufferUsage::INDIRECT,
-                },
-            );
-
-            let globals = InstancedBuffer::new(
-                device,
-                InstancedBufferDesc {
-                    label: "compute globals",
-                    instance_len: 8,
-                    n_instances: 1,
-                    usage: wgpu::BufferUsage::STORAGE | wgpu::BufferUsage::COPY_DST,
-                },
-            );
-
-            ComputeShaderBuffers {
-                faces,
-                indirect,
-                globals,
-            }
-        };
-
-        ChunkBatchRenderState {
+        ChunkState {
             meta_tracker: ChunkMetaTracker::with_capacity(active_chunks.capacity()),
             active_chunks,
             block_type_buf: block_type_helper.make_buffer(device),
@@ -567,7 +565,6 @@ impl ChunkBatchRenderState {
             chunk_metadata_buf: chunk_metadata_helper.make_buffer(device),
             chunk_metadata_helper,
             active_view_box: None,
-            compute_shader_buffers,
             max_visible_chunks,
         }
     }
@@ -627,11 +624,8 @@ impl ChunkBatchRenderState {
             return false; // nothing changed at all
         }
 
-        let new_chunk_box =
-            active_view_box.quantize_down(convert_vec!(index_utils::chunk_size(), i32));
-
-        let old_chunk_box =
-            old_view_box.quantize_down(convert_vec!(index_utils::chunk_size(), i32));
+        let new_chunk_box = view_box_to_chunks(active_view_box);
+        let old_chunk_box = view_box_to_chunks(old_view_box);
 
         if new_chunk_box == old_chunk_box {
             return true; // set of active chunks didn't change but visible blocks at edges did
@@ -670,9 +664,7 @@ impl ChunkBatchRenderState {
 
     pub fn apply_chunk_diff(&mut self, world: &World, diff: &UpdatedWorldState) {
         let active_chunk_box = match self.active_view_box {
-            Some(active_view_box) => {
-                active_view_box.quantize_down(convert_vec!(index_utils::chunk_size(), i32))
-            }
+            Some(active_view_box) => view_box_to_chunks(active_view_box),
             None => return,
         };
 
@@ -964,7 +956,7 @@ impl IntoBufferSynced for RenderLocals {
 }
 
 impl ComputeUniforms {
-    fn new(view_box: Option<Bounds<i32>>, cube: mesh::cube::Cube) -> Self {
+    fn new(view_box: Option<Bounds<i32>>, cube: Cube) -> Self {
         let view_box = match view_box {
             Some(x) => x,
             None => Bounds::new(Point3::new(0, 0, 0), Vector3::new(0, 0, 0)),
@@ -1002,4 +994,12 @@ impl IntoBufferSynced for ComputeUniforms {
             usage: wgpu::BufferUsage::STORAGE | wgpu::BufferUsage::COPY_DST,
         }
     }
+}
+
+pub fn visible_size_to_chunks(visible_size: Vector3<i32>) -> Vector3<i32> {
+    visible_size.div_up(&convert_vec!(index_utils::chunk_size(), i32)) + Vector3::new(1, 1, 1)
+}
+
+pub fn view_box_to_chunks(view_box: Bounds<i32>) -> Bounds<i32> {
+    view_box.quantize_down(convert_vec!(index_utils::chunk_size(), i32))
 }

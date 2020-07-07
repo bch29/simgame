@@ -164,7 +164,7 @@ impl ShaderOpts {
 fn load_shaders(
     ctx: &FileContext,
     shader_opts: &ShaderOpts,
-) -> Result<simgame_render::OwnedWorldShaders> {
+) -> Result<simgame_render::WorldShaderData> {
     use simgame_shaders::{CompileParams, Compiler, ShaderKind};
 
     let mut shader_compiler = Compiler::new(CompileParams {
@@ -184,7 +184,7 @@ fn load_shaders(
         LoadShaderAction::CachedOnly => simgame_core::files::ShaderLoadAction::CachedOnly,
     };
 
-    Ok(simgame_render::WorldShaders {
+    Ok(simgame_render::WorldShaderData {
         vert: ctx.load_shader("vert_partial", ShaderKind::Vertex, &mut action)?,
         frag: ctx.load_shader("frag", ShaderKind::Fragment, &mut action)?,
         comp: ctx.load_shader("comp_block_vertices", ShaderKind::Compute, &mut action)?,
