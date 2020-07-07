@@ -2,13 +2,25 @@ use anyhow::Result;
 use cgmath::Vector3;
 use log::info;
 use rand::Rng;
+use serde::{Deserialize, Serialize};
 
 use crate::block::{Block, WorldBlockData};
 use crate::util::Bounds;
 
-#[derive(Debug)]
+pub(crate) mod primitives;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GenerateWorldConfig {
     pub size: Vector3<usize>,
+    pub trees: Vec<TreeConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TreeConfig {
+    trunk_block: Block,
+    foliage_block: Block,
+    trunk_radius: f64,
+    branch_radius_factor: f64,
 }
 
 pub fn generate_world(config: &GenerateWorldConfig) -> Result<WorldBlockData> {

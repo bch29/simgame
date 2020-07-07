@@ -71,6 +71,8 @@ impl<T> Octree<T> {
     /// Inserts data at the given point in the octree. Returns a mutable reference to the data at
     /// its new location inside the tree.
     pub fn insert(&mut self, pos: Point3<usize>, data: T) -> &mut T {
+        assert!(self.bounds().contains_point(pos));
+
         let node = match self.node {
             None => {
                 if self.height == 0 {
@@ -105,6 +107,10 @@ impl<T> Octree<T> {
     /// Removes and returns object inside the octree at the given point. If there is nothing there,
     /// returns None.
     pub fn remove(&mut self, pos: Point3<usize>) -> Option<T> {
+        if !self.bounds().contains_point(pos) {
+            return None
+        }
+
         let node = std::mem::replace(&mut self.node, None);
         match node {
             None => None,
@@ -131,6 +137,10 @@ impl<T> Octree<T> {
     }
 
     pub fn get(&self, pos: Point3<usize>) -> Option<&T> {
+        if !self.bounds().contains_point(pos) {
+            return None
+        }
+
         match &self.node {
             None => None,
             Some(boxed_node) => match &**boxed_node {
@@ -144,6 +154,10 @@ impl<T> Octree<T> {
     }
 
     pub fn get_mut(&mut self, pos: Point3<usize>) -> Option<&mut T> {
+        if !self.bounds().contains_point(pos) {
+            return None
+        }
+
         match &mut self.node {
             None => None,
             Some(boxed_node) => match &mut **boxed_node {
@@ -160,6 +174,8 @@ impl<T> Octree<T> {
     where
         F: FnOnce() -> T,
     {
+        assert!(self.bounds().contains_point(pos));
+
         match self.node {
             None => self.insert(pos, make_data()),
             Some(ref mut boxed_node) => match &mut **boxed_node {

@@ -8,3 +8,14 @@ block_config:
     - name: Rock
       category: rock
       char_repr: "*"
+    - name: Leaf
+      category: foliage
+      char_repr: "%"
+      speed_modifier: 0.5
+    - name: Wood
+      category: wood
+      char_repr: "@"
+    - name: Dirt
+      category: dirt
+      char_repr: "#"
+      speed_modifier: 0.8

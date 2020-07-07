@@ -114,6 +114,7 @@ async fn run_render_world(ctx: &FileContext, options: &RenderWorldOpts) -> Resul
 fn run_generate(ctx: &FileContext, options: &GenerateWorldOpts) -> Result<()> {
     let config = worldgen::GenerateWorldConfig {
         size: cgmath::Vector3::new(options.size_x, options.size_y, options.size_z),
+        trees: vec![]
     };
 
     let blocks = worldgen::generate_world(&config)?;

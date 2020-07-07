@@ -71,6 +71,41 @@ impl<T: BaseNum> Bounds<T> {
         Bounds::new(origin, limit - origin)
     }
 
+    /// Returns the smallest bounds object containing all of the given points. If the input is
+    /// empty, returns None.
+    #[inline]
+    pub fn from_points<I: IntoIterator<Item = Point3<T>>>(points: I) -> Option<Self> {
+        let mut iter = points.into_iter();
+
+        let first_point = iter.next()?;
+
+        let mut origin = first_point;
+        let mut limit = first_point;
+
+        for point in iter {
+            if point.x < origin.x {
+                origin.x = point.x
+            }
+            if point.y < origin.y {
+                origin.y = point.y
+            }
+            if point.z < origin.z {
+                origin.z = point.z
+            }
+            if point.x > limit.x {
+                limit.x = point.x
+            }
+            if point.y > limit.y {
+                limit.y = point.y
+            }
+            if point.z > limit.z {
+                limit.z = point.z
+            }
+        }
+
+        Some(Self::from_limit(origin, limit))
+    }
+
     #[inline]
     pub fn limit(self) -> Point3<T> {
         self.origin + self.size
@@ -261,6 +296,17 @@ impl<T: BaseNum> Bounds<T> {
             (origin.y..limit.y)
                 .flat_map(move |y| (origin.x..limit.x).map(move |x| Point3 { x, y, z }))
         })
+    }
+
+    // TODO: this is not implemented properly yet. It should iterate in an order that facilitates
+    // chunk locality better.
+    #[inline]
+    pub fn iter_points_aligned(self, _align_to: Vector3<T>) -> impl Iterator<Item = Point3<T>>
+    where
+        std::ops::Range<T>: Iterator<Item = T>,
+        T: Copy + 'static,
+    {
+        self.iter_points()
     }
 
     #[inline]
@@ -564,25 +610,30 @@ mod tests {
         let size = Vector3::new(2, 2, 2);
         check_diff(
             Bounds::new(Point3::new(0, 1, 0), size),
-            Bounds::new(Point3::new(0, 0, 0), size));
+            Bounds::new(Point3::new(0, 0, 0), size),
+        );
 
         let size = Vector3::new(2, 2, 2);
         check_diff(
             Bounds::new(Point3::new(1, 1, 0), size),
-            Bounds::new(Point3::new(0, 0, 0), size));
+            Bounds::new(Point3::new(0, 0, 0), size),
+        );
 
         let size = Vector3::new(128, 128, 3);
         check_diff(
             Bounds::new(Point3::new(124, 365, 7), size),
-            Bounds::new(Point3::new(70, 340, 6), size));
+            Bounds::new(Point3::new(70, 340, 6), size),
+        );
 
         let size = Vector3::new(128, 128, 10);
         check_diff(
             Bounds::new(Point3::new(124, 340, 11), size),
-            Bounds::new(Point3::new(70, 365, 6), size));
+            Bounds::new(Point3::new(70, 365, 6), size),
+        );
 
         check_diff(
             Bounds::new(Point3::new(0, 0, 0), Vector3::new(8, 8, 5)),
-            Bounds::new(Point3::new(0, 0, 0), Vector3::new(8, 8, 4)));
+            Bounds::new(Point3::new(0, 0, 0), Vector3::new(8, 8, 4)),
+        );
     }
 }

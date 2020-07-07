@@ -12,7 +12,7 @@ pub mod index_utils;
 
 /// Represents the value of a single block in the world. The wrapped value is an index into the
 /// BlockConfig's list of BlockInfo.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[repr(transparent)]
 pub struct Block(u16);
 
@@ -159,6 +159,10 @@ impl WorldBlockData {
 
     pub fn chunks(&self) -> &Octree<Chunk> {
         &self.chunks
+    }
+
+    pub fn chunks_mut(&mut self) -> &mut Octree<Chunk> {
+        &mut self.chunks
     }
 
     #[inline]
