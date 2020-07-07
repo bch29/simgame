@@ -14,10 +14,10 @@ use crate::buffer_util::{
     BufferSyncHelper, BufferSyncHelperDesc, BufferSyncable, BufferSyncedData, FillBuffer,
     InstancedBuffer, InstancedBufferDesc, IntoBufferSynced,
 };
-use crate::LoadedWorldShaders;
 use crate::mesh::cube::Cube;
 use crate::stable_map::StableMap;
 use crate::world::{self, ViewParams};
+use crate::LoadedWorldShaders;
 
 pub struct BlocksRenderInit<'a> {
     pub shaders: &'a LoadedWorldShaders,
@@ -101,8 +101,8 @@ struct ChunkState {
 #[repr(C)]
 #[derive(Debug, Clone, Copy, AsBytes, FromBytes, Default, PartialEq)]
 struct ChunkMeta {
-    offset: [f32; 3],
-    _padding0: [f32; 1],
+    offset: [i32; 3],
+    _padding0: [i32; 1],
     neighbor_indices: [i32; 6],
     active: u32,
     _padding1: i32,
@@ -819,8 +819,7 @@ impl ChunkMetaTracker {
     fn modify(&mut self, point: Point3<i32>, index: usize, active_chunks: &ActiveChunks) {
         let old_meta = self.chunk_metas.get(index);
         if old_meta.active == 1 {
-            let old_point: Point3<f32> = old_meta.offset.into();
-            let old_point = convert_point!(old_point, i32);
+            let old_point: Point3<i32> = old_meta.offset.into();
 
             if old_point == point {
                 // an updated chunk whose location has not changed does no trigger any metadata
@@ -891,14 +890,14 @@ impl ChunkMetaTracker {
             result
         }
 
-        let offset = convert_point!(p, f32)
-            .mul_element_wise(Point3::origin() + convert_vec!(index_utils::chunk_size(), f32));
+        let offset =
+            p.mul_element_wise(Point3::origin() + convert_vec!(index_utils::chunk_size(), i32));
 
         let neighbor_indices = make_neighbor_indices(&active_chunks, p);
 
         ChunkMeta {
             offset: offset.into(),
-            _padding0: [0f32],
+            _padding0: [0],
             neighbor_indices,
             active: 1,
             _padding1: 0,

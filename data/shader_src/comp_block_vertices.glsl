@@ -15,7 +15,7 @@ const float half_scale = scale / 2.;
 layout(local_size_x = CHUNK_SIZE_X, local_size_y = CHUNK_SIZE_Y, local_size_z = CHUNK_SIZE_Z) in;
 
 struct ChunkMetadata {
-  vec4 offset;
+  ivec4 offset;
   /*
    * Each element of neighborIndices describes the index of the neighbor chunk in one of the 6
    * axis-aligned directions. The value will be -1 if there is no neighbor chunk in that
@@ -182,7 +182,7 @@ int getBlockType(ivec4 blockAddr)
 
 bool isBlockVisible(ivec4 blockAddr, int blockType)
 {
-  vec3 blockPos = vec3(blockAddr.xyz) + b_ChunkMetadata[blockAddr.w].offset.xyz;
+  ivec3 blockPos = blockAddr.xyz + b_ChunkMetadata[blockAddr.w].offset.xyz;
 
   bool inVisibleBox = 
     blockPos.x >= u_VisibleBoxOrigin.x && blockPos.x <= u_VisibleBoxLimit.x

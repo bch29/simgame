@@ -32,7 +32,7 @@ struct CubeFace {
 };
 
 struct ChunkMetadata {
-  vec4 offset;
+  ivec4 offset;
   int[6] neighborIndices;
   bool isActive;
   int padding;
@@ -158,7 +158,7 @@ bool decodeAttributes(out Attributes attrs) {
 
   ChunkMetadata chunkMeta = b_ChunkMetadata[chunkIndex];
   attrs.blockAddr = blockAddr;
-  attrs.chunkOffset = chunkMeta.offset.xyz;
+  attrs.chunkOffset = vec3(chunkMeta.offset.xyz);
   attrs.blockType = blockTypeAtIndex(blockIndex);
 
   return true;
