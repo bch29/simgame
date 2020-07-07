@@ -1,7 +1,7 @@
 use anyhow::{anyhow, Result};
 use log::{error, info};
 use std::env;
-use std::path::PathBuf;
+use std::path::{PathBuf, Path};
 use structopt::StructOpt;
 
 use simgame_core::files::FileContext;
@@ -164,14 +164,14 @@ impl ShaderOpts {
 fn load_shaders(
     ctx: &FileContext,
     shader_opts: &ShaderOpts,
-) -> Result<simgame_render::WorldShaders<Vec<u32>>> {
+) -> Result<simgame_render::OwnedWorldShaders> {
     use simgame_shaders::{CompileParams, Compiler, ShaderKind};
 
     let mut shader_compiler = Compiler::new(CompileParams {
         chunk_size: simgame_core::block::index_utils::chunk_size().into(),
     })?;
 
-    let mut compile: Box<dyn for<'p> FnMut(&'p std::path::Path, ShaderKind) -> Result<Vec<u32>>> =
+    let mut compile: Box<dyn for<'p> FnMut(&'p Path, ShaderKind) -> Result<Vec<u32>>> =
         Box::new(|p, t| shader_compiler.compile(p, t));
 
     let mut action = match shader_opts.load_action() {

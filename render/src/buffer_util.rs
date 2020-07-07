@@ -409,7 +409,7 @@ impl OpaqueBuffer {
         self.helper.as_binding(index, &self.buffer, 0)
     }
 
-    pub fn len(&self) -> wgpu::BufferAddress {
+    pub fn size(&self) -> wgpu::BufferAddress {
         self.helper.desc().buffer_len as _
     }
 }
@@ -467,7 +467,7 @@ impl InstancedBuffer {
     }
 
     #[inline]
-    pub fn len(&self) -> wgpu::BufferAddress {
+    pub fn size(&self) -> wgpu::BufferAddress {
         self.helper.desc().buffer_len as _
     }
 
@@ -477,7 +477,7 @@ impl InstancedBuffer {
             queue,
             &self.buffer,
             0,
-            std::iter::repeat(&[0u8, 0, 0, 0]).take(self.len() as usize / 4),
+            std::iter::repeat(&[0u8, 0, 0, 0]).take(self.size() as usize / 4),
         );
     }
 }

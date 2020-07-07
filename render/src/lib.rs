@@ -15,6 +15,8 @@ pub use world::WorldRenderInit;
 
 // TODO: UI rendering pipeline
 
+pub type OwnedWorldShaders = WorldShaders<Vec<u32>>;
+
 #[derive(Debug)]
 pub struct RenderInit<'a, W> {
     pub window: &'a W,

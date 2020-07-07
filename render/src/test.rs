@@ -87,7 +87,7 @@ fn restrict_visible_size(max_chunks: usize, mut visible_size: Vector3<i32>) -> V
         visible_size.z = max_z_blocks;
     }
 
-    return visible_size;
+    visible_size
 }
 
 pub async fn test_render<'a>(
@@ -516,7 +516,7 @@ impl TimeTracker {
             return true;
         }
 
-        return false;
+        false
     }
 
     pub fn mean_fps(&self) -> f64 {

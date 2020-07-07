@@ -54,7 +54,7 @@ impl FileContext {
         let mut save_root = user_data_root.clone();
         save_root.push(SAVE_DIR_NAME);
 
-        let mut settings_root = user_data_root.clone();
+        let mut settings_root = user_data_root;
         settings_root.push(SETTINGS_DIR_NAME);
 
         let mut shader_spirv_root = data_root.clone();
@@ -126,8 +126,7 @@ impl FileContext {
             let mut bytes = Vec::new();
             file.read_to_end(&mut bytes)?;
 
-            let mut words = Vec::with_capacity(bytes.len() / 4);
-            words.extend(std::iter::repeat(0).take(bytes.len() / 4));
+            let mut words = vec![0; bytes.len() / 4];
             bytes
                 .as_slice()
                 .read_u32_into::<byteorder::LittleEndian>(&mut words)?;
@@ -231,7 +230,7 @@ impl FileContext {
 
         {
             let file_path = {
-                let mut path = save_dir.clone();
+                let mut path = save_dir;
                 path.push(&self.core_settings.block_data_file_name);
                 path
             };
@@ -284,7 +283,7 @@ impl FileContext {
         }
 
         let data_path = {
-            let mut path = save_dir.clone();
+            let mut path = save_dir;
             path.push(&self.core_settings.block_data_file_name);
             path
         };
