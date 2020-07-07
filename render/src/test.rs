@@ -8,7 +8,7 @@ use winit::{
     event_loop::{ControlFlow, EventLoop},
 };
 
-use simgame_core::convert_point;
+use simgame_core::{convert_point, convert_vec};
 pub use simgame_core::settings::RenderTestParams;
 use simgame_core::world::{UpdatedWorldState, World};
 
@@ -33,6 +33,7 @@ struct TimeTracker {
 }
 
 struct ControlState {
+    look_at_dir: Vector3<f64>,
     camera_dir: Vector3<i32>,
 
     camera_pan: AccelControlState,
@@ -231,6 +232,7 @@ impl ControlState {
         };
 
         ControlState {
+            look_at_dir: convert_vec!(params.look_at_dir, f64),
             max_visible_chunks: params.max_visible_chunks,
             camera_dir: Vector3::zero(),
             camera_pan: AccelControlState::new(
@@ -318,15 +320,20 @@ impl ControlState {
         normalize_camera_axis(&mut self.camera_dir.z);
 
         self.camera_pan
-            .set_direction(Some(Self::pan_direction(self.camera_dir)));
+            .set_direction(Some(Self::pan_direction(self.look_at_dir, self.camera_dir)));
 
         let height_dir = Vector3::new(0.0, 0.0, self.camera_dir.z as f64);
         self.camera_height.set_direction(Some(height_dir));
     }
 
-    fn pan_direction(direction: Vector3<i32>) -> Vector3<f64> {
-        let forward_step = Vector3::new(1., 1., 0.).normalize();
-        let right_step = Vector3::new(1., -1., 0.).normalize();
+    fn pan_direction(look_at_dir: Vector3<f64>, direction: Vector3<i32>) -> Vector3<f64> {
+        let mut forward_step = look_at_dir;
+        forward_step.z = 0.0;
+        forward_step = forward_step.normalize();
+
+        let right_step = Vector3::new(0., 0., -1.).cross(look_at_dir);
+        forward_step.z = 0.0;
+        forward_step = forward_step.normalize();
 
         let mut dir = Vector3::zero();
         dir += forward_step * direction.y as f64;
