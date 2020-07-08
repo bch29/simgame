@@ -101,13 +101,13 @@ async fn run_render_world(ctx: &FileContext, options: &RenderWorldOpts) -> Resul
 
     let world = World::from_blocks(blocks);
 
-    let ref_shaders: simgame_render::WorldShaders<&[u32]> = shaders.map(|x| &x[..]);
+    let ref_shaders: simgame::WorldShaders<&[u32]> = shaders.map(|x| &x[..]);
 
-    let params = simgame_render::RenderParams {
+    let params = simgame::RenderParams {
         trace_path: options.graphics_trace_path.as_ref().map(|p| p.as_path()),
     };
 
-    simgame_render::test::test_render(world, settings.render_test_params, params, ref_shaders)
+    simgame::test_render(world, settings.render_test_params, params, ref_shaders)
         .await
 }
 
@@ -165,7 +165,7 @@ impl ShaderOpts {
 fn load_shaders(
     ctx: &FileContext,
     shader_opts: &ShaderOpts,
-) -> Result<simgame_render::WorldShaderData> {
+) -> Result<simgame::WorldShaderData> {
     use simgame_shaders::{CompileParams, Compiler, ShaderKind};
 
     let mut shader_compiler = Compiler::new(CompileParams {
@@ -185,7 +185,7 @@ fn load_shaders(
         LoadShaderAction::CachedOnly => simgame_core::files::ShaderLoadAction::CachedOnly,
     };
 
-    Ok(simgame_render::WorldShaderData {
+    Ok(simgame::WorldShaderData {
         vert: ctx.load_shader("vert_partial", ShaderKind::Vertex, &mut action)?,
         frag: ctx.load_shader("frag", ShaderKind::Fragment, &mut action)?,
         comp: ctx.load_shader("comp_block_vertices", ShaderKind::Compute, &mut action)?,

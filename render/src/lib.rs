@@ -6,8 +6,7 @@ use simgame_core::world::{UpdatedWorldState, World};
 pub mod buffer_util;
 pub mod mesh;
 mod stable_map;
-pub mod test;
-mod world;
+pub mod world;
 
 pub use world::Shaders as WorldShaders;
 pub use world::WorldRenderInit;

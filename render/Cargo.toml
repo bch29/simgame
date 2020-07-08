@@ -10,8 +10,6 @@ cgmath = "*"
 directories = "*"
 anyhow = "*"
 log = "*"
-# graphics
-winit = "*"
 raw-window-handle = "*"
 zerocopy = "*"
 rand = "*"

@@ -1615,6 +1615,7 @@ dependencies = [
  "simgame_shaders",
  "smol",
  "structopt",
+ "winit",
 ]
 
 [[package]]
@@ -1645,7 +1646,6 @@ dependencies = [
  "raw-window-handle",
  "simgame_core",
  "wgpu",
- "winit",
  "zerocopy",
 ]
 
