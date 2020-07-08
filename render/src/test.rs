@@ -2,7 +2,7 @@ use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use cgmath::{InnerSpace, Point3, Vector3, Zero};
+use cgmath::{EuclideanSpace, InnerSpace, Point2, Point3, Vector2, Vector3, VectorSpace, Zero};
 use winit::{
     event,
     event_loop::{ControlFlow, EventLoop},
@@ -68,11 +68,14 @@ struct AccelControlState {
     current_value: Point3<f64>,
 }
 
-fn build_window(event_loop: &EventLoop<()>) -> Result<winit::window::Window> {
+fn build_window(
+    event_loop: &EventLoop<()>,
+    dimensions: Vector2<f64>,
+) -> Result<winit::window::Window> {
     let builder = winit::window::WindowBuilder::new()
         .with_inner_size(winit::dpi::LogicalSize {
-            width: 1920.0,
-            height: 1080.0,
+            width: dimensions.x,
+            height: dimensions.y,
         })
         .with_decorations(true);
     Ok(builder.build(event_loop)?)
@@ -98,7 +101,9 @@ pub async fn test_render<'a>(
 ) -> Result<()> {
     let event_loop = EventLoop::new();
 
-    let window = build_window(&event_loop)?;
+    let win_dimensions = Vector2::new(1920., 1080.);
+
+    let window = build_window(&event_loop, win_dimensions)?;
 
     let physical_win_size = window.inner_size();
     let win_size: (u32, u32) = physical_win_size.into();
@@ -160,6 +165,12 @@ pub async fn test_render<'a>(
 
     let mut world_diff = UpdatedWorldState::empty();
 
+    window.set_cursor_grab(true)?;
+
+    let cursor_reset_position = Point2::origin() + win_dimensions / 2.;
+
+    reset_cursor(&window, cursor_reset_position)?;
+
     event_loop.run(move |event, _, control_flow| {
         *control_flow = if cfg!(feature = "metal-auto-capture") {
             ControlFlow::Exit
@@ -186,6 +197,13 @@ pub async fn test_render<'a>(
                         },
                         _ => {}
                     }
+                }
+                WindowEvent::CursorMoved { position, .. } => {
+                    let pos_logical = position.to_logical(window.scale_factor());
+                    let pos: Point2<f64> = Point2::new(pos_logical.x, pos_logical.y);
+                    let offset = (pos - cursor_reset_position) / win_dimensions.x;
+                    control_state.move_cursor(offset);
+                    let _ = reset_cursor(&window, cursor_reset_position);
                 }
                 WindowEvent::Focused(false) => control_state.clear_key_states(),
                 _ => {}
@@ -232,7 +250,7 @@ impl ControlState {
         };
 
         ControlState {
-            look_at_dir: convert_vec!(params.look_at_dir, f64),
+            look_at_dir: convert_vec!(params.look_at_dir, f64).normalize(),
             max_visible_chunks: params.max_visible_chunks,
             camera_dir: Vector3::zero(),
             camera_pan: AccelControlState::new(
@@ -331,9 +349,9 @@ impl ControlState {
         forward_step.z = 0.0;
         forward_step = forward_step.normalize();
 
-        let right_step = Vector3::new(0., 0., -1.).cross(look_at_dir);
-        forward_step.z = 0.0;
-        forward_step = forward_step.normalize();
+        let mut right_step = Vector3::new(0., 0., -1.).cross(look_at_dir);
+        right_step.z = 0.0;
+        right_step = right_step.normalize();
 
         let mut dir = Vector3::zero();
         dir += forward_step * direction.y as f64;
@@ -353,11 +371,42 @@ impl ControlState {
         }
     }
 
+    pub fn move_cursor(&mut self, offset: Vector2<f64>) {
+        if offset.x == 0. && offset.y == 0. {
+            return;
+        }
+
+        let up = Vector3::new(0., 0., 1.);
+        let mut right = self.look_at_dir.cross(up);
+        right.z = 0.;
+        right = right.normalize();
+
+        let axis = offset.x * up + offset.y * right;
+        if axis.magnitude2() < 1e-15 {
+            return;
+        }
+
+        let rotated = self.look_at_dir.cross(axis.normalize());
+
+        let result = self.look_at_dir.lerp(rotated, 0.01);
+        if result.x.is_finite()
+            && result.y.is_finite()
+            && result.z.is_finite()
+            && !result.x.is_nan()
+            && !result.y.is_nan()
+            && !result.z.is_nan()
+        {
+            self.look_at_dir = result.normalize();
+        }
+    }
+
     pub fn tick(&mut self, elapsed: f64, view_state: &mut world::ViewParams) {
         self.camera_pan.tick(elapsed);
         self.camera_height.tick(elapsed);
         self.z_level.tick(elapsed);
         self.visible_height.tick(elapsed);
+
+        view_state.look_at_dir = convert_vec!(self.look_at_dir, f32);
 
         view_state.camera_pos.x = self.camera_pan.value().x as f32;
         view_state.camera_pos.y = self.camera_pan.value().y as f32;
@@ -534,4 +583,14 @@ impl TimeTracker {
         let elapsed_max: f64 = self.samples.iter().max().unwrap().as_secs_f64();
         1. / elapsed_max
     }
+}
+
+fn reset_cursor(
+    window: &winit::window::Window,
+    pos: Point2<f64>,
+) -> Result<(), winit::error::ExternalError> {
+    window.set_cursor_position(winit::dpi::Position::Logical(winit::dpi::LogicalPosition {
+        x: pos.x,
+        y: pos.y,
+    }))
 }

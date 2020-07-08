@@ -126,8 +126,8 @@ impl World {
         //     .collect();
         let shapes: Vec<Box<dyn Primitive>> = vec![
             Box::new(primitives::FilledLine {
-                start: Point3::new(32., 32., 32.),
-                end: Point3::new(256., 256., 64.),
+                start: Point3::new(32., 32., 128.),
+                end: Point3::new(256., 256., 384.),
                 radius: 30.,
                 round_start: false,
                 round_end: true
