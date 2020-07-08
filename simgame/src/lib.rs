@@ -1,7 +1,7 @@
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use cgmath::{EuclideanSpace, Point2, Vector2};
 use winit::{
     event::{self, Event},
@@ -9,7 +9,7 @@ use winit::{
     window::{Window, WindowBuilder},
 };
 
-use simgame_core::settings::RenderTestParams;
+use simgame_core::settings::{self, RenderTestParams};
 use simgame_core::world::{UpdatedWorldState, World};
 
 use simgame_render::world;
@@ -18,28 +18,63 @@ pub use simgame_render::{RenderParams, WorldShaderData, WorldShaders};
 
 mod controls;
 
-struct TimingParams {
-    window_len: usize,
-    tick_size: Duration,
-    render_interval: Option<Duration>,
+pub async fn test_render<'a>(
+    world: World,
+    test_params: RenderTestParams,
+    render_params: RenderParams<'a>,
+    shaders: WorldShaders<&'a [u32]>,
+) -> Result<()> {
+    let event_loop = EventLoop::new();
+    let game = TestRender::new(&event_loop, world, test_params, render_params, shaders).await?;
+    Ok(game.run(event_loop))
 }
 
-struct TimeTracker {
-    params: TimingParams,
-    samples: VecDeque<Duration>,
-    start_time: Instant,
-    prev_sample_time: Instant,
-    total_ticks: i64,
-    prev_render_time: Instant,
-}
+fn build_window(event_loop: &EventLoop<()>, settings: &settings::VideoSettings) -> Result<Window> {
+    let builder = WindowBuilder::new();
 
-fn build_window(event_loop: &EventLoop<()>, dimensions: Vector2<f64>) -> Result<Window> {
-    let builder = WindowBuilder::new()
-        .with_inner_size(winit::dpi::LogicalSize {
-            width: dimensions.x,
-            height: dimensions.y,
-        })
-        .with_decorations(true);
+    let builder = match settings.video_mode {
+        settings::VideoMode::Windowed => builder
+            .with_inner_size(winit::dpi::LogicalSize {
+                width: settings.win_dimensions.x,
+                height: settings.win_dimensions.y,
+            })
+            .with_fullscreen(None)
+            .with_decorations(true),
+        settings::VideoMode::Borderless => {
+            let monitor = event_loop.primary_monitor();
+            builder
+                .with_inner_size(winit::dpi::LogicalSize {
+                    width: settings.win_dimensions.x,
+                    height: settings.win_dimensions.y,
+                })
+                .with_fullscreen(Some(winit::window::Fullscreen::Borderless(monitor)))
+                .with_decorations(false)
+        }
+        settings::VideoMode::Fullscreen => {
+            let monitor = event_loop.primary_monitor();
+            let mut video_modes = monitor
+                .video_modes()
+                .filter(|video_mode| {
+                    let mode_dimensions = video_mode.size().to_logical::<f64>(monitor.scale_factor());
+                    mode_dimensions.width == settings.win_dimensions.x
+                        && mode_dimensions.height == settings.win_dimensions.y
+                })
+                .collect::<Vec<_>>();
+            video_modes.sort_by_key(|mode| mode.refresh_rate());
+
+            let video_mode = video_modes.pop().ok_or(anyhow!(
+                "No fullscreen video mode matches requested dimensions"
+            ))?;
+
+            builder
+                .with_inner_size(winit::dpi::LogicalSize {
+                    width: settings.win_dimensions.x,
+                    height: settings.win_dimensions.y,
+                })
+                .with_fullscreen(Some(winit::window::Fullscreen::Exclusive(video_mode)))
+        }
+    };
+
     Ok(builder.build(event_loop)?)
 }
 
@@ -56,6 +91,21 @@ pub struct TestRender {
     has_cursor_control: bool,
 }
 
+struct TimingParams {
+    window_len: usize,
+    tick_size: Duration,
+    render_interval: Option<Duration>,
+}
+
+struct TimeTracker {
+    params: TimingParams,
+    samples: VecDeque<Duration>,
+    start_time: Instant,
+    prev_sample_time: Instant,
+    total_ticks: i64,
+    prev_render_time: Instant,
+}
+
 impl TestRender {
     pub async fn new<'a>(
         event_loop: &EventLoop<()>,
@@ -64,12 +114,12 @@ impl TestRender {
         render_params: RenderParams<'a>,
         shaders: WorldShaders<&'a [u32]>,
     ) -> Result<Self> {
-        let win_dimensions = Vector2::new(1920., 1080.);
-
-        let window = build_window(&event_loop, win_dimensions)?;
+        let window = build_window(&event_loop, &test_params.video_settings)?;
 
         let physical_win_size = window.inner_size();
         let win_size: (u32, u32) = physical_win_size.into();
+        let logical_win_size = physical_win_size.to_logical::<f64>(window.scale_factor());
+        let win_dimensions = Vector2::new(logical_win_size.width, logical_win_size.height);
 
         let visible_size = controls::restrict_visible_size(
             test_params.max_visible_chunks,
@@ -271,17 +321,6 @@ impl TestRender {
         self.control_state.tick(elapsed, &mut self.view_state);
         Ok(())
     }
-}
-
-pub async fn test_render<'a>(
-    world: World,
-    test_params: RenderTestParams,
-    render_params: RenderParams<'a>,
-    shaders: WorldShaders<&'a [u32]>,
-) -> Result<()> {
-    let event_loop = EventLoop::new();
-    let game = TestRender::new(&event_loop, world, test_params, render_params, shaders).await?;
-    Ok(game.run(event_loop))
 }
 
 impl TimeTracker {
