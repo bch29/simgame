@@ -177,7 +177,15 @@ impl ControlState {
             && !result.y.is_nan()
             && !result.z.is_nan()
         {
-            self.look_at_dir = result.normalize();
+            let mut result = result.normalize();
+            if result.z < -0.9 {
+                result.z = -0.9;
+                result = result.normalize();
+            } else if result.z > 0.9 {
+                result.z = 0.9;
+                result = result.normalize();
+            }
+            self.look_at_dir = result;
         }
     }
 

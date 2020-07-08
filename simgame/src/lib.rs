@@ -55,7 +55,8 @@ fn build_window(event_loop: &EventLoop<()>, settings: &settings::VideoSettings) 
             let mut video_modes = monitor
                 .video_modes()
                 .filter(|video_mode| {
-                    let mode_dimensions = video_mode.size().to_logical::<f64>(monitor.scale_factor());
+                    let mode_dimensions =
+                        video_mode.size().to_logical::<f64>(monitor.scale_factor());
                     mode_dimensions.width == settings.win_dimensions.x
                         && mode_dimensions.height == settings.win_dimensions.y
                 })
@@ -117,8 +118,10 @@ impl TestRender {
         let window = build_window(&event_loop, &test_params.video_settings)?;
 
         let physical_win_size = window.inner_size();
-        let win_size: (u32, u32) = physical_win_size.into();
-        let logical_win_size = physical_win_size.to_logical::<f64>(window.scale_factor());
+        let physical_win_size: (u32, u32) = physical_win_size.into();
+        let physical_win_size = physical_win_size.into();
+
+        let logical_win_size = window.inner_size().to_logical::<f64>(window.scale_factor());
         let win_dimensions = Vector2::new(logical_win_size.width, logical_win_size.height);
 
         let visible_size = controls::restrict_visible_size(
@@ -149,12 +152,10 @@ impl TestRender {
             render_params.clone(),
             RenderInit {
                 window: &window,
-                physical_win_size: win_size,
+                physical_win_size: physical_win_size,
                 world: WorldRenderInit {
                     shaders,
-                    aspect_ratio: (physical_win_size.width / physical_win_size.height) as f32,
-                    width: win_size.0,
-                    height: win_size.1,
+                    display_size: physical_win_size,
                     world: &world,
                     view_params: view_state.clone(),
                     max_visible_chunks: test_params.max_visible_chunks,
@@ -262,6 +263,11 @@ impl TestRender {
                         self.control_state.clear_key_states();
                         self.has_cursor_control = false;
                     }
+                }
+                WindowEvent::Resized(new_size) => {
+                    log::info!("Window resized to {:?}", new_size);
+                    self.render_state
+                        .update_win_size(Vector2::new(new_size.width, new_size.height))?;
                 }
                 _ => {}
             },

@@ -1,5 +1,5 @@
 use anyhow::Result;
-use cgmath::{Deg, EuclideanSpace, InnerSpace, Matrix4, Point3, SquareMatrix, Vector3};
+use cgmath::{Deg, EuclideanSpace, InnerSpace, Matrix4, Point3, SquareMatrix, Vector2, Vector3};
 
 use simgame_core::{
     convert_point, convert_vec,
@@ -36,9 +36,7 @@ pub struct Shaders<R> {
 #[derive(Debug)]
 pub struct WorldRenderInit<'a> {
     pub shaders: Shaders<&'a [u32]>,
-    pub aspect_ratio: f32,
-    pub width: u32,
-    pub height: u32,
+    pub display_size: Vector2<u32>,
     pub view_params: ViewParams,
     pub world: &'a World,
     pub max_visible_chunks: usize,
@@ -77,24 +75,14 @@ impl WorldRenderState {
             Ok(device.create_shader_module(wgpu::ShaderModuleSource::SpirV(stream)))
         })?;
 
-        let depth_texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("world depth texture"),
-            size: wgpu::Extent3d {
-                width: init.width,
-                height: init.height,
-                depth: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Depth32Float,
-            usage: wgpu::TextureUsage::OUTPUT_ATTACHMENT,
-        });
+        let depth_texture = Self::make_depth_texture(&device_result.device, init.display_size);
+
+        let aspect_ratio = init.display_size.x as f32 / init.display_size.y as f32;
 
         let view_state = ViewState {
             params: init.view_params,
             proj: OPENGL_TO_WGPU_MATRIX
-                * cgmath::perspective(Deg(70f32), init.aspect_ratio, 1.0, 1000.0),
+                * cgmath::perspective(Deg(70f32), aspect_ratio, 1.0, 1000.0),
             rotation: Matrix4::identity(),
         };
 
@@ -102,7 +90,6 @@ impl WorldRenderState {
             blocks::BlocksRenderInit {
                 shaders: &shaders,
                 view_state: &view_state,
-                aspect_ratio: init.aspect_ratio,
                 depth_texture: &depth_texture,
                 world: init.world,
                 max_visible_chunks: init.max_visible_chunks,
@@ -116,6 +103,34 @@ impl WorldRenderState {
             render_blocks,
             view_state,
         })
+    }
+
+    fn make_depth_texture(device: &wgpu::Device, size: Vector2<u32>) -> wgpu::Texture {
+        device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("world depth texture"),
+            size: wgpu::Extent3d {
+                width: size.x,
+                height: size.y,
+                depth: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Depth32Float,
+            usage: wgpu::TextureUsage::OUTPUT_ATTACHMENT,
+        })
+    }
+
+    pub fn update_win_size(&mut self, device: &wgpu::Device, display_size: Vector2<u32>) -> Result<()> {
+        let depth_texture = Self::make_depth_texture(device, display_size);
+        self.render_blocks.set_depth_texture(&depth_texture);
+
+        let aspect_ratio = display_size.x as f32 / display_size.y as f32;
+
+        self.view_state.proj = OPENGL_TO_WGPU_MATRIX
+                * cgmath::perspective(Deg(70f32), aspect_ratio, 1.0, 1000.0);
+
+        Ok(())
     }
 
     pub fn render_frame(

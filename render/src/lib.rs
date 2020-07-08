@@ -1,5 +1,6 @@
 use anyhow::{anyhow, Result};
 use raw_window_handle::HasRawWindowHandle;
+use cgmath::Vector2;
 
 use simgame_core::world::{UpdatedWorldState, World};
 
@@ -20,7 +21,7 @@ pub(crate) type LoadedWorldShaders = WorldShaders<wgpu::ShaderModule>;
 pub struct RenderInit<'a, W> {
     pub window: &'a W,
     pub world: WorldRenderInit<'a>,
-    pub physical_win_size: (u32, u32),
+    pub physical_win_size: Vector2<u32>,
 }
 
 #[derive(Debug, Clone)]
@@ -30,6 +31,7 @@ pub struct RenderParams<'a> {
 
 pub struct RenderState {
     device: wgpu::Device,
+    surface: wgpu::Surface,
     swap_chain: wgpu::SwapChain,
     queue: wgpu::Queue,
     world: world::WorldRenderState,
@@ -64,25 +66,25 @@ impl RenderState {
         let device_result = Self::request_device(&params, &adapter).await?;
         let device = &device_result.device;
 
-        let swap_chain = device.create_swap_chain(
-            &surface,
-            &wgpu::SwapChainDescriptor {
-                usage: wgpu::TextureUsage::OUTPUT_ATTACHMENT,
-                format: wgpu::TextureFormat::Bgra8UnormSrgb,
-                width: init.physical_win_size.0,
-                height: init.physical_win_size.1,
-                present_mode: wgpu::PresentMode::Fifo,
-            },
-        );
+        let swap_chain = Self::create_swap_chain(
+            &device, &surface, init.physical_win_size)?;
 
         let world_render_state = world::WorldRenderState::new(init.world, &device_result)?;
 
         Ok(RenderState {
+            surface,
             swap_chain,
             world: world_render_state,
             queue: device_result.queue,
             device: device_result.device,
         })
+    }
+
+    pub fn update_win_size(&mut self, physical_win_size: Vector2<u32>) -> Result<()> {
+        let swap_chain = Self::create_swap_chain(
+            &self.device, &self.surface, physical_win_size)?;
+        self.swap_chain = swap_chain;
+        Ok(())
     }
 
     async fn request_device<'a>(
@@ -164,5 +166,22 @@ impl RenderState {
 
     pub fn update(&mut self, world: &World, diff: &UpdatedWorldState) {
         self.world.update(&self.queue, world, diff);
+    }
+
+    fn create_swap_chain(
+        device: &wgpu::Device,
+        surface: &wgpu::Surface,
+        win_size: Vector2<u32>,
+    ) -> Result<wgpu::SwapChain> {
+        Ok(device.create_swap_chain(
+            &surface,
+            &wgpu::SwapChainDescriptor {
+                usage: wgpu::TextureUsage::OUTPUT_ATTACHMENT,
+                format: wgpu::TextureFormat::Bgra8UnormSrgb,
+                width: win_size.x,
+                height: win_size.y,
+                present_mode: wgpu::PresentMode::Fifo,
+            },
+        ))
     }
 }

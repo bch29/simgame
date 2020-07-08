@@ -21,7 +21,6 @@ use crate::LoadedWorldShaders;
 
 pub struct BlocksRenderInit<'a> {
     pub shaders: &'a LoadedWorldShaders,
-    pub aspect_ratio: f32,
     pub depth_texture: &'a wgpu::Texture,
     pub view_state: &'a world::ViewState,
     pub world: &'a World,
@@ -386,6 +385,10 @@ impl BlocksRenderState {
             render_stage,
             geometry_buffers,
         }
+    }
+
+    pub fn set_depth_texture(&mut self, depth_texture: &wgpu::Texture) {
+        self.render_stage.depth_texture = depth_texture.create_default_view();
     }
 
     pub fn render_frame(
