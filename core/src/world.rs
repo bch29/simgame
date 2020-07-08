@@ -107,7 +107,7 @@ impl World {
     }
 
     /// Moves the world forward by one tick. Records anything that changed in the 'updated_state'.
-    pub fn tick(&mut self, updated_state: &mut UpdatedWorldState) {
+    pub fn tick(&mut self, _elapsed: f64, updated_state: &mut UpdatedWorldState) {
         if !self.updating {
             return;
         }
@@ -160,8 +160,6 @@ impl World {
         } else if self.filled_blocks >= index_utils::chunk_size_total() as i32 {
             self.filled_blocks = index_utils::chunk_size_total() as i32
         }
-
-        self.tick(updated_state);
 
         let bounds: Bounds<usize> =
             Bounds::new(Point3::new(32, 32, 0), Vector3::new(16, 16, 1024));

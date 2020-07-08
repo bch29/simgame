@@ -220,6 +220,7 @@ where
         self.index_map.iter().map(|(k, &i)| (k, i))
     }
 
+    #[allow(dead_code)]
     /// Verify that
     /// 1. every entry in `index_map` corresponds with a `Some` entry in `entries`
     /// 2. every `None` entry in `entries` corresponds with a missing key in `index_map` and an

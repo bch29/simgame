@@ -160,8 +160,6 @@ impl ShaderOpts {
     }
 }
 
-#[allow(unused_variables)]
-#[allow(dead_code)]
 fn load_shaders(
     ctx: &FileContext,
     shader_opts: &ShaderOpts,

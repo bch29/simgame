@@ -96,7 +96,7 @@ impl ControlState {
         }
     }
 
-    pub fn update_from_keyboard_event(&mut self, event: winit::event::KeyboardInput) {
+    pub fn handle_keyboad_input(&mut self, event: winit::event::KeyboardInput) {
         use winit::event::VirtualKeyCode;
         match event {
             winit::event::KeyboardInput {
