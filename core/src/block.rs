@@ -8,7 +8,7 @@ use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use cgmath::{ElementWise, EuclideanSpace, Point3};
 use serde::{Deserialize, Serialize};
 
-use crate::octree::Octree;
+use crate::octree::{self, Octree};
 use crate::util::Bounds;
 
 pub mod index_utils;
@@ -112,7 +112,7 @@ pub struct Chunk {
      | 16 17 18 19
      v 20 21 22 23
      */
-    pub blocks: [Block; index_utils::chunk_size_total()],
+    pub blocks: [Block; index_utils::chunk_size_total() as usize],
 }
 
 impl std::fmt::Debug for Chunk {
@@ -123,7 +123,7 @@ impl std::fmt::Debug for Chunk {
             for y in 0..index_utils::chunk_size().y {
                 for x in 0..index_utils::chunk_size().x {
                     let ix = index_utils::pack_xyz(index_utils::chunk_size(), Point3 { x, y, z });
-                    write!(f, "{}", self.blocks[ix].0)?;
+                    write!(f, "{}", self.blocks[ix as usize].0)?;
                 }
                 writeln!(f)?;
             }
@@ -148,18 +148,18 @@ impl Block {
 
 impl Chunk {
     #[inline]
-    pub fn get_block(&self, p: Point3<usize>) -> Block {
-        self.blocks[index_utils::pack_within_chunk(p)]
+    pub fn get_block(&self, p: Point3<i64>) -> Block {
+        self.blocks[index_utils::pack_within_chunk(p) as usize]
     }
 
     #[inline]
-    pub fn set_block(&mut self, p: Point3<usize>, val: Block) {
-        self.blocks[index_utils::pack_within_chunk(p)] = val;
+    pub fn set_block(&mut self, p: Point3<i64>, val: Block) {
+        self.blocks[index_utils::pack_within_chunk(p) as usize] = val;
     }
 
     /// Creates a chunk filled with zeroes (i.e. empty blocks).
     pub fn empty() -> Chunk {
-        let blocks = [Block(0); index_utils::chunk_size_total()];
+        let blocks = [Block(0); index_utils::chunk_size_total() as usize];
         Chunk { blocks }
     }
 }
@@ -167,7 +167,7 @@ impl Chunk {
 impl std::cmp::PartialEq for Chunk {
     fn eq(&self, other: &Self) -> bool {
         for i in 0..index_utils::chunk_size_total() {
-            if self.blocks[i] != other.blocks[i] {
+            if self.blocks[i as usize] != other.blocks[i as usize] {
                 return false;
             }
         }
@@ -181,7 +181,7 @@ impl Eq for Chunk {}
 impl WorldBlockData {
     /// Returns the chunk in which the given block position resides.
     #[inline]
-    pub fn get_chunk(&self, p: Point3<usize>) -> &Chunk {
+    pub fn get_chunk(&self, p: Point3<i64>) -> &Chunk {
         let (chunk_pos, _) = index_utils::to_chunk_pos(p);
         self.chunks
             .get(chunk_pos)
@@ -197,7 +197,7 @@ impl WorldBlockData {
     }
 
     #[inline]
-    pub fn get_block(&self, p: Point3<usize>) -> Block {
+    pub fn get_block(&self, p: Point3<i64>) -> Block {
         let (chunk_pos, inner_pos) = index_utils::to_chunk_pos(p);
         let chunk = self
             .chunks
@@ -208,7 +208,7 @@ impl WorldBlockData {
 
     /// Visits every chunk in the world exactly once, in an unspecified order.
     #[inline]
-    pub fn iter_chunks(&self) -> impl Iterator<Item = (Point3<usize>, &Chunk)> + '_ {
+    pub fn iter_chunks(&self) -> impl Iterator<Item = (Point3<i64>, &Chunk)> + '_ {
         self.chunks.iter()
     }
 
@@ -217,22 +217,22 @@ impl WorldBlockData {
     #[inline]
     pub fn iter_chunks_in_bounds(
         &self,
-        block_bounds: Bounds<usize>,
-    ) -> impl Iterator<Item = (Point3<usize>, &Chunk)> + '_ {
+        block_bounds: Bounds<i64>,
+    ) -> impl Iterator<Item = (Point3<i64>, &Chunk)> + '_ {
         let chunk_bounds = block_bounds.quantize_down(index_utils::chunk_size());
         self.chunks.iter_in_bounds(chunk_bounds)
     }
 
     /// Visits every block in the world exactly once, in an unspecified order.
     #[inline]
-    pub fn iter_blocks(&self) -> impl Iterator<Item = (Point3<usize>, Block)> + '_ {
+    pub fn iter_blocks(&self) -> impl Iterator<Item = (Point3<i64>, Block)> + '_ {
         self.chunks.iter().flat_map(move |(chunk_pos, chunk)| {
             chunk
                 .blocks
                 .iter()
                 .enumerate()
                 .map(move |(inner_index, block)| {
-                    let loc = index_utils::unpack_index((chunk_pos, inner_index));
+                    let loc = index_utils::unpack_index((chunk_pos, inner_index as i64));
                     (loc, *block)
                 })
         })
@@ -240,14 +240,14 @@ impl WorldBlockData {
 
     /// Visits every block in the world exactly once, in an unspecified order.
     #[inline]
-    pub fn iter_blocks_mut(&mut self) -> impl Iterator<Item = (Point3<usize>, &mut Block)> + '_ {
+    pub fn iter_blocks_mut(&mut self) -> impl Iterator<Item = (Point3<i64>, &mut Block)> + '_ {
         self.chunks.iter_mut().flat_map(move |(chunk_pos, chunk)| {
             chunk
                 .blocks
                 .iter_mut()
                 .enumerate()
                 .map(move |(inner_index, block)| {
-                    let loc = index_utils::unpack_index((chunk_pos, inner_index));
+                    let loc = index_utils::unpack_index((chunk_pos, inner_index as i64));
                     (loc, block)
                 })
         })
@@ -257,14 +257,14 @@ impl WorldBlockData {
     /// using the given function.
     pub fn replace_blocks<E, F>(
         &mut self,
-        bounds: Bounds<usize>,
+        bounds: Bounds<i64>,
         mut replace_block: F,
     ) -> Result<(), E>
     where
-        F: FnMut(Point3<usize>, Block) -> Result<Block, E>,
+        F: FnMut(Point3<i64>, Block) -> Result<Block, E>,
     {
         while !self.bounds().contains_bounds(bounds) {
-            self.chunks.grow(0);
+            self.chunks.grow(octree::Octant(0));
         }
 
         let chunk_bounds = bounds.quantize_down(index_utils::chunk_size());
@@ -302,11 +302,11 @@ impl WorldBlockData {
 
     /// Sets the value of a block at the given point.
     #[inline]
-    pub fn set_block(&mut self, p: Point3<usize>, val: Block) {
+    pub fn set_block(&mut self, p: Point3<i64>, val: Block) {
         let (chunk_pos, inner_pos) = index_utils::to_chunk_pos(p);
 
         while !self.bounds().contains_point(p) {
-            self.chunks.grow(0);
+            self.chunks.grow(octree::Octant(0));
         }
 
         let chunk = self.chunks.get_or_insert(chunk_pos, Chunk::empty);
@@ -315,12 +315,12 @@ impl WorldBlockData {
 
     /// Returns a bounding box that is guaranteed to contain every block in the world. No
     /// guarantees are made about whether it is the smallest such bounding box.
-    pub fn bounds(&self) -> Bounds<usize> {
+    pub fn bounds(&self) -> Bounds<i64> {
         self.chunks.bounds().scale_up(index_utils::chunk_size())
     }
 
     /// Serialize the blocks in the world. Returns the number of bytes written.
-    pub fn serialize_blocks<W>(&self, target: &mut W) -> io::Result<usize>
+    pub fn serialize_blocks<W>(&self, target: &mut W) -> io::Result<i64>
     where
         W: Write,
     {
@@ -337,7 +337,7 @@ impl WorldBlockData {
     /// Deserialize the world blocks from the given reader.
     pub fn deserialize_blocks<R: Read>(&mut self, src: &mut R) -> io::Result<()> {
         self.chunks = Octree::<Chunk>::deserialize(src, &mut |src| {
-            let mut blocks = [Block(0u16); index_utils::chunk_size_total()];
+            let mut blocks = [Block(0u16); index_utils::chunk_size_total() as usize];
             src.read_u16_into::<BigEndian>(blocks_to_u16_mut(&mut blocks))?;
             Ok(Chunk { blocks })
         })?;
@@ -345,7 +345,7 @@ impl WorldBlockData {
     }
 
     /// Constructs an empty WorldBlocks capable of holding blocks within the given bounds.
-    pub fn empty(min_bounds: Bounds<usize>) -> WorldBlockData {
+    pub fn empty(min_bounds: Bounds<i64>) -> WorldBlockData {
         WorldBlockData {
             chunks: Octree::new(bounds_to_octree_height(min_bounds)),
         }
@@ -353,7 +353,7 @@ impl WorldBlockData {
 
     pub fn debug_summary(&self) -> WorldBlockDataSummary {
         let size = self.bounds().size();
-        let count_total = size.x * size.y * size.z;
+        let count_total = (size.x * size.y * size.z) as usize;
         let mut count_nonempty = 0;
         for (_, block) in self.iter_blocks() {
             if !block.is_empty() {
@@ -385,7 +385,7 @@ pub struct WorldBlockDataSummary {
     pct_nonempty: f64,
     byte_size: usize,
     mb_size: usize,
-    bounds: Bounds<usize>,
+    bounds: Bounds<i64>,
 }
 
 #[inline]
@@ -398,7 +398,7 @@ pub fn blocks_to_u16_mut(buf: &mut [Block]) -> &mut [u16] {
     unsafe { slice::from_raw_parts_mut(buf.as_mut_ptr() as *mut u16, buf.len()) }
 }
 
-fn bounds_to_octree_height(min_bounds: Bounds<usize>) -> usize {
+fn bounds_to_octree_height(min_bounds: Bounds<i64>) -> i64 {
     let chunk_size = index_utils::chunk_size();
     let max_dim = [
         min_bounds.limit().x as f64 / chunk_size.x as f64,
@@ -409,7 +409,7 @@ fn bounds_to_octree_height(min_bounds: Bounds<usize>) -> usize {
     .copied()
     .fold(0.0, f64::max);
 
-    1 + f64::max(max_dim.log2(), 0.0).ceil() as usize
+    1 + f64::max(max_dim.log2(), 0.0).ceil() as i64
 }
 
 #[cfg(test)]
@@ -504,7 +504,7 @@ mod tests {
             reserialized.get_block(Point3::new(31, 47, 63))
         );
 
-        let collect_blocks = |world: &WorldBlockData| -> Vec<(Point3<usize>, Block)> {
+        let collect_blocks = |world: &WorldBlockData| -> Vec<(Point3<i64>, Block)> {
             world.iter_blocks().filter(|(_, b)| !b.is_empty()).collect()
         };
 
@@ -584,9 +584,9 @@ mod tests {
         );
     }
 
-    fn point_range<Points>(points: Points) -> Option<(Point3<usize>, Point3<usize>)>
+    fn point_range<Points>(points: Points) -> Option<(Point3<i64>, Point3<i64>)>
     where
-        Points: IntoIterator<Item = Point3<usize>>,
+        Points: IntoIterator<Item = Point3<i64>>,
     {
         let points: Vec<_> = points.into_iter().collect();
         let x = || points.iter().map(|p| p.x);

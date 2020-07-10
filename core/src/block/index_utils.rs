@@ -3,23 +3,23 @@ use std::ops::{Index, IndexMut};
 use cgmath::{ElementWise, Point3, Vector3};
 
 #[inline]
-pub const fn chunk_size() -> Vector3<usize> {
+pub const fn chunk_size() -> Vector3<i64> {
     Vector3 { x: 16, y: 16, z: 4 }
 }
 
 #[inline]
-pub const fn chunk_size_total() -> usize {
+pub const fn chunk_size_total() -> i64 {
     chunk_size().x * chunk_size().y * chunk_size().z
 }
 
 #[inline]
-pub fn pack_xyz(bounds: Vector3<usize>, p: Point3<usize>) -> usize {
+pub fn pack_xyz(bounds: Vector3<i64>, p: Point3<i64>) -> i64 {
     assert!(point_within_size(p, bounds));
     p.x + p.y * bounds.x + p.z * bounds.x * bounds.y
 }
 
 #[inline]
-pub fn unpack_xyz(bounds: Vector3<usize>, index: usize) -> Point3<usize> {
+pub fn unpack_xyz(bounds: Vector3<i64>, index: i64) -> Point3<i64> {
     assert!(index < bounds.x * bounds.y * bounds.z);
     let xy = index % (bounds.x * bounds.y);
 
@@ -31,13 +31,13 @@ pub fn unpack_xyz(bounds: Vector3<usize>, index: usize) -> Point3<usize> {
 }
 
 #[inline]
-pub fn point_within_size(point: Point3<usize>, bounds: Vector3<usize>) -> bool {
+pub fn point_within_size(point: Point3<i64>, bounds: Vector3<i64>) -> bool {
     point.x < bounds.x && point.y < bounds.y && point.z < bounds.z
 }
 
 /// indices is (chunk_pos, inner_index)
 #[inline]
-pub fn unpack_index(indices: (Point3<usize>, usize)) -> Point3<usize> {
+pub fn unpack_index(indices: (Point3<i64>, i64)) -> Point3<i64> {
     let (chunk_pos, inner_index) = indices;
     let origin = Point3::from((0, 0, 0));
     let inner_pos = unpack_xyz(chunk_size(), inner_index);
@@ -48,7 +48,7 @@ pub fn unpack_index(indices: (Point3<usize>, usize)) -> Point3<usize> {
 /// From a point in block coordinates, return the chunk index and the position of the block
 /// within that chunk.
 #[inline]
-pub fn to_chunk_pos(p: Point3<usize>) -> (Point3<usize>, Point3<usize>) {
+pub fn to_chunk_pos(p: Point3<i64>) -> (Point3<i64>, Point3<i64>) {
     let origin = Point3::from((0, 0, 0));
     let inner_pos = p.rem_element_wise(origin + chunk_size());
     let chunk_pos = p.div_element_wise(origin + chunk_size());
@@ -56,84 +56,84 @@ pub fn to_chunk_pos(p: Point3<usize>) -> (Point3<usize>, Point3<usize>) {
 }
 
 #[inline]
-pub fn pack_within_chunk(p: Point3<usize>) -> usize {
+pub fn pack_within_chunk(p: Point3<i64>) -> i64 {
     assert!(point_within_size(p, chunk_size()));
     p.x + p.y * chunk_size().x + p.z * chunk_size().x * chunk_size().y
 }
 
 /// Returns (chunk_pos, inner_index),
 #[inline]
-pub fn pack_index(p: Point3<usize>) -> (Point3<usize>, usize) {
+pub fn pack_index(p: Point3<i64>) -> (Point3<i64>, i64) {
     let (chunk_pos, inner_point) = to_chunk_pos(p);
     let inner_index = pack_within_chunk(inner_point);
     (chunk_pos, inner_index)
 }
 
 #[inline]
-pub fn make_size(count_chunks: Vector3<usize>) -> Vector3<usize> {
+pub fn make_size(count_chunks: Vector3<i64>) -> Vector3<i64> {
     count_chunks.mul_element_wise(chunk_size())
 }
 
 pub struct Indexed3D<'a, T> {
     slice: &'a [T],
-    size: Vector3<usize>,
+    size: Vector3<i64>,
 }
 
 impl<'a, T> Indexed3D<'a, T> {
-    pub fn new(slice: &'a [T], size: Vector3<usize>) -> Self {
-        assert!(slice.len() >= size.x * size.y * size.z);
+    pub fn new(slice: &'a [T], size: Vector3<i64>) -> Self {
+        assert!(slice.len() >= (size.x * size.y * size.z) as usize);
         Indexed3D { slice, size }
     }
 }
 
-impl<'a, T> Index<Point3<usize>> for Indexed3D<'a, T> {
+impl<'a, T> Index<Point3<i64>> for Indexed3D<'a, T> {
     type Output = T;
-    fn index(&self, loc: Point3<usize>) -> &Self::Output {
+    fn index(&self, loc: Point3<i64>) -> &Self::Output {
         assert!(point_within_size(loc, self.size));
         let index = pack_xyz(self.size, loc);
-        &self.slice[index]
+        &self.slice[index as usize]
     }
 }
 
 pub struct Indexed3DMut<'a, T> {
     slice: &'a mut [T],
-    size: Vector3<usize>,
+    size: Vector3<i64>,
 }
 
 impl<'a, T> Indexed3DMut<'a, T> {
-    pub fn new(slice: &'a mut [T], size: Vector3<usize>) -> Self {
-        assert!(slice.len() >= size.x * size.y * size.z);
+    pub fn new(slice: &'a mut [T], size: Vector3<i64>) -> Self {
+        assert!(slice.len() >= (size.x * size.y * size.z) as usize);
         Indexed3DMut { slice, size }
     }
 }
 
-impl<'a, T> Index<Point3<usize>> for Indexed3DMut<'a, T> {
+impl<'a, T> Index<Point3<i64>> for Indexed3DMut<'a, T> {
     type Output = T;
-    fn index(&self, loc: Point3<usize>) -> &Self::Output {
+    fn index(&self, loc: Point3<i64>) -> &Self::Output {
         assert!(point_within_size(loc, self.size));
         let index = pack_xyz(self.size, loc);
-        unsafe { self.slice.get_unchecked(index) }
+        unsafe { self.slice.get_unchecked(index as usize) }
     }
 }
 
-impl<'a, T> IndexMut<Point3<usize>> for Indexed3DMut<'a, T> {
-    fn index_mut(&mut self, loc: Point3<usize>) -> &mut Self::Output {
+impl<'a, T> IndexMut<Point3<i64>> for Indexed3DMut<'a, T> {
+    fn index_mut(&mut self, loc: Point3<i64>) -> &mut Self::Output {
         assert!(point_within_size(loc, self.size));
         let index = pack_xyz(self.size, loc);
-        unsafe { self.slice.get_unchecked_mut(index) }
+        unsafe { self.slice.get_unchecked_mut(index as usize) }
     }
 }
 
 pub struct Vec3D<T> {
     data: Vec<T>,
-    size: Vector3<usize>,
+    size: Vector3<i64>,
 }
 
 impl<T> Vec3D<T>
 where
     T: Clone,
 {
-    pub fn new(val: &T, size: Vector3<usize>) -> Self {
+    pub fn new(val: &T, size: Vector3<i64>) -> Self {
         Vec3D {
             data: (0..size.x * size.y * size.z).map(|_| val.clone()).collect(),
             size,
@@ -141,20 +141,20 @@ where
     }
 }
 
-impl<T> Index<Point3<usize>> for Vec3D<T> {
+impl<T> Index<Point3<i64>> for Vec3D<T> {
     type Output = T;
-    fn index(&self, loc: Point3<usize>) -> &Self::Output {
+    fn index(&self, loc: Point3<i64>) -> &Self::Output {
         assert!(point_within_size(loc, self.size));
         let index = pack_xyz(self.size, loc);
-        unsafe { self.data.get_unchecked(index) }
+        unsafe { self.data.get_unchecked(index as usize) }
     }
 }
 
-impl<T> IndexMut<Point3<usize>> for Vec3D<T> {
-    fn index_mut(&mut self, loc: Point3<usize>) -> &mut Self::Output {
+impl<T> IndexMut<Point3<i64>> for Vec3D<T> {
+    fn index_mut(&mut self, loc: Point3<i64>) -> &mut Self::Output {
         assert!(point_within_size(loc, self.size));
         let index = pack_xyz(self.size, loc);
-        unsafe { self.data.get_unchecked_mut(index) }
+        unsafe { self.data.get_unchecked_mut(index as usize) }
     }
 }
 

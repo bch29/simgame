@@ -3,7 +3,7 @@ use cgmath::{InnerSpace, Matrix4, Point3, Transform, Vector3};
 use simgame_core::block::{index_utils, Block};
 use simgame_core::util::Bounds;
 use simgame_core::world::BlockUpdater;
-use simgame_core::{convert_point, convert_vec};
+use simgame_core::convert_point;
 
 pub trait Primitive {
     /// Returns true if the given point is within the shape.
@@ -15,9 +15,8 @@ pub trait Primitive {
     fn draw(&self, blocks: &mut BlockUpdater, fill_block: Block) {
         blocks.set_blocks(
             round_bounds(self.bounds())
-                .iter_points_aligned(convert_vec!(index_utils::chunk_size(), i64))
+                .iter_points_aligned(index_utils::chunk_size())
                 .filter(|p| self.test(convert_point!(p, f64)))
-                .map(|p| convert_point!(p, usize))
                 .zip(std::iter::repeat(fill_block)),
         );
     }

@@ -146,23 +146,23 @@ fn test_grow() {
     tree.insert(Point3::new(1, 1, 2), 9);
     tree.assert_height_invariant();
 
-    tree.grow(0);
+    tree.grow(Octant(0));
     assert_eq!(tree.height(), 7);
     tree.assert_height_invariant();
 
-    tree.grow(2);
+    tree.grow(Octant(2));
     assert_eq!(tree.height(), 8);
     tree.assert_height_invariant();
 
-    tree.grow(4);
+    tree.grow(Octant(4));
     assert_eq!(tree.height(), 9);
     tree.assert_height_invariant();
 
-    tree.grow(5);
+    tree.grow(Octant(5));
     assert_eq!(tree.height(), 10);
     tree.assert_height_invariant();
 
-    tree.grow(6);
+    tree.grow(Octant(6));
     assert_eq!(tree.height(), 11);
     tree.assert_height_invariant();
 }

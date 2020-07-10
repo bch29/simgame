@@ -327,7 +327,7 @@ impl BlocksRenderState {
                 device,
                 InstancedBufferDesc {
                     label: "block faces",
-                    instance_len: 4 * 3 as usize * index_utils::chunk_size_total(),
+                    instance_len: (4 * 3 * index_utils::chunk_size_total()) as usize,
                     n_instances: init.max_visible_chunks,
                     usage: wgpu::BufferUsage::STORAGE,
                 },
@@ -543,13 +543,13 @@ impl ChunkState {
             visible_chunk_size.x * visible_chunk_size.y * visible_chunk_size.z;
         assert!(active_visible_chunks <= max_visible_chunks as i32);
 
-        let max_visible_blocks = max_visible_chunks * index_utils::chunk_size_total();
+        let max_visible_blocks = max_visible_chunks * index_utils::chunk_size_total() as usize;
         let active_chunks = ActiveChunks::new(max_visible_chunks as usize);
 
         let block_type_helper = BufferSyncHelper::new(BufferSyncHelperDesc {
             label: "block types",
             buffer_len: max_visible_blocks,
-            max_chunk_len: index_utils::chunk_size_total(),
+            max_chunk_len: index_utils::chunk_size_total() as usize,
             usage: wgpu::BufferUsage::STORAGE | wgpu::BufferUsage::COPY_DST,
         });
 
@@ -586,8 +586,8 @@ impl ChunkState {
     fn update_box_chunks(&mut self, view_box: Bounds<i32>, world: &World) {
         assert!(self.active_chunks.len() == 0);
         let bounds = Bounds::new(
-            convert_point!(view_box.origin(), usize),
-            convert_vec!(view_box.size(), usize),
+            convert_point!(view_box.origin(), i64),
+            convert_vec!(view_box.size(), i64),
         );
         for (p, _chunk) in world
             .blocks
@@ -645,7 +645,7 @@ impl ChunkState {
                 continue;
             }
 
-            if let Some(_chunk) = world.blocks.chunks().get(convert_point!(pos, usize)) {
+            if let Some(_chunk) = world.blocks.chunks().get(convert_point!(pos, i64)) {
                 self.active_chunks.update(pos, ());
             }
         }
@@ -712,10 +712,10 @@ impl ChunkState {
                 let chunk = world
                     .blocks
                     .chunks()
-                    .get(convert_point!(point, usize))
+                    .get(convert_point!(point, i64))
                     .unwrap();
                 let chunk_data = block::blocks_to_u16(&chunk.blocks);
-                fill_block_types.seek(index * index_utils::chunk_size_total());
+                fill_block_types.seek(index * index_utils::chunk_size_total() as usize);
                 fill_block_types.advance(chunk_data);
             } else {
                 self.meta_tracker.remove(index)

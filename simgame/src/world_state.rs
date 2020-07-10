@@ -95,14 +95,14 @@ impl WorldState {
             self.filled_blocks = index_utils::chunk_size_total() as i32
         }
 
-        let bounds: Bounds<usize> =
+        let bounds: Bounds<i64> =
             Bounds::new(Point3::new(32, 32, 0), Vector3::new(16, 16, 1024));
 
-        let step = index_utils::chunk_size_total() / self.filled_blocks as usize;
+        let step = index_utils::chunk_size_total() / self.filled_blocks as i64;
         let mut count_filled = 0;
 
         for p in bounds.iter_points() {
-            if (p.x + p.y + p.z) % step as usize == 0 {
+            if (p.x + p.y + p.z) % step == 0 {
                 self.world.blocks.set_block(p, Block::from_u16(1));
                 count_filled += 1;
             } else {

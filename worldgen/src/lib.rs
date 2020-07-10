@@ -15,7 +15,7 @@ pub mod tree;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GenerateWorldConfig {
-    pub size: Vector3<usize>,
+    pub size: Vector3<i64>,
     pub tree: Option<tree::TreeConfig>,
 }
 

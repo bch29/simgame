@@ -34,7 +34,7 @@ pub struct FileContext {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct WorldMeta {
-    world_bounds: Bounds<usize>,
+    world_bounds: Bounds<i64>,
 }
 
 #[derive(Debug)]

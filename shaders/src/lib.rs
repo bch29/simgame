@@ -7,7 +7,7 @@ pub enum ShaderKind {
 
 #[derive(Debug, Clone, Copy)]
 pub struct CompileParams {
-    pub chunk_size: (usize, usize, usize),
+    pub chunk_size: (i64, i64, i64),
 }
 
 /// Real implementation when "shader-compiler" feature is enabled.

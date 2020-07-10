@@ -3,6 +3,7 @@ use std::collections::HashSet;
 use cgmath::Point3;
 
 use crate::block::{index_utils, Block, Chunk, WorldBlockData};
+use crate::octree;
 
 #[derive(Debug)]
 pub struct World {
@@ -11,7 +12,7 @@ pub struct World {
 
 #[derive(Debug)]
 pub struct UpdatedWorldState {
-    pub modified_chunks: HashSet<Point3<usize>>,
+    pub modified_chunks: HashSet<Point3<i64>>,
 }
 
 #[derive(Debug)]
@@ -29,7 +30,7 @@ impl<'a> BlockUpdater<'a> {
     }
 
     #[inline]
-    pub fn set_block(&mut self, point: Point3<usize>, block: Block) {
+    pub fn set_block(&mut self, point: Point3<i64>, block: Block) {
         self.blocks.set_block(point, block);
         let (chunk_pos, _) = index_utils::to_chunk_pos(point);
         self.updated_state.record_chunk_update(chunk_pos);
@@ -41,7 +42,7 @@ impl<'a> BlockUpdater<'a> {
     #[inline]
     pub fn set_blocks<I>(&mut self, blocks: I)
     where
-        I: IntoIterator<Item = (Point3<usize>, Block)>,
+        I: IntoIterator<Item = (Point3<i64>, Block)>,
     {
         let chunks = self.blocks.chunks_mut();
         let mut iter = blocks.into_iter();
@@ -61,7 +62,7 @@ impl<'a> BlockUpdater<'a> {
             // operations.
 
             while !chunks.bounds().contains_point(chunk_pos) {
-                chunks.grow(0);
+                chunks.grow(octree::Octant(0));
             }
 
             let chunk = chunks.get_or_insert(chunk_pos, Chunk::empty);
@@ -103,7 +104,7 @@ impl UpdatedWorldState {
         self.modified_chunks.clear();
     }
 
-    pub fn record_chunk_update(&mut self, chunk_pos: Point3<usize>) {
+    pub fn record_chunk_update(&mut self, chunk_pos: Point3<i64>) {
         self.modified_chunks.insert(chunk_pos);
     }
 
