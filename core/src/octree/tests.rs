@@ -137,7 +137,7 @@ fn test_dense_iter_mut() {
 
 #[test]
 fn test_grow() {
-    let mut tree: Octree<i64> = Octree::new(6);
+    let mut tree: Octree<i64> = Octree::new(7);
     tree.insert(Point3::new(34, 2, 17), 6);
     tree.insert(Point3::new(2, 3, 4), 5);
     tree.insert(Point3::new(34, 3, 16), 2);
@@ -146,23 +146,38 @@ fn test_grow() {
     tree.insert(Point3::new(1, 1, 2), 9);
     tree.assert_height_invariant();
 
-    tree.grow(Octant(0));
-    assert_eq!(tree.height(), 7);
-    tree.assert_height_invariant();
+    let check_points = |tree: &Octree<i64>| {
+        assert_eq!(tree.get(Point3::new(1, 1, 2)), Some(&9));
+        assert_eq!(tree.get(Point3::new(2, 3, 4)), Some(&5));
+        assert_eq!(tree.get(Point3::new(34, 3, 16)), Some(&2));
+        assert_eq!(tree.get(Point3::new(1, 1, 1)), Some(&7));
+        assert_eq!(tree.get(Point3::new(1, 2, 1)), Some(&8));
+        assert_eq!(tree.get(Point3::new(1, 1, 2)), Some(&9));
+    };
 
-    tree.grow(Octant(2));
+    tree.grow();
     assert_eq!(tree.height(), 8);
+    check_points(&tree);
     tree.assert_height_invariant();
+    println!("{:?}", tree.iter().collect::<Vec<_>>());
 
-    tree.grow(Octant(4));
+    tree.grow();
     assert_eq!(tree.height(), 9);
+    check_points(&tree);
     tree.assert_height_invariant();
 
-    tree.grow(Octant(5));
+    tree.grow();
     assert_eq!(tree.height(), 10);
+    check_points(&tree);
     tree.assert_height_invariant();
 
-    tree.grow(Octant(6));
+    tree.grow();
     assert_eq!(tree.height(), 11);
+    check_points(&tree);
+    tree.assert_height_invariant();
+
+    tree.grow();
+    assert_eq!(tree.height(), 12);
+    check_points(&tree);
     tree.assert_height_invariant();
 }

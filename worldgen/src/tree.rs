@@ -15,7 +15,7 @@ pub struct TreeSystemConfig {
     foliage_block: String,
     trunk_radius: f64,
     branch_radius_factor: f64,
-    branch_length: f64,
+    trunk_length: f64,
     foliage_length: f64,
     steps: i32,
 }
@@ -144,7 +144,7 @@ impl TurtleInterpreter<Symbol> for TreeSystem {
                     round_end: true,
                     round_start: true,
                 };
-                turtle.draw(self.config.branch_length);
+                turtle.draw(self.config.trunk_length);
             }
             Leaf => {
                 turtle.state_mut().brush = TurtleBrush::Spheroid {

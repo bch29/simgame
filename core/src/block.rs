@@ -8,7 +8,7 @@ use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use cgmath::{ElementWise, EuclideanSpace, Point3};
 use serde::{Deserialize, Serialize};
 
-use crate::octree::{self, Octree};
+use crate::octree::Octree;
 use crate::util::Bounds;
 
 pub mod index_utils;
@@ -38,18 +38,6 @@ pub struct BlockInfo {
     pub speed_modifier: f64,
 }
 
-impl BlockInfo {
-    pub fn default_passable_through() -> bool {
-        false
-    }
-    pub fn default_passable_above() -> bool {
-        true
-    }
-    pub fn default_speed_modifier() -> f64 {
-        1.0
-    }
-}
-
 /// Specification of the selection of available blocks and categories.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BlockConfig {
@@ -59,29 +47,6 @@ pub struct BlockConfig {
 pub struct BlockConfigHelper {
     blocks_by_name: HashMap<String, (Block, BlockInfo)>,
     blocks_by_id: Vec<BlockInfo>
-}
-
-impl BlockConfigHelper {
-    pub fn new(config: &BlockConfig) -> Self {
-        let blocks_by_name = config.block_info.iter().enumerate().map(|(i, block_info)| {
-            let name = block_info.name.clone();
-            let block = Block::from_u16(i as u16);
-            (name, (block, block_info.clone()))
-        }).collect();
-
-        let blocks_by_id = config.block_info.clone();
-
-        Self { blocks_by_name, blocks_by_id }
-    }
-
-    pub fn block_by_name(&self, name: &str) -> Option<(Block, &BlockInfo)> {
-        let (block, block_info) = self.blocks_by_name.get(name)?;
-        Some((*block, block_info))
-    }
-
-    pub fn block_info(&self, block: Block) -> Option<&BlockInfo> {
-        self.blocks_by_id.get(block.0 as usize)
-    }
 }
 
 /// Stores the world's blocks, but not other things like entities.
@@ -113,23 +78,6 @@ pub struct Chunk {
      v 20 21 22 23
      */
     pub blocks: [Block; index_utils::chunk_size_total() as usize],
-}
-
-impl std::fmt::Debug for Chunk {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        writeln!(f, "Chunk {{")?;
-        for z in 0..index_utils::chunk_size().z {
-            writeln!(f, "z={}", z)?;
-            for y in 0..index_utils::chunk_size().y {
-                for x in 0..index_utils::chunk_size().x {
-                    let ix = index_utils::pack_xyz(index_utils::chunk_size(), Point3 { x, y, z });
-                    write!(f, "{}", self.blocks[ix as usize].0)?;
-                }
-                writeln!(f)?;
-            }
-        }
-        write!(f, "}}")
-    }
 }
 
 impl Block {
@@ -179,6 +127,13 @@ impl std::cmp::PartialEq for Chunk {
 impl Eq for Chunk {}
 
 impl WorldBlockData {
+    /// Constructs an empty WorldBlocks capable of holding blocks within the given bounds.
+    pub fn empty(min_bounds: Bounds<i64>) -> WorldBlockData {
+        WorldBlockData {
+            chunks: Octree::new(bounds_to_octree_height(min_bounds)),
+        }
+    }
+
     /// Returns the chunk in which the given block position resides.
     #[inline]
     pub fn get_chunk(&self, p: Point3<i64>) -> &Chunk {
@@ -264,7 +219,7 @@ impl WorldBlockData {
         F: FnMut(Point3<i64>, Block) -> Result<Block, E>,
     {
         while !self.bounds().contains_bounds(bounds) {
-            self.chunks.grow(octree::Octant(0));
+            self.chunks.grow();
         }
 
         let chunk_bounds = bounds.quantize_down(index_utils::chunk_size());
@@ -306,7 +261,7 @@ impl WorldBlockData {
         let (chunk_pos, inner_pos) = index_utils::to_chunk_pos(p);
 
         while !self.bounds().contains_point(p) {
-            self.chunks.grow(octree::Octant(0));
+            self.chunks.grow();
         }
 
         let chunk = self.chunks.get_or_insert(chunk_pos, Chunk::empty);
@@ -342,13 +297,6 @@ impl WorldBlockData {
             Ok(Chunk { blocks })
         })?;
         Ok(())
-    }
-
-    /// Constructs an empty WorldBlocks capable of holding blocks within the given bounds.
-    pub fn empty(min_bounds: Bounds<i64>) -> WorldBlockData {
-        WorldBlockData {
-            chunks: Octree::new(bounds_to_octree_height(min_bounds)),
-        }
     }
 
     pub fn debug_summary(&self) -> WorldBlockDataSummary {
@@ -401,15 +349,70 @@ pub fn blocks_to_u16_mut(buf: &mut [Block]) -> &mut [u16] {
 fn bounds_to_octree_height(min_bounds: Bounds<i64>) -> i64 {
     let chunk_size = index_utils::chunk_size();
     let max_dim = [
-        min_bounds.limit().x as f64 / chunk_size.x as f64,
-        min_bounds.limit().y as f64 / chunk_size.y as f64,
-        min_bounds.limit().z as f64 / chunk_size.z as f64,
+        min_bounds.limit().x.abs() as f64 / chunk_size.x as f64,
+        min_bounds.limit().y.abs() as f64 / chunk_size.y as f64,
+        min_bounds.limit().z.abs() as f64 / chunk_size.z as f64,
+        min_bounds.origin().x.abs() as f64 / chunk_size.x as f64,
+        min_bounds.origin().y.abs() as f64 / chunk_size.y as f64,
+        min_bounds.origin().z.abs() as f64 / chunk_size.z as f64,
     ]
     .iter()
     .copied()
     .fold(0.0, f64::max);
 
-    1 + f64::max(max_dim.log2(), 0.0).ceil() as i64
+    2 + f64::max(max_dim.log2(), 0.0).ceil() as i64
+}
+
+impl std::fmt::Debug for Chunk {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "Chunk {{")?;
+        for z in 0..index_utils::chunk_size().z {
+            writeln!(f, "z={}", z)?;
+            for y in 0..index_utils::chunk_size().y {
+                for x in 0..index_utils::chunk_size().x {
+                    let ix = index_utils::pack_xyz(index_utils::chunk_size(), Point3 { x, y, z });
+                    write!(f, "{}", self.blocks[ix as usize].0)?;
+                }
+                writeln!(f)?;
+            }
+        }
+        write!(f, "}}")
+    }
+}
+
+impl BlockInfo {
+    pub fn default_passable_through() -> bool {
+        false
+    }
+    pub fn default_passable_above() -> bool {
+        true
+    }
+    pub fn default_speed_modifier() -> f64 {
+        1.0
+    }
+}
+
+impl BlockConfigHelper {
+    pub fn new(config: &BlockConfig) -> Self {
+        let blocks_by_name = config.block_info.iter().enumerate().map(|(i, block_info)| {
+            let name = block_info.name.clone();
+            let block = Block::from_u16(i as u16);
+            (name, (block, block_info.clone()))
+        }).collect();
+
+        let blocks_by_id = config.block_info.clone();
+
+        Self { blocks_by_name, blocks_by_id }
+    }
+
+    pub fn block_by_name(&self, name: &str) -> Option<(Block, &BlockInfo)> {
+        let (block, block_info) = self.blocks_by_name.get(name)?;
+        Some((*block, block_info))
+    }
+
+    pub fn block_info(&self, block: Block) -> Option<&BlockInfo> {
+        self.blocks_by_id.get(block.0 as usize)
+    }
 }
 
 #[cfg(test)]
@@ -430,14 +433,14 @@ mod tests {
                     z: index_utils::chunk_size().z - 2,
                 },
         );
-        assert_eq!(bounds_to_octree_height(bounds), 2);
+        assert_eq!(bounds_to_octree_height(bounds), 3);
 
         let bounds = Bounds::from_size(index_utils::chunk_size() * 2);
-        assert_eq!(bounds_to_octree_height(bounds), 2);
+        assert_eq!(bounds_to_octree_height(bounds), 3);
 
         let bounds =
             Bounds::from_size(index_utils::chunk_size() * 2 + Vector3 { x: 1, y: 0, z: 0 });
-        assert_eq!(bounds_to_octree_height(bounds), 3);
+        assert_eq!(bounds_to_octree_height(bounds), 4);
     }
 
     #[test]

@@ -3,7 +3,6 @@ use std::collections::HashSet;
 use cgmath::Point3;
 
 use crate::block::{index_utils, Block, Chunk, WorldBlockData};
-use crate::octree;
 
 #[derive(Debug)]
 pub struct World {
@@ -62,7 +61,7 @@ impl<'a> BlockUpdater<'a> {
             // operations.
 
             while !chunks.bounds().contains_point(chunk_pos) {
-                chunks.grow(octree::Octant(0));
+                chunks.grow();
             }
 
             let chunk = chunks.get_or_insert(chunk_pos, Chunk::empty);

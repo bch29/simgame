@@ -6,31 +6,6 @@ use std::io::{self, Read, Write};
 
 use crate::util::Bounds;
 
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub struct OctantMap<T> {
-    children: [Octree<T>; 8],
-}
-
-impl<T> std::ops::Index<Octant> for OctantMap<T> {
-    type Output = Octree<T>;
-
-    fn index(&self, octant: Octant) -> &Self::Output {
-        &self.children[octant.0 as usize]
-    }
-}
-
-impl<T> std::ops::IndexMut<Octant> for OctantMap<T> {
-    fn index_mut(&mut self, octant: Octant) -> &mut Self::Output {
-        &mut self.children[octant.0 as usize]
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-enum Node<T> {
-    Branch(OctantMap<T>),
-    Leaf(T),
-}
-
 /// A tree structure providing a sparse representation of values in a 3D grid.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct Octree<T> {
@@ -38,29 +13,23 @@ pub struct Octree<T> {
     node: Option<Box<Node<T>>>,
 }
 
+/// Refers to one octant of an area that has been split into 8, along 3 orthogonal planes.
 #[derive(Clone, Debug, Copy, PartialEq, Eq)]
-pub struct Octant(pub i8);
+pub struct Octant {
+    x: i8,
+    y: i8,
+    z: i8,
+}
 
-impl Octant {
-    pub fn x(self) -> i64 {
-        (self.0 % 2) as i64
-    }
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+enum Node<T> {
+    Branch(OctantMap<Octree<T>>),
+    Leaf(T),
+}
 
-    pub fn y(self) -> i64 {
-        ((self.0 % 4) / 2) as i64
-    }
-
-    pub fn z(self) -> i64 {
-        (self.0 / 4) as i64
-    }
-
-    pub fn as_direction(self) -> Vector3<i64> {
-        Vector3 {
-            x: self.x(),
-            y: self.y(),
-            z: self.z(),
-        }
-    }
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct OctantMap<T> {
+    children: (T, T, T, T, T, T, T, T),
 }
 
 impl<T> Octree<T> {
@@ -72,26 +41,55 @@ impl<T> Octree<T> {
         Octree { height, node: None }
     }
 
-    /// Increase the height of the Octree by one step, by growing 7 new leaves and moving the
-    /// existing tree into the eighth. The given octant is the one where the existing tree ends up.
-    /// To keep the set of points in the tree unchanged, grow into the zeroth octant.
-    pub fn grow(&mut self, octant: Octant) {
-        assert!(octant.0 < 8);
+    /// Increase the height of the Octree by one step.
+    pub fn grow(&mut self) {
         assert!(self.height < 63);
 
-        let mut branch = Self::new_branch(self.height);
-        branch[octant].node = std::mem::replace(&mut self.node, None);
+        // octant (-1, -1, -1) becomes octant (1, 1, 1) of the new octant (-1, -1, -1)
+        // octant (1, 1, 1) becomes octant (-1, -1, -1) of the new octant (1, 1, 1)
+        // etc
 
-        self.height += 1;
-        self.node = Some(Box::new(Node::Branch(branch)))
+        let new_self = Octree::new(self.height + 1);
+        let old = std::mem::replace(self, new_self);
+
+        let old_height = old.height;
+        let old_node = match old.node {
+            None => {
+                return;
+            }
+            Some(node) => *node,
+        };
+
+        let octants = match old_node {
+            Node::Branch(octants) => octants.transform(|octant, octree| {
+                let mut branch = Self::new_branch(old_height - 1);
+                assert_eq!(octree.height, old_height - 1);
+                octree.assert_height_invariant();
+                branch[octant.opposite()] = octree;
+                Octree {
+                    height: old_height,
+                    node: Some(Box::new(Node::Branch(branch))),
+                }
+            }),
+            Node::Leaf(data) => {
+                assert!(old_height == 0);
+                let mut octants = Self::new_branch(old_height);
+                octants[Octant::from_index(0)] = Octree {
+                    height: 0,
+                    node: Some(Box::new(Node::Leaf(data))),
+                };
+                octants
+            }
+        };
+
+        self.node = Some(Box::new(Node::Branch(octants)));
     }
 
     /// Shrinks the height of the octree by one step, by discarding all but the given octant.
     /// If the octree has no children, returns None. Otherwise returns the discarded octants.
     /// In the returned array, the octant that was shrunk into is made empty.
-    pub fn shrink(&mut self, octant: Octant) -> Option<OctantMap<T>> {
+    pub fn shrink(&mut self, octant: Octant) -> Option<OctantMap<Self>> {
         assert!(self.height > 0);
-        assert!(octant.0 < 8);
 
         let old_height = self.height;
         self.height = old_height - 1;
@@ -115,7 +113,12 @@ impl<T> Octree<T> {
     /// Inserts data at the given point in the octree. Returns a mutable reference to the data at
     /// its new location inside the tree.
     pub fn insert(&mut self, pos: Point3<i64>, data: T) -> &mut T {
-        assert!(self.bounds().contains_point(pos));
+        assert!(
+            self.bounds().contains_point(pos),
+            "insert of point {:?} is outside bounds {:?}",
+            pos,
+            self.bounds()
+        );
 
         let node = match self.node {
             None => {
@@ -259,7 +262,7 @@ impl<T> Octree<T> {
                 Node::Branch(children) => {
                     writer.write_u8(2)?;
                     bytes_written += 1;
-                    for child in &children.children {
+                    for child in children {
                         bytes_written += child.serialize(writer, serialize_data)?;
                     }
                 }
@@ -296,7 +299,9 @@ impl<T> Octree<T> {
             }
             2 => {
                 let mut de = || Self::deserialize(reader, deserialize_data);
-                let node = Node::Branch(OctantMap { children: [de()?, de()?, de()?, de()?, de()?, de()?, de()?, de()?] });
+                let node = Node::Branch(OctantMap {
+                    children: (de()?, de()?, de()?, de()?, de()?, de()?, de()?, de()?),
+                });
 
                 Ok(Octree {
                     height,
@@ -325,9 +330,9 @@ impl<T> Octree<T> {
         IterMut::new(self)
     }
 
-    const fn new_branch(height: i64) -> OctantMap<T> {
+    const fn new_branch(height: i64) -> OctantMap<Self> {
         OctantMap {
-            children: [
+            children: (
                 Octree { height, node: None },
                 Octree { height, node: None },
                 Octree { height, node: None },
@@ -336,7 +341,7 @@ impl<T> Octree<T> {
                 Octree { height, node: None },
                 Octree { height, node: None },
                 Octree { height, node: None },
-            ],
+            ),
         }
     }
 
@@ -345,18 +350,17 @@ impl<T> Octree<T> {
     pub fn subdivide(height: i64, pos: Point3<i64>) -> (Octant, Point3<i64>) {
         assert!(height > 0);
         let half_size: i64 = 1 << (height - 1);
-        let size: i64 = half_size * 2;
 
         let get_step = |value| {
-            if value < half_size {
-                (0, value)
-            } else if value < size {
-                (1, value - half_size)
+            if value < 0 && value >= -half_size {
+                (-1, value + (half_size + 1) / 2)
+            } else if value >= 0 && value < half_size {
+                (1, value - half_size / 2)
             } else {
                 panic!(
                     "Subdividing point {:?} into octants but it falls outside the current octant
-                     at height {} with max size {}",
-                    pos, height, size
+                     at height {} with allowed range [{}, {})",
+                    pos, height, -half_size, half_size
                 )
             }
         };
@@ -366,7 +370,11 @@ impl<T> Octree<T> {
         let (z_octant, z) = get_step(pos.z);
 
         (
-            Octant(x_octant + y_octant * 2 + z_octant * 4 as i8),
+            Octant {
+                x: x_octant,
+                y: y_octant,
+                z: z_octant,
+            },
             Point3::new(x, y, z),
         )
     }
@@ -379,19 +387,21 @@ impl<T> Octree<T> {
     /// use cgmath::{Point3, Vector3};
     /// use simgame_core::octree::{self, Octree};
     /// let height = 7;
-    /// let octant = octree::Octant(3);
+    /// let octant = octree::Octant::from_index(3);
     /// let offset = Octree::<()>::quadrant_offset(height, octant);
-    /// assert_eq!(offset, Vector3::new(64, 64, 0));
+    /// assert_eq!(offset, Vector3::new(32, 32, -32));
     /// let sub = Octree::<()>::subdivide(height, Point3::new(0, 0, 0) + offset);
     /// assert_eq!(sub.0, octant);
     /// assert_eq!(sub.1, Point3::new(0, 0, 0));
     /// ```
     pub fn quadrant_offset(height: i64, octant: Octant) -> Vector3<i64> {
         assert!(height > 0);
-        assert!(octant.0 < 8);
-        let distance = 1 << (height - 1);
-
-        distance * octant.as_direction()
+        if height > 2 {
+            let distance = 1 << (height - 2);
+            distance * octant.as_direction()
+        } else {
+            octant.as_direction()
+        }
     }
 
     #[inline]
@@ -404,7 +414,10 @@ impl<T> Octree<T> {
     #[inline]
     pub fn bounds(&self) -> Bounds<i64> {
         let width = 1 << self.height;
-        Bounds::from_size(Vector3::new(width, width, width))
+        let origin = Point3::new(-width / 2, -width / 2, -width / 2);
+        let size = Vector3::new(width, width, width);
+
+        Bounds::new(origin, size)
     }
 
     pub fn check_height_invariant(&self) -> bool {
@@ -412,7 +425,7 @@ impl<T> Octree<T> {
             None => true,
             Some(boxed_node) => match &**boxed_node {
                 Node::Leaf(_) => self.height == 0,
-                Node::Branch(children) => children.children.iter().all(|child| {
+                Node::Branch(children) => children.iter().all(|child| {
                     1 + child.height == self.height && child.check_height_invariant()
                 }),
             },
@@ -426,7 +439,7 @@ impl<T> Octree<T> {
                 Node::Leaf(_) => assert_eq!(self.height, 0),
                 Node::Branch(children) => {
                     assert!(self.height > 0);
-                    for child in &children.children {
+                    for child in children {
                         assert_eq!(child.height, self.height - 1);
                         child.assert_height_invariant();
                     }
@@ -445,7 +458,7 @@ pub struct Iter<'a, T> {
 
 struct IterNode<'a, T> {
     node: &'a Node<T>,
-    next_octant: Octant,
+    next_octant: Option<Octant>,
     octant_origin: Point3<i64>,
 }
 
@@ -462,7 +475,7 @@ pub struct IterMut<'a, T> {
 
 struct IterMutNode<'a, T> {
     node: *mut Node<T>,
-    next_octant: Octant,
+    next_octant: Option<Octant>,
     octant_origin: Point3<i64>,
     _marker: std::marker::PhantomData<&'a mut Octree<T>>,
 }
@@ -477,8 +490,8 @@ impl<'a, T> Iter<'a, T> {
                 stack.reserve_exact(1 + tree.height as usize);
                 stack.push(IterNode {
                     node: &**boxed_node,
-                    next_octant: Octant(0),
-                    octant_origin: Point3::new(0, 0, 0),
+                    next_octant: Some(Octant::from_index(0)),
+                    octant_origin: tree.bounds().origin(),
                 });
             }
         }
@@ -500,20 +513,23 @@ impl<'a, T> Iterator for Iter<'a, T> {
             };
 
             let next_child = loop {
-                if iter_node.next_octant == Octant(8) {
+                let next_octant = if let Some(next_octant) = iter_node.next_octant {
+                    next_octant
+                } else {
                     break None;
-                }
+                };
 
-                let child = &children[iter_node.next_octant];
+                let child = &children[next_octant];
                 match &child.node {
-                    None => iter_node.next_octant.0 += 1,
+                    None => iter_node.next_octant = next_octant.next(),
                     Some(boxed_node) => {
                         let height = child.height;
                         let octant_size = 1 << height;
-                        let dir = iter_node.next_octant.as_direction();
+                        let dir = next_octant.as_direction();
+                        let offset = (dir + Vector3::new(1, 1, 1)) / 2;
 
-                        iter_node.next_octant.0 += 1;
-                        let octant_origin = iter_node.octant_origin + (octant_size * dir);
+                        iter_node.next_octant = next_octant.next();
+                        let octant_origin = iter_node.octant_origin + (octant_size * offset);
                         let octant_bounds =
                             Bounds::new(octant_origin, octant_size * Vector3::new(1, 1, 1));
 
@@ -536,7 +552,7 @@ impl<'a, T> Iterator for Iter<'a, T> {
                     self.stack.push(iter_node);
                     self.stack.push(IterNode {
                         node: next_node,
-                        next_octant: Octant(0),
+                        next_octant: Some(Octant::from_index(0)),
                         octant_origin,
                     });
                 }
@@ -559,8 +575,8 @@ impl<'a, T> IterMut<'a, T> {
                 stack.reserve_exact(capacity);
                 stack.push(IterMutNode {
                     node: &mut **node as *mut Node<T>,
-                    next_octant: Octant(0),
-                    octant_origin: Point3::new(0, 0, 0),
+                    next_octant: Some(Octant::from_index(0)),
+                    octant_origin: tree.bounds().origin(),
                     _marker: std::marker::PhantomData,
                 });
             }
@@ -589,18 +605,20 @@ impl<'a, T> Iterator for IterMut<'a, T> {
                 };
 
                 loop {
-                    if iter_node.next_octant == Octant(8) {
+                    let next_octant = if let Some(next_octant) = iter_node.next_octant {
+                        next_octant
+                    } else {
                         break None;
-                    }
+                    };
 
-                    let child = &mut children[iter_node.next_octant];
+                    let child = &mut children[next_octant];
                     match &mut child.node {
-                        None => iter_node.next_octant.0 += 1,
+                        None => iter_node.next_octant = next_octant.next(),
                         Some(ref mut boxed_node) => {
                             let height = child.height;
                             let distance = 1 << height;
-                            let dir = iter_node.next_octant.as_direction();
-                            iter_node.next_octant.0 += 1;
+                            let dir = (next_octant.as_direction() + Vector3::new(1, 1, 1)) / 2;
+                            iter_node.next_octant = next_octant.next();
                             let octant_origin = iter_node.octant_origin + (distance * dir);
                             break Some((octant_origin, &mut **boxed_node));
                         }
@@ -614,7 +632,7 @@ impl<'a, T> Iterator for IterMut<'a, T> {
                     self.stack.push(iter_node);
                     self.stack.push(IterMutNode {
                         node: next_node as *mut Node<T>,
-                        next_octant: Octant(0),
+                        next_octant: Some(Octant::from_index(0)),
                         octant_origin,
                         _marker: std::marker::PhantomData,
                     });
@@ -629,6 +647,157 @@ impl<'a, T> Iterator for IterMut<'a, T> {
 impl<T> Node<T> {
     const fn dummy() -> Node<T> {
         Node::Branch(Octree::new_branch(0))
+    }
+}
+
+impl<T> OctantMap<T> {
+    pub fn iter(&self) -> IterOctantMap<T> {
+        self.into_iter()
+    }
+}
+
+impl<T> std::ops::Index<Octant> for OctantMap<T> {
+    type Output = T;
+
+    fn index(&self, octant: Octant) -> &Self::Output {
+        let index = octant.as_index();
+        if index == 0 {
+            &self.children.0
+        } else if index == 1 {
+            &self.children.1
+        } else if index == 2 {
+            &self.children.2
+        } else if index == 3 {
+            &self.children.3
+        } else if index == 4 {
+            &self.children.4
+        } else if index == 5 {
+            &self.children.5
+        } else if index == 6 {
+            &self.children.6
+        } else if index == 7 {
+            &self.children.7
+        } else {
+            panic!("Octant has invalid index {}", index);
+        }
+    }
+}
+
+impl<T> std::ops::IndexMut<Octant> for OctantMap<T> {
+    fn index_mut(&mut self, octant: Octant) -> &mut Self::Output {
+        let index = octant.as_index();
+        if index == 0 {
+            &mut self.children.0
+        } else if index == 1 {
+            &mut self.children.1
+        } else if index == 2 {
+            &mut self.children.2
+        } else if index == 3 {
+            &mut self.children.3
+        } else if index == 4 {
+            &mut self.children.4
+        } else if index == 5 {
+            &mut self.children.5
+        } else if index == 6 {
+            &mut self.children.6
+        } else if index == 7 {
+            &mut self.children.7
+        } else {
+            panic!("Octant has invalid index {}", index);
+        }
+    }
+}
+
+pub struct IterOctantMap<'a, T> {
+    map: &'a OctantMap<T>,
+    next_octant: Option<Octant>,
+}
+
+impl<'a, T> Iterator for IterOctantMap<'a, T> {
+    type Item = &'a T;
+
+    fn next(&mut self) -> Option<&'a T> {
+        let octant = self.next_octant?;
+        self.next_octant = octant.next();
+        Some(&self.map[octant])
+    }
+}
+
+impl<'a, T> IntoIterator for &'a OctantMap<T> {
+    type Item = &'a T;
+    type IntoIter = IterOctantMap<'a, T>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        IterOctantMap {
+            map: self,
+            next_octant: Some(Octant::from_index(0)),
+        }
+    }
+}
+
+impl<T> OctantMap<T> {
+    pub fn transform<R, F>(self, mut f: F) -> OctantMap<R>
+    where
+        F: FnMut(Octant, T) -> R,
+    {
+        OctantMap {
+            children: (
+                f(Octant::from_index(0), self.children.0),
+                f(Octant::from_index(1), self.children.1),
+                f(Octant::from_index(2), self.children.2),
+                f(Octant::from_index(3), self.children.3),
+                f(Octant::from_index(4), self.children.4),
+                f(Octant::from_index(5), self.children.5),
+                f(Octant::from_index(6), self.children.6),
+                f(Octant::from_index(7), self.children.7),
+            ),
+        }
+    }
+}
+
+impl Octant {
+    #[inline]
+    pub fn as_index(self) -> usize {
+        ((self.x + 1) / 2 + (self.y + 1) + (self.z + 1) * 2) as usize
+    }
+
+    #[inline]
+    pub fn from_index(index: usize) -> Octant {
+        assert!(index < 8);
+
+        Octant {
+            x: ((index % 2) as i8) * 2 - 1,
+            y: (((index % 4) / 2) as i8) * 2 - 1,
+            z: ((index / 4) as i8) * 2 - 1,
+        }
+    }
+
+    #[inline]
+    pub fn as_direction(self) -> Vector3<i64> {
+        Vector3 {
+            x: self.x as i64,
+            y: self.y as i64,
+            z: self.z as i64,
+        }
+    }
+
+    #[inline]
+    pub fn next(self) -> Option<Octant> {
+        let index = self.as_index();
+        if 1 + index < 8 {
+            Some(Octant::from_index(1 + index))
+        } else {
+            None
+        }
+    }
+
+    #[inline]
+    pub fn opposite(self) -> Octant {
+        Octant {
+            x: -self.x,
+            y: -self.y,
+            z: -self.z,
+        }
     }
 }
 
