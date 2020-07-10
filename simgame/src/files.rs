@@ -5,9 +5,9 @@ use serde::{Deserialize, Serialize};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
-use crate::block::WorldBlockData;
-use crate::settings::{CoreSettings, Settings};
-use crate::util::Bounds;
+use simgame_core::block::WorldBlockData;
+use simgame_core::settings::{CoreSettings, Settings};
+use simgame_core::util::Bounds;
 
 const CORE_SETTINGS_FILE_NAME: &str = "core_config.yaml";
 const USER_SETTINGS_FILE_NAME: &str = "settings.yaml";

@@ -18,6 +18,7 @@ pub use simgame_render::{RenderParams, WorldShaderData, WorldShaders};
 
 mod controls;
 mod world_state;
+pub mod files;
 
 pub async fn test_render<'a>(
     world: World,

@@ -5,9 +5,9 @@ use std::path::{Path, PathBuf};
 use structopt::StructOpt;
 
 use simgame_core::block::BlockConfigHelper;
-use simgame_core::files::FileContext;
 use simgame_core::world::World;
 use simgame_worldgen as worldgen;
+use simgame::files::{FileContext, ShaderLoadAction};
 
 #[derive(Debug, StructOpt)]
 struct Opts {
@@ -133,7 +133,7 @@ fn run_compile_shaders(ctx: &FileContext) -> Result<()> {
 
 #[derive(Clone, Copy)]
 #[allow(dead_code)]
-enum LoadShaderAction {
+enum SimpleShaderLoadAction {
     CompileOnly,
     CachedOrCompile,
     CachedOnly,
@@ -141,17 +141,17 @@ enum LoadShaderAction {
 
 impl ShaderOpts {
     #[cfg(feature = "shader-compiler")]
-    fn load_action(&self) -> LoadShaderAction {
+    fn load_action(&self) -> SimpleShaderLoadAction {
         if self.force_shader_compile {
-            LoadShaderAction::CompileOnly
+            SimpleShaderLoadAction::CompileOnly
         } else {
-            LoadShaderAction::CachedOrCompile
+            SimpleShaderLoadAction::CachedOrCompile
         }
     }
 
     #[cfg(not(feature = "shader-compiler"))]
-    fn load_action(&self) -> LoadShaderAction {
-        LoadShaderAction::CachedOnly
+    fn load_action(&self) -> SimpleShaderLoadAction {
+        SimpleShaderLoadAction::CachedOnly
     }
 }
 
@@ -166,13 +166,13 @@ fn load_shaders(ctx: &FileContext, shader_opts: &ShaderOpts) -> Result<simgame::
         Box::new(|p, t| shader_compiler.compile(p, t));
 
     let mut action = match shader_opts.load_action() {
-        LoadShaderAction::CompileOnly => {
-            simgame_core::files::ShaderLoadAction::CompileOnly(&mut compile)
+        SimpleShaderLoadAction::CompileOnly => {
+            ShaderLoadAction::CompileOnly(&mut compile)
         }
-        LoadShaderAction::CachedOrCompile => {
-            simgame_core::files::ShaderLoadAction::CachedOrCompile(&mut compile)
+        SimpleShaderLoadAction::CachedOrCompile => {
+            ShaderLoadAction::CachedOrCompile(&mut compile)
         }
-        LoadShaderAction::CachedOnly => simgame_core::files::ShaderLoadAction::CachedOnly,
+        SimpleShaderLoadAction::CachedOnly => ShaderLoadAction::CachedOnly,
     };
 
     Ok(simgame::WorldShaderData {

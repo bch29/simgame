@@ -10,8 +10,6 @@ byteorder = "*"
 serde = { version = "*", features = ["derive"] }
 serde_cbor = "*"
 serde_yaml = "*"
-directories = "*"
 anyhow = "*"
-lz4 = "*"
 rand = "*"
 log = "*"
