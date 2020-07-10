@@ -2,6 +2,7 @@
 members = [
   "core",
   "render",
+  "worldgen",
   "simgame",
 ]
 

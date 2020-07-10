@@ -17,6 +17,7 @@ use simgame_render::{RenderInit, RenderState, WorldRenderInit};
 pub use simgame_render::{RenderParams, WorldShaderData, WorldShaders};
 
 mod controls;
+mod world_state;
 
 pub async fn test_render<'a>(
     world: World,
@@ -80,7 +81,7 @@ fn build_window(event_loop: &EventLoop<()>, settings: &settings::VideoSettings) 
 }
 
 pub struct TestRender {
-    world: World,
+    world_state: world_state::WorldState,
     win_dimensions: Vector2<f64>,
     window: Window,
     control_state: controls::ControlState,
@@ -152,7 +153,7 @@ impl TestRender {
             render_params.clone(),
             RenderInit {
                 window: &window,
-                physical_win_size: physical_win_size,
+                physical_win_size,
                 world: WorldRenderInit {
                     shaders,
                     display_size: physical_win_size,
@@ -182,7 +183,7 @@ impl TestRender {
         let world_diff = UpdatedWorldState::empty();
 
         Ok(TestRender {
-            world,
+            world_state: world_state::WorldState::new(world),
             win_dimensions,
             window,
             control_state,
@@ -236,12 +237,12 @@ impl TestRender {
                             ..
                         } => match key {
                             VirtualKeyCode::Escape => *control_flow = ControlFlow::Exit,
-                            VirtualKeyCode::Space => self.world.toggle_updates(),
+                            VirtualKeyCode::Space => self.world_state.toggle_updates(),
                             VirtualKeyCode::E => {
-                                self.world.modify_filled_blocks(1, &mut self.world_diff)
+                                self.world_state.modify_filled_blocks(1, &mut self.world_diff)
                             }
                             VirtualKeyCode::Q => {
-                                self.world.modify_filled_blocks(-1, &mut self.world_diff)
+                                self.world_state.modify_filled_blocks(-1, &mut self.world_diff)
                             }
                             _ => {}
                         },
@@ -297,7 +298,7 @@ impl TestRender {
 
     fn redraw(&mut self) -> Result<()> {
         self.render_state.set_world_view(self.view_state.clone());
-        self.render_state.update(&self.world, &self.world_diff);
+        self.render_state.update(&self.world_state.world(), &self.world_diff);
         self.render_state.render_frame();
         self.world_diff.clear();
         self.time_tracker.sample(Instant::now());
@@ -323,7 +324,7 @@ impl TestRender {
     fn tick(&mut self, _now: Instant, elapsed: Duration) -> Result<()> {
         let elapsed = elapsed.as_secs_f64();
 
-        self.world.tick(elapsed, &mut self.world_diff);
+        self.world_state.tick(elapsed, &mut self.world_diff)?;
         self.control_state.tick(elapsed, &mut self.view_state);
         Ok(())
     }

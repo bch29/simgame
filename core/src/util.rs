@@ -310,6 +310,23 @@ impl<T: BaseNum> Bounds<T> {
     }
 
     #[inline]
+    pub fn corners(self) -> [Point3<T>; 8] {
+        let a = self.origin();
+        let b = self.limit();
+
+        [
+            Point3::new(a.x, a.y, a.z),
+            Point3::new(a.x, a.y, b.z),
+            Point3::new(a.x, b.y, a.z),
+            Point3::new(a.x, b.y, b.z),
+            Point3::new(b.x, a.y, a.z),
+            Point3::new(b.x, a.y, b.z),
+            Point3::new(b.x, b.y, a.z),
+            Point3::new(b.x, b.y, b.z),
+        ]
+    }
+
+    #[inline]
     pub fn volume(self) -> T {
         self.size.x * self.size.y * self.size.z
     }

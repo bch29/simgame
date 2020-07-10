@@ -1,9 +1,12 @@
+//! Types used to represent the voxel-based world.
+
+use std::io::{self, Read, Write};
+use std::slice;
+use std::collections::HashMap;
+
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use cgmath::{ElementWise, EuclideanSpace, Point3};
 use serde::{Deserialize, Serialize};
-/// Types used to represent the voxel-based world.
-use std::io::{self, Read, Write};
-use std::slice;
 
 use crate::octree::Octree;
 use crate::util::Bounds;
@@ -51,6 +54,34 @@ impl BlockInfo {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BlockConfig {
     block_info: Vec<BlockInfo>,
+}
+
+pub struct BlockConfigHelper {
+    blocks_by_name: HashMap<String, (Block, BlockInfo)>,
+    blocks_by_id: Vec<BlockInfo>
+}
+
+impl BlockConfigHelper {
+    pub fn new(config: &BlockConfig) -> Self {
+        let blocks_by_name = config.block_info.iter().enumerate().map(|(i, block_info)| {
+            let name = block_info.name.clone();
+            let block = Block::from_u16(i as u16);
+            (name, (block, block_info.clone()))
+        }).collect();
+
+        let blocks_by_id = config.block_info.clone();
+
+        Self { blocks_by_name, blocks_by_id }
+    }
+
+    pub fn block_by_name(&self, name: &str) -> Option<(Block, &BlockInfo)> {
+        let (block, block_info) = self.blocks_by_name.get(name)?;
+        Some((*block, block_info))
+    }
+
+    pub fn block_info(&self, block: Block) -> Option<&BlockInfo> {
+        self.blocks_by_id.get(block.0 as usize)
+    }
 }
 
 /// Stores the world's blocks, but not other things like entities.

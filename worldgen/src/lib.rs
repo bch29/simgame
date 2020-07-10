@@ -4,27 +4,23 @@ use log::info;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 
-use crate::block::{Block, WorldBlockData};
-use crate::util::Bounds;
+use simgame_core::block::{Block, WorldBlockData, BlockConfigHelper};
+use simgame_core::world::{BlockUpdater, UpdatedWorldState};
+use simgame_core::util::Bounds;
 
-pub(crate) mod primitives;
+pub mod primitives;
+pub mod lsystem;
+pub mod turtle;
+pub mod tree;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GenerateWorldConfig {
     pub size: Vector3<usize>,
-    pub trees: Vec<TreeConfig>,
+    pub tree: Option<tree::TreeConfig>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TreeConfig {
-    trunk_block: Block,
-    foliage_block: Block,
-    trunk_radius: f64,
-    branch_radius_factor: f64,
-}
-
-pub fn generate_world(config: &GenerateWorldConfig) -> Result<WorldBlockData> {
-    info!("Creating empty world");
+pub fn generate_world(config: &GenerateWorldConfig, block_helper: &BlockConfigHelper) -> Result<WorldBlockData> {
+    info!("Creating empty world: {:?}", config);
     let world_bounds = Bounds::from_size(config.size);
     let mut blocks = WorldBlockData::empty(world_bounds);
 
@@ -84,6 +80,14 @@ pub fn generate_world(config: &GenerateWorldConfig) -> Result<WorldBlockData> {
             Ok(block)
         })
         .unwrap();
+
+    if let Some(tree_config) = &config.tree {
+        let mut updated_state = UpdatedWorldState::empty();
+        let mut block_updater = BlockUpdater::new(&mut blocks, &mut updated_state);
+
+        let tree = tree::generate(tree_config, block_helper, &mut rng)?;
+        tree.draw(&mut block_updater);
+    }
 
     info!("Generated world: {:?}", blocks.debug_summary());
 

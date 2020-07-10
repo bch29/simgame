@@ -1,12 +1,13 @@
 use anyhow::{anyhow, Result};
 use log::{error, info};
 use std::env;
-use std::path::{PathBuf, Path};
+use std::path::{Path, PathBuf};
 use structopt::StructOpt;
 
+use simgame_core::block::BlockConfigHelper;
 use simgame_core::files::FileContext;
 use simgame_core::world::World;
-use simgame_core::worldgen;
+use simgame_worldgen as worldgen;
 
 #[derive(Debug, StructOpt)]
 struct Opts {
@@ -57,12 +58,8 @@ enum Action {
 struct GenerateWorldOpts {
     #[structopt(short, long)]
     save_name: String,
-    #[structopt(short = "x", long)]
-    size_x: usize,
-    #[structopt(short = "y", long)]
-    size_y: usize,
-    #[structopt(short = "z", long, default_value = "128")]
-    size_z: usize,
+    #[structopt(short, long)]
+    config: PathBuf,
 }
 
 fn run(opt: Opts) -> Result<()> {
@@ -107,17 +104,15 @@ async fn run_render_world(ctx: &FileContext, options: &RenderWorldOpts) -> Resul
         trace_path: options.graphics_trace_path.as_ref().map(|p| p.as_path()),
     };
 
-    simgame::test_render(world, settings.render_test_params, params, ref_shaders)
-        .await
+    simgame::test_render(world, settings.render_test_params, params, ref_shaders).await
 }
 
 fn run_generate(ctx: &FileContext, options: &GenerateWorldOpts) -> Result<()> {
-    let config = worldgen::GenerateWorldConfig {
-        size: cgmath::Vector3::new(options.size_x, options.size_y, options.size_z),
-        trees: vec![]
-    };
+    let block_helper = BlockConfigHelper::new(&ctx.core_settings.block_config);
 
-    let blocks = worldgen::generate_world(&config)?;
+    let config_file = std::fs::File::open(&options.config)?;
+    let config = serde_yaml::from_reader(config_file)?;
+    let blocks = worldgen::generate_world(&config, &block_helper)?;
 
     info!("Saving");
     ctx.save_world_blocks(options.save_name.as_str(), &blocks)?;
@@ -160,10 +155,7 @@ impl ShaderOpts {
     }
 }
 
-fn load_shaders(
-    ctx: &FileContext,
-    shader_opts: &ShaderOpts,
-) -> Result<simgame::WorldShaderData> {
+fn load_shaders(ctx: &FileContext, shader_opts: &ShaderOpts) -> Result<simgame::WorldShaderData> {
     use simgame_shaders::{CompileParams, Compiler, ShaderKind};
 
     let mut shader_compiler = Compiler::new(CompileParams {

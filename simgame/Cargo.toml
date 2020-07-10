@@ -11,6 +11,7 @@ shader-compiler = ["simgame_shaders/shader-compiler"]
 simgame_core = { path = "../core/" }
 simgame_render = { path = "../render/" }
 simgame_shaders = { path = "../shaders/" }
+simgame_worldgen = { path = "../worldgen/" }
 cgmath = "*"
 structopt = "*"
 env_logger = "*"
@@ -18,3 +19,5 @@ log = "*"
 anyhow = "*"
 smol = "*"
 winit = "*"
+rand = "*"
+serde_yaml = "*"

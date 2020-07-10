@@ -1610,9 +1610,12 @@ dependencies = [
  "cgmath",
  "env_logger",
  "log",
+ "rand 0.6.5",
+ "serde_yaml",
  "simgame_core",
  "simgame_render",
  "simgame_shaders",
+ "simgame_worldgen",
  "smol",
  "structopt",
  "winit",
@@ -1656,6 +1659,18 @@ dependencies = [
  "anyhow",
  "log",
  "shaderc",
+]
+
+[[package]]
+name = "simgame_worldgen"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "cgmath",
+ "log",
+ "rand 0.6.5",
+ "serde",
+ "simgame_core",
 ]
 
 [[package]]

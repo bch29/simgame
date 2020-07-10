@@ -1,0 +1,15 @@
+[package]
+name = "simgame_worldgen"
+version = "0.1.0"
+authors = ["Bradley Hardy <bradleyhardy29@gmail.com>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+simgame_core = { path = "../core/" }
+rand = "*"
+cgmath = "*"
+log = "*"
+anyhow = "*"
+serde = { version = "*", features = ["derive"] }
