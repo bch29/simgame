@@ -635,7 +635,7 @@ where
 #[macro_export]
 macro_rules! convert_point {
     ($val:expr, $type:ty) => {
-        Point3 {
+        cgmath::Point3 {
             x: $val.x as $type,
             y: $val.y as $type,
             z: $val.z as $type,
@@ -646,11 +646,21 @@ macro_rules! convert_point {
 #[macro_export]
 macro_rules! convert_vec {
     ($val:expr, $type:ty) => {
-        Vector3 {
+        cgmath::Vector3 {
             x: $val.x as $type,
             y: $val.y as $type,
             z: $val.z as $type,
         }
+    };
+}
+
+#[macro_export]
+macro_rules! convert_bounds {
+    ($val:expr, $type:ty) => {
+        $crate::util::Bounds::new(
+            $crate::convert_point!($val.origin(), $type),
+            $crate::convert_vec!($val.size(), $type),
+        )
     };
 }
 
@@ -896,6 +906,16 @@ mod tests {
                     }
                 }
             );
+        }
+
+        {
+            let ray = Ray {
+                origin: Point3::new(0.5, 0.0, 7.0),
+                dir: Vector3::new(-1.0, 1.0, -1.0),
+            };
+            let res = bounds.cast_ray(&ray);
+
+            assert_eq!(res, ConvexRaycastResult::Miss);
         }
     }
 }

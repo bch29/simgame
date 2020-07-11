@@ -181,3 +181,69 @@ fn test_grow() {
     check_points(&tree);
     tree.assert_height_invariant();
 }
+
+#[test]
+fn test_cast_ray() {
+    let mut tree: Octree<i64> = Octree::new(4);
+    tree.insert(Point3::new(4, 2, 5), 6);
+    tree.insert(Point3::new(2, 3, 4), 5);
+    tree.insert(Point3::new(-6, 7, 0), 2);
+    tree.insert(Point3::new(1, 1, 1), 7);
+    tree.insert(Point3::new(1, 2, 1), 8);
+    tree.insert(Point3::new(1, 1, 2), 9);
+
+    let ray = Ray {
+        origin: Point3::new(0., 0., 0.),
+        dir: Vector3::new(4.2, 2.1, 5.25),
+    };
+
+    let hits = collect_ray_hits(&tree, ray);
+    assert_eq!(
+        hits,
+        vec![
+        ]
+    );
+
+    let ray = Ray {
+        origin: Point3::new(0., 0., 0.),
+        dir: Vector3::new(2., 3., 4.),
+    };
+
+    let hits = collect_ray_hits(&tree, ray);
+    assert_eq!(
+        hits,
+        vec![
+            RaycastHit {
+                pos: Point3::new(1, 1, 1),
+                data: 7
+            },
+            RaycastHit {
+                pos: Point3::new(1, 1, 2),
+                data: 9
+            },
+            RaycastHit {
+                pos: Point3::new(2, 3, 4),
+                data: 5
+            },
+        ]
+    );
+
+    // let ray = Ray {
+    //     origin: Point3::new(0., 0., 0.),
+    //     dir: Vector3::new(-6.1, 7., 0.),
+    // };
+
+    // println!("{:?}", tree.cast_ray(&ray, |_, &v| { Some(v) }));
+}
+
+fn collect_ray_hits<T>(tree: &Octree<T>, ray: Ray<f64>) -> Vec<RaycastHit<T>>
+where
+    T: Copy,
+{
+    let mut res = Vec::new();
+    tree.cast_ray(&ray, |pos, &data| {
+        res.push(RaycastHit { pos, data });
+        None as Option<()>
+    });
+    res
+}

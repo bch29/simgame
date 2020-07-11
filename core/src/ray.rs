@@ -46,6 +46,14 @@ where
     pub fn get(&self, t: T) -> Point3<T> {
         self.origin + self.dir * t
     }
+
+    /// Move the ray's origin by some offset.
+    pub fn offset(&self, offset: Vector3<T>) -> Self {
+        Self {
+            origin: self.origin + offset,
+            dir: self.dir
+        }
+    }
 }
 
 impl<T> Ray<T>

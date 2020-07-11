@@ -1,10 +1,12 @@
 use anyhow::anyhow;
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
-use cgmath::{Point3, Vector3};
+use cgmath::{EuclideanSpace, Point3, Vector3};
 use serde::{Deserialize, Serialize};
 use std::io::{self, Read, Write};
 
+use crate::ray::{ConvexRaycastResult, Ray};
 use crate::util::Bounds;
+use crate::{convert_bounds, convert_vec};
 
 /// A tree structure providing a sparse representation of values in a 3D grid.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -22,14 +24,43 @@ pub struct Octant {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-enum Node<T> {
-    Branch(OctantMap<Octree<T>>),
-    Leaf(T),
+pub struct OctantMap<T> {
+    children: (T, T, T, T, T, T, T, T),
+}
+
+pub struct Iter<'a, T> {
+    /// Traces the path currently taken through the tree. Each point along the path records the
+    /// node and the index of the next branch to take.
+    stack: Vec<IterNode<'a, T>>,
+    bounds: Bounds<i64>,
+}
+
+pub struct IterMut<'a, T> {
+    // This could be implemented safely without using raw pointers but that would require using a
+    // stack of size 8 * tree height instead of the 1 + tree height that we can get away with in
+    // unsafe code.
+    stack: Vec<IterMutNode<'a, T>>,
+
+    // this is used to test that the stack never re-allocates
+    #[cfg(test)]
+    capacity: usize,
+}
+
+pub struct IterOctantMap<'a, T> {
+    map: &'a OctantMap<T>,
+    next_octant: Option<Octant>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RaycastHit<T> {
+    pub data: T,
+    pub pos: Point3<i64>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub struct OctantMap<T> {
-    children: (T, T, T, T, T, T, T, T),
+enum Node<T> {
+    Branch(OctantMap<Octree<T>>),
+    Leaf(T),
 }
 
 impl<T> Octree<T> {
@@ -235,6 +266,71 @@ impl<T> Octree<T> {
         }
     }
 
+    pub fn cast_ray<'a, R, F>(&'a self, ray: &Ray<f64>, mut test: F) -> Option<RaycastHit<R>>
+    where
+        F: FnMut(Point3<i64>, &'a T) -> Option<R>,
+        R: 'a,
+    {
+        let near_octant = {
+            let x = if ray.dir.x > 0.0 { -1 } else { 1 };
+            let y = if ray.dir.y > 0.0 { -1 } else { 1 };
+            let z = if ray.dir.z > 0.0 { -1 } else { 1 };
+            Octant { x, y, z }
+        };
+
+        println!("near octant: {:?}", near_octant);
+
+        self.cast_ray_impl(Point3::origin(), near_octant, ray, &mut test)
+    }
+
+    fn cast_ray_impl<'a, R, F>(
+        &'a self,
+        origin: Point3<i64>,
+        near_octant: Octant,
+        ray: &Ray<f64>,
+        test: &mut F,
+    ) -> Option<RaycastHit<R>>
+    where
+        F: FnMut(Point3<i64>, &'a T) -> Option<R>,
+        R: 'a,
+    {
+        let test_bounds = self.bounds().translate(origin);
+
+        match convert_bounds!(test_bounds, f64).cast_ray(ray) {
+            ConvexRaycastResult::Miss => return None,
+            _ => {}
+        };
+
+        match &self.node {
+            None => None,
+            Some(node) => {
+                println!("Hit bounds {:?}, current origin {:?}", test_bounds, origin);
+                match &**node {
+                    Node::Leaf(ref data) => Some(RaycastHit {
+                        pos: origin,
+                        data: test(origin, data)?,
+                    }),
+                    Node::Branch(children) => {
+                        let first_ix = near_octant.as_index();
+
+                        for i in 0..8 {
+                            let octant = Octant::from_index((first_ix + i) % 8);
+                            let child = &children[octant];
+                            let offset = Self::octant_offset(self.height, octant);
+                            if let Some(res) =
+                                child.cast_ray_impl(origin + offset, near_octant, ray, test)
+                            {
+                                return Some(res);
+                            }
+                        }
+
+                        None
+                    }
+                }
+            }
+        }
+    }
+
     /// Serializes the octree in a binary format. Returns the number of bytes written.
     /// Accepts a function to serialize individual data leaves. This function must precisely report
     /// the number of bytes it wrote if it succeeds.
@@ -388,19 +484,19 @@ impl<T> Octree<T> {
     /// use simgame_core::octree::{self, Octree};
     /// let height = 7;
     /// let octant = octree::Octant::from_index(3);
-    /// let offset = Octree::<()>::quadrant_offset(height, octant);
+    /// let offset = Octree::<()>::octant_offset(height, octant);
     /// assert_eq!(offset, Vector3::new(32, 32, -32));
     /// let sub = Octree::<()>::subdivide(height, Point3::new(0, 0, 0) + offset);
     /// assert_eq!(sub.0, octant);
     /// assert_eq!(sub.1, Point3::new(0, 0, 0));
     /// ```
-    pub fn quadrant_offset(height: i64, octant: Octant) -> Vector3<i64> {
+    pub fn octant_offset(height: i64, octant: Octant) -> Vector3<i64> {
         assert!(height > 0);
-        if height > 2 {
+        if height >= 2 {
             let distance = 1 << (height - 2);
             distance * octant.as_direction()
         } else {
-            octant.as_direction()
+            (octant.as_direction() - Vector3::new(1, 1, 1)) / 2
         }
     }
 
@@ -449,28 +545,10 @@ impl<T> Octree<T> {
     }
 }
 
-pub struct Iter<'a, T> {
-    /// Traces the path currently taken through the tree. Each point along the path records the
-    /// node and the index of the next branch to take.
-    stack: Vec<IterNode<'a, T>>,
-    bounds: Bounds<i64>,
-}
-
 struct IterNode<'a, T> {
     node: &'a Node<T>,
     next_octant: Option<Octant>,
     octant_origin: Point3<i64>,
-}
-
-pub struct IterMut<'a, T> {
-    // This could be implemented safely without using raw pointers but that would require using a
-    // stack of size 8 * tree height instead of the 1 + tree height that we can get away with in
-    // unsafe code.
-    stack: Vec<IterMutNode<'a, T>>,
-
-    // this is used to test that the stack never re-allocates
-    #[cfg(test)]
-    capacity: usize,
 }
 
 struct IterMutNode<'a, T> {
@@ -706,11 +784,6 @@ impl<T> std::ops::IndexMut<Octant> for OctantMap<T> {
             panic!("Octant has invalid index {}", index);
         }
     }
-}
-
-pub struct IterOctantMap<'a, T> {
-    map: &'a OctantMap<T>,
-    next_octant: Option<Octant>,
 }
 
 impl<'a, T> Iterator for IterOctantMap<'a, T> {
