@@ -1,5 +1,5 @@
 use anyhow::Result;
-use cgmath::{Deg, EuclideanSpace, InnerSpace, Matrix4, Point3, SquareMatrix, Vector2, Vector3};
+use cgmath::{Deg, InnerSpace, Matrix4, Point3, SquareMatrix, Vector2, Vector3};
 
 use simgame_core::{
     convert_point, convert_vec,
@@ -91,7 +91,7 @@ impl WorldRenderState {
                 shaders: &shaders,
                 view_state: &view_state,
                 depth_texture: &depth_texture,
-                world: init.world,
+                blocks: &init.world.blocks,
                 max_visible_chunks: init.max_visible_chunks,
                 multi_draw_enabled: *multi_draw_enabled,
             },
@@ -121,14 +121,18 @@ impl WorldRenderState {
         })
     }
 
-    pub fn update_win_size(&mut self, device: &wgpu::Device, display_size: Vector2<u32>) -> Result<()> {
+    pub fn update_win_size(
+        &mut self,
+        device: &wgpu::Device,
+        display_size: Vector2<u32>,
+    ) -> Result<()> {
         let depth_texture = Self::make_depth_texture(device, display_size);
         self.render_blocks.set_depth_texture(&depth_texture);
 
         let aspect_ratio = display_size.x as f32 / display_size.y as f32;
 
-        self.view_state.proj = OPENGL_TO_WGPU_MATRIX
-                * cgmath::perspective(Deg(70f32), aspect_ratio, 1.0, 1000.0);
+        self.view_state.proj =
+            OPENGL_TO_WGPU_MATRIX * cgmath::perspective(Deg(70f32), aspect_ratio, 1.0, 1000.0);
 
         Ok(())
     }
@@ -151,13 +155,13 @@ impl WorldRenderState {
 
     pub fn update(&mut self, queue: &wgpu::Queue, world: &World, diff: &UpdatedWorldState) {
         self.render_blocks
-            .update(queue, world, diff, &self.view_state);
+            .update(queue, &world.blocks, &diff.blocks, &self.view_state);
     }
 }
 
 impl ViewParams {
     /// Calculates the box containing blocks that will be rendered according to current view.
-    pub fn calculate_view_box(&self, world: &World) -> Option<Bounds<i32>> {
+    pub fn calculate_view_box(&self) -> Option<Bounds<i32>> {
         // center x and y 60 blocks in front of the camera
         let mut center = self.camera_pos + 60. * self.look_at_dir.normalize();
 
@@ -167,15 +171,12 @@ impl ViewParams {
         let size = convert_vec!(self.visible_size, f32);
         let float_bounds = Bounds::new(center - 0.5 * size, size);
 
-        let world_bounds_limit = world.blocks.bounds().limit();
-        let positive_box =
-            Bounds::from_limit(Point3::origin(), convert_point!(world_bounds_limit, f32));
-        float_bounds.intersection(positive_box).map(|bounds| {
+        Some(
             Bounds::new(
-                convert_point!(bounds.origin(), i32),
-                convert_vec!(bounds.size(), i32),
+                convert_point!(float_bounds.origin(), i32),
+                convert_vec!(float_bounds.size(), i32),
             )
-        })
+        )
     }
 }
 

@@ -1,13 +1,13 @@
 use cgmath::{Point3, Vector3};
 use anyhow::Result;
 
-use simgame_core::block::{index_utils, Block};
+use simgame_core::block::{index_utils, Block, BlockUpdater};
 use simgame_core::util::Bounds;
-use simgame_core::world::{BlockUpdater, UpdatedWorldState, World};
+use simgame_core::world::{UpdatedWorldState, World};
 
 pub struct WorldState {
     world: World,
-    rng: rand::rngs::ThreadRng,
+    _rng: rand::rngs::ThreadRng,
     updating: bool,
     filled_blocks: i32,
 }
@@ -16,7 +16,7 @@ impl WorldState {
     pub fn new(world: World) -> Self {
         Self {
             world,
-            rng: rand::thread_rng(),
+            _rng: rand::thread_rng(),
             updating: false,
             filled_blocks: (16 * 16 * 4) / 8,
         }
@@ -79,7 +79,7 @@ impl WorldState {
 
         let shape = turtle.into_shape();
 
-        let mut updater = BlockUpdater::new(&mut self.world.blocks, updated_state);
+        let mut updater = BlockUpdater::new(&mut self.world.blocks, &mut updated_state.blocks);
 
         shape.draw(&mut updater);
         self.updating = false;
@@ -109,7 +109,7 @@ impl WorldState {
                 self.world.blocks.set_block(p, Block::from_u16(0));
             }
             let (chunk_pos, _) = index_utils::to_chunk_pos(p);
-            updated_state.record_chunk_update(chunk_pos);
+            updated_state.blocks.record_chunk_update(chunk_pos);
         }
 
         log::info!(

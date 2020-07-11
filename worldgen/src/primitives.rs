@@ -1,8 +1,7 @@
 use cgmath::{InnerSpace, Matrix4, Point3, Transform, Vector3};
 
-use simgame_core::block::{index_utils, Block};
+use simgame_core::block::{index_utils, Block, BlockUpdater};
 use simgame_core::util::Bounds;
-use simgame_core::world::BlockUpdater;
 use simgame_core::convert_point;
 
 pub trait Primitive {

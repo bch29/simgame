@@ -4,10 +4,9 @@ use cgmath::{ElementWise, EuclideanSpace, Point3, Vector3};
 use zerocopy::{AsBytes, FromBytes};
 
 use simgame_core::{
-    block::{self, index_utils},
+    block::{self, index_utils, UpdatedBlocksState, WorldBlockData},
     convert_point, convert_vec,
     util::{Bounds, DivUp},
-    world::{UpdatedWorldState, World},
 };
 
 use crate::buffer_util::{
@@ -23,7 +22,7 @@ pub struct BlocksRenderInit<'a> {
     pub shaders: &'a LoadedWorldShaders,
     pub depth_texture: &'a wgpu::Texture,
     pub view_state: &'a world::ViewState,
-    pub world: &'a World,
+    pub blocks: &'a WorldBlockData,
     pub max_visible_chunks: usize,
     pub multi_draw_enabled: bool,
 }
@@ -116,9 +115,8 @@ impl BlocksRenderState {
         let cube = Cube::new();
 
         let compute_stage = {
-            let uniforms =
-                ComputeUniforms::new(init.view_state.params.calculate_view_box(init.world), cube)
-                    .into_buffer_synced(device);
+            let uniforms = ComputeUniforms::new(init.view_state.params.calculate_view_box(), cube)
+                .into_buffer_synced(device);
 
             let bind_group_layout =
                 device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -367,13 +365,13 @@ impl BlocksRenderState {
         );
         let mut needs_compute_pass = false;
 
-        if let Some(active_view_box) = init.view_state.params.calculate_view_box(init.world) {
-            if chunk_state.update_view_box(active_view_box, init.world) {
+        if let Some(active_view_box) = init.view_state.params.calculate_view_box() {
+            if chunk_state.update_view_box(active_view_box, init.blocks) {
                 needs_compute_pass = true;
             }
         }
 
-        if chunk_state.update_buffers(queue, init.world) {
+        if chunk_state.update_buffers(queue, init.blocks) {
             needs_compute_pass = true;
         }
 
@@ -407,22 +405,22 @@ impl BlocksRenderState {
     pub fn update(
         &mut self,
         queue: &wgpu::Queue,
-        world: &World,
-        diff: &UpdatedWorldState,
+        blocks: &WorldBlockData,
+        diff: &UpdatedBlocksState,
         view_state: &world::ViewState,
     ) {
-        if let Some(active_view_box) = view_state.params.calculate_view_box(world) {
+        if let Some(active_view_box) = view_state.params.calculate_view_box() {
             self.compute_stage.uniforms.update_view_box(active_view_box);
 
-            if self.chunk_state.update_view_box(active_view_box, world) {
+            if self.chunk_state.update_view_box(active_view_box, blocks) {
                 self.needs_compute_pass = true;
             }
         } else if self.chunk_state.clear_view_box() {
             self.needs_compute_pass = true;
         }
 
-        self.chunk_state.apply_chunk_diff(world, diff);
-        if self.chunk_state.update_buffers(queue, world) {
+        self.chunk_state.apply_chunk_diff(blocks, diff);
+        if self.chunk_state.update_buffers(queue, blocks) {
             self.needs_compute_pass = true;
         }
 
@@ -583,14 +581,13 @@ impl ChunkState {
         }
     }
 
-    fn update_box_chunks(&mut self, view_box: Bounds<i32>, world: &World) {
+    fn update_box_chunks(&mut self, view_box: Bounds<i32>, blocks: &WorldBlockData) {
         assert!(self.active_chunks.len() == 0);
         let bounds = Bounds::new(
             convert_point!(view_box.origin(), i64),
             convert_vec!(view_box.size(), i64),
         );
-        for (p, _chunk) in world
-            .blocks
+        for (p, _chunk) in blocks
             .iter_chunks_in_bounds(bounds)
             .map(|(p, chunk)| (convert_point!(p, i32), chunk))
         {
@@ -610,7 +607,11 @@ impl ChunkState {
         true
     }
 
-    pub fn update_view_box(&mut self, active_view_box: Bounds<i32>, world: &World) -> bool {
+    pub fn update_view_box(
+        &mut self,
+        active_view_box: Bounds<i32>,
+        blocks: &WorldBlockData,
+    ) -> bool {
         let old_view_box = self.active_view_box;
         self.active_view_box = Some(active_view_box);
 
@@ -618,7 +619,7 @@ impl ChunkState {
             Some(x) => x,
             None => {
                 // no chunks in previous view; insert all
-                self.update_box_chunks(active_view_box, world);
+                self.update_box_chunks(active_view_box, blocks);
                 return true;
             }
         };
@@ -645,7 +646,7 @@ impl ChunkState {
                 continue;
             }
 
-            if let Some(_chunk) = world.blocks.chunks().get(convert_point!(pos, i64)) {
+            if let Some(_chunk) = blocks.chunks().get(convert_point!(pos, i64)) {
                 self.active_chunks.update(pos, ());
             }
         }
@@ -665,7 +666,7 @@ impl ChunkState {
         true
     }
 
-    pub fn apply_chunk_diff(&mut self, world: &World, diff: &UpdatedWorldState) {
+    pub fn apply_chunk_diff(&mut self, blocks: &WorldBlockData, diff: &UpdatedBlocksState) {
         let active_chunk_box = match self.active_view_box {
             Some(active_view_box) => view_box_to_chunks(active_view_box),
             None => return,
@@ -677,7 +678,7 @@ impl ChunkState {
                 continue;
             }
 
-            if let Some(_chunk) = world.blocks.chunks().get(pos) {
+            if let Some(_chunk) = blocks.chunks().get(pos) {
                 self.active_chunks.update(pos_i32, ());
             } else {
                 self.active_chunks.remove(&pos_i32);
@@ -685,7 +686,7 @@ impl ChunkState {
         }
     }
 
-    fn update_buffers(&mut self, queue: &wgpu::Queue, world: &World) -> bool {
+    fn update_buffers(&mut self, queue: &wgpu::Queue, blocks: &WorldBlockData) -> bool {
         let mut any_updates = false;
 
         let mut fill_block_types =
@@ -709,11 +710,7 @@ impl ChunkState {
             if let Some((&point, _)) = opt_point {
                 self.meta_tracker.modify(point, index, active_chunks);
 
-                let chunk = world
-                    .blocks
-                    .chunks()
-                    .get(convert_point!(point, i64))
-                    .unwrap();
+                let chunk = blocks.chunks().get(convert_point!(point, i64)).unwrap();
                 let chunk_data = block::blocks_to_u16(&chunk.blocks);
                 fill_block_types.seek(index * index_utils::chunk_size_total() as usize);
                 fill_block_types.advance(chunk_data);

@@ -4,9 +4,9 @@ use log::info;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 
-use simgame_core::block::{Block, BlockConfigHelper, WorldBlockData};
+use simgame_core::block::{Block, BlockConfigHelper, WorldBlockData, BlockUpdater};
 use simgame_core::util::Bounds;
-use simgame_core::world::{BlockUpdater, UpdatedWorldState};
+use simgame_core::world::{UpdatedWorldState};
 
 pub mod lsystem;
 pub mod primitives;
@@ -148,7 +148,7 @@ impl<'a, R> WorldGenerator<'a, R> {
         };
 
         let mut updated_state = UpdatedWorldState::empty();
-        let mut block_updater = BlockUpdater::new(&mut self.blocks, &mut updated_state);
+        let mut block_updater = BlockUpdater::new(&mut self.blocks, &mut updated_state.blocks);
 
         let tree = tree::generate(tree_config, self.block_helper, &mut self.rng)?;
         tree.draw(&mut block_updater);
