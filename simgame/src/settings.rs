@@ -1,6 +1,8 @@
-use crate::block::BlockConfig;
 use cgmath::{Point3, Vector2, Vector3};
 use serde::{Deserialize, Serialize};
+
+use simgame_core::block::BlockConfig;
+use simgame_worldgen::tree::TreeConfig;
 
 /// Settings specific to this particular game.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -28,17 +30,21 @@ pub struct RenderTestParams {
     pub max_visible_chunks: usize,
     pub look_at_dir: Vector3<f32>,
     pub video_settings: VideoSettings,
+
+    pub tree: Option<TreeConfig>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum VideoMode {
-    Borderless, Fullscreen, Windowed
+    Borderless,
+    Fullscreen,
+    Windowed,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VideoSettings {
     pub win_dimensions: Vector2<f64>,
-    pub video_mode: VideoMode
+    pub video_mode: VideoMode,
 }
 
 impl Default for RenderTestParams {
@@ -53,8 +59,9 @@ impl Default for RenderTestParams {
             look_at_dir: Vector3::new(1., 1., -6.),
             video_settings: VideoSettings {
                 win_dimensions: Vector2::new(1920., 1080.),
-                video_mode: VideoMode::Windowed
-            }
+                video_mode: VideoMode::Windowed,
+            },
+            tree: None
         }
     }
 }

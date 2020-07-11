@@ -6,8 +6,9 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use simgame_core::block::WorldBlockData;
-use simgame_core::settings::{CoreSettings, Settings};
 use simgame_core::util::Bounds;
+
+use crate::settings::{CoreSettings, Settings};
 
 const CORE_SETTINGS_FILE_NAME: &str = "core_config.yaml";
 const USER_SETTINGS_FILE_NAME: &str = "settings.yaml";
@@ -38,8 +39,7 @@ pub struct WorldMeta {
 }
 
 #[derive(Debug)]
-pub enum ShaderLoadAction<F>
-{
+pub enum ShaderLoadAction<F> {
     /// Load cached shaders. Return failure if there is no cached shader.
     CachedOnly,
     /// Try to load cached shaders. If there is no cached shader, compile from source and write to

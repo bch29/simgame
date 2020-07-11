@@ -9,7 +9,6 @@ use winit::{
     window::{Window, WindowBuilder},
 };
 
-use simgame_core::settings::{self, RenderTestParams};
 use simgame_core::world::{UpdatedWorldState, World};
 
 use simgame_render::world;
@@ -18,7 +17,10 @@ pub use simgame_render::{RenderParams, WorldShaderData, WorldShaders};
 
 mod controls;
 mod world_state;
+pub mod settings;
 pub mod files;
+
+use settings::RenderTestParams;
 
 pub async fn test_render<'a>(
     world: World,

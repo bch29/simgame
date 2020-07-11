@@ -1,8 +1,9 @@
 use cgmath::{InnerSpace, Point3, Vector2, Vector3, VectorSpace, Zero};
 
-use simgame_core::settings::RenderTestParams;
 use simgame_core::{convert_point, convert_vec};
 use simgame_render::world::visible_size_to_chunks;
+
+use crate::settings::RenderTestParams;
 
 pub struct ControlState {
     look_at_dir: Vector3<f64>,
