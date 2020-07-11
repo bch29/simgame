@@ -644,10 +644,6 @@ impl ChunkState {
 
         // 2. insert chunks that are newly in the view
         for pos in new_chunk_box.iter_diff(old_chunk_box) {
-            if pos.x < 0 || pos.y < 0 || pos.z < 0 {
-                continue;
-            }
-
             if let Some(_chunk) = blocks.chunks().get(convert_point!(pos, i64)) {
                 self.active_chunks.update(pos, ());
             }
