@@ -26,11 +26,13 @@ pub struct IterBoundsDiffPoints<T> {
 }
 
 pub trait DivDown {
-    fn div_down(&self, divisor: &Self) -> Self;
+    /// Divides and rounds the result towards negative infinity.
+    fn div_down(self, divisor: Self) -> Self;
 }
 
 pub trait DivUp {
-    fn div_up(&self, divisor: &Self) -> Self;
+    /// Divides and rounds the result towards positive infinity.
+    fn div_up(self, divisor: Self) -> Self;
 }
 
 impl<T> Bounds<T> {
@@ -266,8 +268,8 @@ impl<T: BaseNum> Bounds<T> {
         T: DivUp + DivDown,
     {
         Bounds::from_limit(
-            self.origin.div_down(&(Point3::origin() + quantum_size)),
-            self.limit().div_up(&(Point3::origin() + quantum_size)),
+            self.origin.div_down(Point3::origin() + quantum_size),
+            self.limit().div_up(Point3::origin() + quantum_size),
         )
     }
 
@@ -529,23 +531,58 @@ macro_rules! convert_vec {
 }
 
 macro_rules! impl_div_traits_int {
-    ($type:ty) => {
+    ($type:ty, $div_up_positive:ident) => {
+        // `0 - x` used for negation so that unsigned types can share the implementation. We will
+        // never actually compute `0 - x` for an unsigned x because there is always an `x <= 0`
+        // check before a negation. These checks and the corresponding negation code should be
+        // optimized away for unsigned types.
+
+        #[allow(unused_comparisons)]
+        fn $div_up_positive(dividend: $type, divisor: $type) -> $type {
+            assert!(dividend >= 0);
+            assert!(divisor > 0);
+
+            let d = dividend / divisor;
+            let r = dividend % divisor;
+            if r > 0 {
+                1 + d
+            } else {
+                d
+            }
+        }
+
         impl DivDown for $type {
             #[inline]
-            fn div_down(&self, divisor: &$type) -> $type {
-                self / divisor
+            #[allow(unused_comparisons)]
+            fn div_down(mut self, mut divisor: $type) -> $type {
+                assert!(divisor != 0);
+                if divisor < 0 {
+                    self = 0 - self;
+                    divisor = 0 - divisor;
+                }
+
+                if self >= 0 {
+                    self / divisor
+                } else {
+                    0 - $div_up_positive(0 - self, divisor)
+                }
             }
         }
 
         impl DivUp for $type {
             #[inline]
-            fn div_up(&self, divisor: &$type) -> $type {
-                let d = self / divisor;
-                let r = self % divisor;
-                if r > 0 {
-                    1 + d
+            #[allow(unused_comparisons)]
+            fn div_up(mut self, mut divisor: $type) -> $type {
+                assert!(divisor != 0);
+                if divisor < 0 {
+                    self = 0 - self;
+                    divisor = 0 - divisor;
+                }
+
+                if self >= 0 {
+                    $div_up_positive(self, divisor)
                 } else {
-                    d
+                    0 - ((0 - self) / divisor)
                 }
             }
         }
@@ -559,27 +596,27 @@ macro_rules! impl_div_trait_pv {
             T: $trait,
         {
             #[inline]
-            fn $method(&self, divisor: &$pv<T>) -> Self {
+            fn $method(self, divisor: $pv<T>) -> Self {
                 $pv {
-                    x: self.x.$method(&divisor.x),
-                    y: self.y.$method(&divisor.y),
-                    z: self.z.$method(&divisor.z),
+                    x: self.x.$method(divisor.x),
+                    y: self.y.$method(divisor.y),
+                    z: self.z.$method(divisor.z),
                 }
             }
         }
     };
 }
 
-impl_div_traits_int!(u8);
-impl_div_traits_int!(u16);
-impl_div_traits_int!(u32);
-impl_div_traits_int!(u64);
-impl_div_traits_int!(i8);
-impl_div_traits_int!(i16);
-impl_div_traits_int!(i32);
-impl_div_traits_int!(i64);
-impl_div_traits_int!(usize);
-impl_div_traits_int!(isize);
+impl_div_traits_int!(u8, div_up_positive_u8);
+impl_div_traits_int!(u16, div_up_positive_u16);
+impl_div_traits_int!(u32, div_up_positive_u32);
+impl_div_traits_int!(u64, div_up_positive_u64);
+impl_div_traits_int!(i8, div_up_positive_i8);
+impl_div_traits_int!(i16, div_up_positive_i16);
+impl_div_traits_int!(i32, div_up_positive_i32);
+impl_div_traits_int!(i64, div_up_positive_i64);
+impl_div_traits_int!(usize, div_up_positive_usize);
+impl_div_traits_int!(isize, div_up_positive_isize);
 
 impl_div_trait_pv!(Vector3, DivDown, div_down);
 impl_div_trait_pv!(Vector3, DivUp, div_up);
@@ -591,9 +628,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_div_up() {
-        assert_eq!(38.div_up(&16), 3);
-        assert_eq!(38.div_up(&4), 10);
+    fn test_div_traits() {
+        assert_eq!(38u32.div_up(16), 3);
+        assert_eq!(38i32.div_up(4), 10);
+        assert_eq!(38u32.div_down(4), 9);
+
+        assert_eq!((-38).div_up(-4), 10);
+
+        assert_eq!((-38).div_up(4), -9);
+        assert_eq!((-38).div_down(4), -10);
     }
 
     fn check_diff(lhs: Bounds<i32>, rhs: Bounds<i32>) {
@@ -606,8 +649,11 @@ mod tests {
                 lhs.y_range().flat_map(move |y| {
                     lhs.x_range().flat_map(move |x| {
                         let p = Point3::new(x, y, z);
-                        let p = if rhs.contains_point(p) { None } else { Some(p) };
-                        p.into_iter()
+                        if rhs.contains_point(p) {
+                            None
+                        } else {
+                            Some(p)
+                        }
                     })
                 })
             })
@@ -619,7 +665,7 @@ mod tests {
     #[test]
     fn test_iter_diff() {
         let small = Bounds::from_limit(Point3::new(0, 0, 0), Point3::new(3, 3, 3));
-        let large = Bounds::from_limit(Point3::new(0, 0, 0), Point3::new(4, 4, 3));
+        let large = Bounds::from_limit(Point3::new(-1, 0, 0), Point3::new(4, 4, 3));
 
         check_diff(small, large);
         check_diff(large, small);
@@ -652,5 +698,15 @@ mod tests {
             Bounds::new(Point3::new(0, 0, 0), Vector3::new(8, 8, 5)),
             Bounds::new(Point3::new(0, 0, 0), Vector3::new(8, 8, 4)),
         );
+    }
+
+    #[test]
+    fn test_quantize_down() {
+        let large = Bounds::from_limit(Point3::new(-15, -3, -31), Point3::new(-1, 30, -16));
+
+        let small = large.quantize_down(Vector3::new(16, 16, 16));
+
+        assert_eq!(small.origin(), Point3::new(-1, -1, -2));
+        assert_eq!(small.limit(), Point3::new(0, 2, -1));
     }
 }

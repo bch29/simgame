@@ -635,6 +635,8 @@ impl ChunkState {
             return true; // set of active chunks didn't change but visible blocks at edges did
         }
 
+        // if we get here we need to update the set of active chunks
+
         // 1. delete chunks that have left the view
         for pos in old_chunk_box.iter_diff(new_chunk_box) {
             self.active_chunks.remove(&pos);
@@ -996,7 +998,7 @@ impl IntoBufferSynced for ComputeUniforms {
 }
 
 pub fn visible_size_to_chunks(visible_size: Vector3<i32>) -> Vector3<i32> {
-    visible_size.div_up(&convert_vec!(index_utils::chunk_size(), i32)) + Vector3::new(1, 1, 1)
+    visible_size.div_up(convert_vec!(index_utils::chunk_size(), i32)) + Vector3::new(1, 1, 1)
 }
 
 pub fn view_box_to_chunks(view_box: Bounds<i32>) -> Bounds<i32> {
