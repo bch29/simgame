@@ -1,5 +1,7 @@
-use cgmath::{BaseNum, ElementWise, EuclideanSpace, Point3, Vector3};
+use cgmath::{BaseFloat, BaseNum, ElementWise, EuclideanSpace, Point3, Vector3};
 use serde::{Deserialize, Serialize};
+
+use crate::ray::{ConvexRaycastResult, Intersection, Ray, Rect};
 
 /// Represents a half-open cuboid of points: the origin is inclusive and the limit is exclusive.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize, Serialize)]
@@ -143,6 +145,113 @@ impl<T: BaseNum> Bounds<T> {
     /// If the size is 0 in any dimension, the bounds object is empty.
     pub fn is_empty(self) -> bool {
         self.size.x == T::zero() || self.size.y == T::zero() || self.size.z == T::zero()
+    }
+
+    /// Returns rects describing each face of the bounds.
+    #[inline]
+    pub fn face_rects(&self) -> [Rect<T>; 6]
+    where
+        Vector3<T>: std::ops::Neg<Output = Vector3<T>>,
+    {
+        let Point3 {
+            x: left,
+            y: bottom,
+            z: front,
+        } = self.origin;
+        let Point3 {
+            x: right,
+            y: top,
+            z: back,
+        } = self.limit();
+
+        let sx = Vector3::new(self.size.x, T::zero(), T::zero());
+        let sy = Vector3::new(T::zero(), self.size.y, T::zero());
+        let sz = Vector3::new(T::zero(), T::zero(), self.size.z);
+
+        let p = Point3::new;
+
+        [
+            // front
+            Rect {
+                origin: p(left, bottom, front),
+                horizontal: sx,
+                vertical: sy,
+            }
+            .flipped(),
+            // back
+            Rect {
+                origin: p(right, bottom, back),
+                horizontal: -sx,
+                vertical: sy,
+            }
+            .flipped(),
+            // left
+            Rect {
+                origin: p(left, bottom, back),
+                horizontal: -sz,
+                vertical: sy,
+            }
+            .flipped(),
+            // right
+            Rect {
+                origin: p(right, bottom, front),
+                horizontal: sz,
+                vertical: sy,
+            }
+            .flipped(),
+            // bottom
+            Rect {
+                origin: p(left, bottom, back),
+                horizontal: sx,
+                vertical: -sz,
+            }
+            .flipped(),
+            // top
+            Rect {
+                origin: p(left, top, front),
+                horizontal: sx,
+                vertical: sz,
+            }
+            .flipped(),
+        ]
+    }
+
+    #[inline]
+    /// Checks if a ray intersects the bounds and if so returns the entry and exit points. These
+    /// may be the same if the ray just touches the bounds on an edge or corner.
+    pub fn cast_ray(&self, ray: &Ray<T>) -> ConvexRaycastResult<T>
+    where
+        T: BaseFloat,
+    {
+        // algorithm: test for intersection with each plane of the bounds and insert into the
+        // `results` array when we get a hit. Sort results by t-value to find entry and exit
+        // points.
+
+        let faces = self.face_rects();
+        let mut results: [Option<Intersection<T>>; 6] = [None; 6];
+
+        for i in 0..6 {
+            results[i] = match ray.test_rect(&faces[i]) {
+                Some(int) if int.t >= T::zero() => Some(int),
+                _ => None,
+            };
+        }
+
+        results.sort_by_key(|x| x.map(|p| OrdFloat(p.t)));
+
+        let mut results_iter = results.iter().flatten().cloned();
+
+        let first = results_iter.next();
+        let second = results_iter.next();
+
+        match (first, second) {
+            (Some(exit), None) if self.contains_point(ray.origin) => {
+                ConvexRaycastResult::ExitOnly { exit }
+            }
+            (Some(clip), None) => ConvexRaycastResult::Clip { clip },
+            (Some(entry), Some(exit)) => ConvexRaycastResult::PassThrough { entry, exit },
+            _ => ConvexRaycastResult::Miss,
+        }
     }
 
     /// Computes a bounds object that is the intersection of self with the given bounds. If the
@@ -343,6 +452,21 @@ impl<T: BaseNum> Bounds<T> {
     /// Iterates through all the points in 'self' which are not in 'other'.
     pub fn iter_diff(self, other: Bounds<T>) -> IterBoundsDiffPoints<T> {
         self.diff(other).iter_points()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
+struct OrdFloat<T>(T);
+
+impl<T> Eq for OrdFloat<T> where T: PartialEq {}
+impl<T> Ord for OrdFloat<T>
+where
+    T: PartialOrd,
+{
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.0
+            .partial_cmp(&other.0)
+            .unwrap_or(std::cmp::Ordering::Less)
     }
 }
 
@@ -708,5 +832,70 @@ mod tests {
 
         assert_eq!(small.origin(), Point3::new(-1, -1, -2));
         assert_eq!(small.limit(), Point3::new(0, 2, -1));
+    }
+
+    #[test]
+    fn test_rects() {
+        let bounds = Bounds::from_size(Vector3::new(4.0, 5.0, 6.0));
+
+        let faces = bounds.face_rects();
+
+        assert_eq!(faces[0].normal(), -faces[0].flipped().normal());
+
+        assert_eq!(faces[0].normal(), -Vector3::unit_z());
+        assert_eq!(faces[1].normal(), Vector3::unit_z());
+        assert_eq!(faces[2].normal(), -Vector3::unit_x());
+        assert_eq!(faces[3].normal(), Vector3::unit_x());
+        assert_eq!(faces[4].normal(), -Vector3::unit_y());
+        assert_eq!(faces[5].normal(), Vector3::unit_y());
+    }
+
+    #[test]
+    fn test_raycast() {
+        let bounds = Bounds::from_size(Vector3::new(4.0, 5.0, 6.0));
+
+        {
+            let ray = Ray {
+                origin: Point3::new(0.0, 0.0, -1.0),
+                dir: Vector3::new(1.0, 1.0, 1.0),
+            };
+            let res = bounds.cast_ray(&ray);
+
+            assert_eq!(
+                res,
+                ConvexRaycastResult::PassThrough {
+                    entry: Intersection {
+                        t: 1.0,
+                        normal: Vector3::new(0.0, 0.0, -1.0)
+                    },
+                    exit: Intersection {
+                        t: 4.0,
+                        normal: Vector3::new(1.0, 0.0, 0.0)
+                    }
+                }
+            );
+        }
+
+        {
+            let ray = Ray {
+                origin: Point3::new(4.0, 0.0, 7.0),
+                dir: Vector3::new(-1.0, 1.0, -1.0),
+            };
+            let res = bounds.cast_ray(&ray);
+
+            assert_eq!(
+                res,
+                ConvexRaycastResult::PassThrough {
+                    entry: Intersection {
+                        t: 1.0,
+                        normal: Vector3::new(0.0, 0.0, 1.0)
+                    },
+                    exit: Intersection {
+                        t: 4.0,
+                        normal: Vector3::new(-1.0, 0.0, 0.0)
+                    }
+                }
+            );
+        }
     }
 }
