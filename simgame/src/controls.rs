@@ -3,7 +3,7 @@ use cgmath::{
 };
 
 use simgame_core::{convert_point, convert_vec};
-use simgame_render::world::visible_size_to_chunks;
+use simgame_render::visible_size_to_chunks;
 
 use crate::settings::RenderTestParams;
 
@@ -200,7 +200,7 @@ impl ControlState {
         self.look_at_dir = rotation.rotate_vector(self.look_at_dir);
     }
 
-    pub fn tick(&mut self, elapsed: f64, view_state: &mut simgame_render::world::ViewParams) {
+    pub fn tick(&mut self, elapsed: f64, view_state: &mut simgame_render::ViewParams) {
         self.camera_pan.tick(elapsed);
         self.camera_height.tick(elapsed);
         self.z_level.tick(elapsed);

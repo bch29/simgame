@@ -1,13 +1,14 @@
 use anyhow::{anyhow, Result};
 use log::{error, info};
 use std::env;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use structopt::StructOpt;
 
+use simgame::files::FileContext;
 use simgame_core::block::BlockConfigHelper;
 use simgame_core::world::World;
+use simgame_render::resource::ResourceLoader;
 use simgame_worldgen as worldgen;
-use simgame::files::{FileContext, ShaderLoadAction};
 
 #[derive(Debug, StructOpt)]
 struct Opts {
@@ -17,17 +18,6 @@ struct Opts {
     action: Action,
 }
 
-#[cfg(feature = "shader-compiler")]
-#[derive(Debug, StructOpt)]
-struct ShaderOpts {
-    #[structopt(long)]
-    force_shader_compile: bool,
-}
-
-#[cfg(not(feature = "shader-compiler"))]
-#[derive(Debug, StructOpt)]
-struct ShaderOpts {}
-
 #[derive(Debug, StructOpt)]
 struct RenderWorldOpts {
     #[structopt(short, long)]
@@ -35,9 +25,6 @@ struct RenderWorldOpts {
 
     #[structopt(short = "t", long)]
     graphics_trace_path: Option<PathBuf>,
-
-    #[structopt(flatten)]
-    shader_opts: ShaderOpts,
 }
 
 #[derive(Debug, StructOpt)]
@@ -50,8 +37,6 @@ enum Action {
         #[structopt(flatten)]
         options: RenderWorldOpts,
     },
-    #[cfg(feature = "shader-compiler")]
-    CompileShaders,
 }
 
 #[derive(Debug, StructOpt)]
@@ -66,10 +51,12 @@ fn run(opt: Opts) -> Result<()> {
     let data_root: PathBuf = match opt.data_root {
         None => {
             let exe_fp = env::current_exe()?;
-            exe_fp
+            let mut res: PathBuf = exe_fp
                 .parent()
                 .ok_or_else(|| anyhow!("Expected absolute directory for current exe"))?
-                .into()
+                .into();
+            res.push("data");
+            res
         }
         Some(data_root) => data_root,
     };
@@ -80,15 +67,14 @@ fn run(opt: Opts) -> Result<()> {
     match &opt.action {
         Action::GenerateWorld { options } => run_generate(&ctx, options),
         Action::RenderWorld { options } => smol::run(run_render_world(&ctx, &options)),
-        #[cfg(feature = "shader-compiler")]
-        Action::CompileShaders => run_compile_shaders(&ctx),
     }
 }
 
 async fn run_render_world(ctx: &FileContext, options: &RenderWorldOpts) -> Result<()> {
-    let shaders = load_shaders(&ctx, &options.shader_opts)?;
-
     let settings = ctx.load_settings()?;
+
+    let resource_loader =
+        ResourceLoader::new(ctx.data_root.as_path(), ctx.core_settings.resources.clone())?;
 
     let blocks = match &options.save_name {
         Some(save_name) => ctx.load_world_blocks(save_name)?,
@@ -96,15 +82,16 @@ async fn run_render_world(ctx: &FileContext, options: &RenderWorldOpts) -> Resul
     };
     info!("Loaded world: {:?}", blocks.debug_summary());
 
-    let world = World::new(blocks, BlockConfigHelper::new(&ctx.core_settings.block_config));
-
-    let ref_shaders: simgame::WorldShaders<&[u32]> = shaders.map(|x| &x[..]);
+    let world = World::new(
+        blocks,
+        BlockConfigHelper::new(&ctx.core_settings.block_config),
+    );
 
     let params = simgame::RenderParams {
         trace_path: options.graphics_trace_path.as_ref().map(|p| p.as_path()),
     };
 
-    simgame::test_render(world, settings.render_test_params, params, ref_shaders).await
+    simgame::test_render(world, settings.render_test_params, params, resource_loader).await
 }
 
 fn run_generate(ctx: &FileContext, options: &GenerateWorldOpts) -> Result<()> {
@@ -118,68 +105,6 @@ fn run_generate(ctx: &FileContext, options: &GenerateWorldOpts) -> Result<()> {
     ctx.save_world_blocks(options.save_name.as_str(), &blocks)?;
 
     Ok(())
-}
-
-#[cfg(feature = "shader-compiler")]
-fn run_compile_shaders(ctx: &FileContext) -> Result<()> {
-    load_shaders(
-        &ctx,
-        &ShaderOpts {
-            force_shader_compile: true,
-        },
-    )?;
-    Ok(())
-}
-
-#[derive(Clone, Copy)]
-#[allow(dead_code)]
-enum SimpleShaderLoadAction {
-    CompileOnly,
-    CachedOrCompile,
-    CachedOnly,
-}
-
-impl ShaderOpts {
-    #[cfg(feature = "shader-compiler")]
-    fn load_action(&self) -> SimpleShaderLoadAction {
-        if self.force_shader_compile {
-            SimpleShaderLoadAction::CompileOnly
-        } else {
-            SimpleShaderLoadAction::CachedOrCompile
-        }
-    }
-
-    #[cfg(not(feature = "shader-compiler"))]
-    fn load_action(&self) -> SimpleShaderLoadAction {
-        SimpleShaderLoadAction::CachedOnly
-    }
-}
-
-fn load_shaders(ctx: &FileContext, shader_opts: &ShaderOpts) -> Result<simgame::WorldShaderData> {
-    use simgame_shaders::{CompileParams, Compiler, ShaderKind};
-
-    let mut shader_compiler = Compiler::new(CompileParams {
-        chunk_size: simgame_core::block::index_utils::chunk_size().into(),
-    })?;
-
-    let mut compile: Box<dyn for<'p> FnMut(&'p Path, ShaderKind) -> Result<Vec<u32>>> =
-        Box::new(|p, t| shader_compiler.compile(p, t));
-
-    let mut action = match shader_opts.load_action() {
-        SimpleShaderLoadAction::CompileOnly => {
-            ShaderLoadAction::CompileOnly(&mut compile)
-        }
-        SimpleShaderLoadAction::CachedOrCompile => {
-            ShaderLoadAction::CachedOrCompile(&mut compile)
-        }
-        SimpleShaderLoadAction::CachedOnly => ShaderLoadAction::CachedOnly,
-    };
-
-    Ok(simgame::WorldShaderData {
-        vert: ctx.load_shader("vert_partial", ShaderKind::Vertex, &mut action)?,
-        frag: ctx.load_shader("frag", ShaderKind::Fragment, &mut action)?,
-        comp: ctx.load_shader("comp_block_vertices", ShaderKind::Compute, &mut action)?,
-    })
 }
 
 fn main() {

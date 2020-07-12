@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
+use anyhow::Result;
 use cgmath::{ElementWise, EuclideanSpace, Point3, Vector3};
 use zerocopy::{AsBytes, FromBytes};
 
@@ -14,20 +15,20 @@ use crate::buffer_util::{
     InstancedBuffer, InstancedBufferDesc, IntoBufferSynced,
 };
 use crate::mesh::cube::Cube;
+use crate::resource::ResourceLoader;
 use crate::stable_map::StableMap;
 use crate::world::{self, ViewParams};
-use crate::LoadedWorldShaders;
 
-pub struct BlocksRenderInit<'a> {
-    pub shaders: &'a LoadedWorldShaders,
+pub(crate) struct BlocksRenderInit<'a> {
     pub depth_texture: &'a wgpu::Texture,
     pub view_state: &'a world::ViewState,
     pub blocks: &'a WorldBlockData,
     pub max_visible_chunks: usize,
     pub multi_draw_enabled: bool,
+    pub resource_loader: &'a ResourceLoader,
 }
 
-pub struct BlocksRenderState {
+pub(crate) struct BlocksRenderState {
     multi_draw_enabled: bool,
     needs_compute_pass: bool,
     chunk_state: ChunkState,
@@ -111,8 +112,30 @@ impl BlocksRenderState {
         self.chunk_state.set_visible_size(params.visible_size);
     }
 
-    pub fn new(init: BlocksRenderInit, device: &wgpu::Device, queue: &wgpu::Queue) -> Self {
+    pub fn new(
+        init: BlocksRenderInit,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+    ) -> Result<Self> {
         let cube = Cube::new();
+
+        let compute_shader = device.create_shader_module(wgpu::ShaderModuleSource::SpirV(
+            init.resource_loader
+                .load_shader("blocks_compute")?
+                .as_slice(),
+        ));
+
+        let vert_shader = device.create_shader_module(wgpu::ShaderModuleSource::SpirV(
+            init.resource_loader
+                .load_shader("blocks_vertex")?
+                .as_slice(),
+        ));
+
+        let frag_shader = device.create_shader_module(wgpu::ShaderModuleSource::SpirV(
+            init.resource_loader
+                .load_shader("blocks_fragment")?
+                .as_slice(),
+        ));
 
         let compute_stage = {
             let uniforms = ComputeUniforms::new(init.view_state.params.calculate_view_box(), cube)
@@ -192,7 +215,7 @@ impl BlocksRenderState {
             let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
                 layout: &pipeline_layout,
                 compute_stage: wgpu::ProgrammableStageDescriptor {
-                    module: &init.shaders.comp,
+                    module: &compute_shader,
                     entry_point: "main",
                 },
             });
@@ -268,11 +291,11 @@ impl BlocksRenderState {
             let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 layout: &pipeline_layout,
                 vertex_stage: wgpu::ProgrammableStageDescriptor {
-                    module: &init.shaders.vert,
+                    module: &vert_shader,
                     entry_point: "main",
                 },
                 fragment_stage: Some(wgpu::ProgrammableStageDescriptor {
-                    module: &init.shaders.frag,
+                    module: &frag_shader,
                     entry_point: "main",
                 }),
                 rasterization_state: Some(wgpu::RasterizationStateDescriptor {
@@ -375,14 +398,14 @@ impl BlocksRenderState {
             needs_compute_pass = true;
         }
 
-        Self {
+        Ok(Self {
             multi_draw_enabled: init.multi_draw_enabled,
             needs_compute_pass,
             chunk_state,
             compute_stage,
             render_stage,
             geometry_buffers,
-        }
+        })
     }
 
     pub fn set_depth_texture(&mut self, depth_texture: &wgpu::Texture) {
@@ -848,9 +871,10 @@ impl ChunkMetaTracker {
                 continue;
             }
 
-            let (&point, _) = active_chunks
-                .index(index)
-                .expect("touched chunk without new_metas entry was deleted");
+            let (&point, _) = match active_chunks.index(index) {
+                Some(x) => x,
+                None => continue,
+            };
             self.new_metas
                 .insert(index, Self::make_chunk_meta(active_chunks, point));
         }
@@ -909,7 +933,7 @@ impl RenderUniforms {
             proj: view_state.proj().into(),
             model: view_state.model().into(),
             view: view_state.view().into(),
-            camera_pos: view_state.camera_pos().into()
+            camera_pos: view_state.camera_pos().into(),
         }
     }
 }

@@ -1,5 +1,6 @@
+#![allow(dead_code)]
+
 pub mod cube;
-pub mod half_open_cube;
 
 use zerocopy::AsBytes;
 

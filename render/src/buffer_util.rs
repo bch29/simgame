@@ -54,6 +54,7 @@ impl<Data, Item> BufferSyncedData<Data, Item> {
         }
     }
 
+    #[allow(dead_code)]
     pub fn from_buffer(data: Data, desc: BufferSyncHelperDesc, buffer: Buffer) -> Self {
         BufferSyncedData {
             data,
@@ -74,11 +75,13 @@ impl<Data, Item> BufferSyncedData<Data, Item> {
     }
 
     #[inline]
+    #[allow(dead_code)]
     pub fn buffer(&self) -> &Buffer {
         &self.buffer
     }
 
     #[inline]
+    #[allow(dead_code)]
     pub fn sync_helper(&self) -> &BufferSyncHelper<Item> {
         &self.helper
     }
@@ -223,25 +226,7 @@ pub struct FillBuffer<'a, Item> {
     sync_helper: &'a BufferSyncHelper<Item>,
 }
 
-pub struct FillBufferWithIter<'a, Iter, Item> {
-    fill_buffer: FillBuffer<'a, Item>,
-    iter: Iter,
-}
-
 impl<'a, Item> FillBuffer<'a, Item> {
-    /// By attaching an iterator to the object, it gains the ability to `advance` by consuming from
-    /// its internal iterator instead of having the caller supply chunks directly.
-    #[inline]
-    pub fn attach_iter<Iter>(self, iter: Iter) -> FillBufferWithIter<'a, Iter::IntoIter, Item>
-    where
-        Iter: IntoIterator,
-    {
-        FillBufferWithIter {
-            fill_buffer: self,
-            iter: iter.into_iter(),
-        }
-    }
-
     /// Copy a single chunk of data to the buffer.
     #[inline]
     pub fn advance<Chunk>(&mut self, chunk: Chunk)
@@ -270,30 +255,6 @@ impl<'a, Item> FillBuffer<'a, Item> {
 
         self.queue.write_buffer(self.target, begin as _, chunk_slice.as_bytes());
         self.batch_len += chunk_len;
-    }
-
-    /// Copies each chunk from the given iterator to the buffer.
-    #[inline]
-    pub fn advance_iter<Iter>(&mut self, chunks: Iter)
-    where
-        Iter::Item: AsRef<[Item]>,
-        Iter: IntoIterator,
-        Item: 'static + Copy + AsBytes + FromBytes,
-    {
-        for chunk in chunks {
-            self.advance(chunk)
-        }
-    }
-
-    /// Copies each chunk from the given iterator to the buffer, then finalizes the copy.
-    #[inline]
-    pub fn finish_with_iter<Iter>(self, chunks: Iter)
-    where
-        Iter::Item: AsRef<[Item]>,
-        Iter: IntoIterator,
-        Item: 'static + Copy + AsBytes + FromBytes,
-    {
-        self.attach_iter(chunks).drain()
     }
 
     /// Finalizes the copy, copying any remaining chunks.
@@ -346,74 +307,6 @@ impl<'a, Item> Drop for FillBuffer<'a, Item> {
     }
 }
 
-impl<'a, Iter, Item> FillBufferWithIter<'a, Iter, Item>
-where
-    Iter: Iterator,
-    Iter::Item: AsRef<[Item]>,
-    Item: 'static + Copy + AsBytes + FromBytes,
-{
-    #[inline]
-    pub fn advance(mut self) -> Option<Self> {
-        match self.iter.next() {
-            Some(chunk) => {
-                self.fill_buffer.advance(chunk);
-                Some(self)
-            }
-            None => {
-                self.fill_buffer.finish();
-                None
-            }
-        }
-    }
-
-    #[inline]
-    pub fn drain(mut self) {
-        loop {
-            self = match self.advance() {
-                Some(x) => x,
-                None => break,
-            }
-        }
-    }
-
-    #[inline]
-    pub fn detach(self) -> FillBuffer<'a, Item> {
-        self.fill_buffer
-    }
-}
-
-pub struct OpaqueBuffer {
-    helper: BufferSyncHelper<u8>,
-    buffer: Buffer,
-}
-
-impl OpaqueBuffer {
-    pub fn new(device: &Device, desc: BufferSyncHelperDesc) -> Self {
-        let helper = BufferSyncHelper::new(desc);
-        let buffer = helper.make_buffer(device);
-        Self { helper, buffer }
-    }
-
-    #[inline]
-    pub fn buffer(&self) -> &Buffer {
-        &self.buffer
-    }
-
-    #[inline]
-    pub fn sync_helper(&self) -> &BufferSyncHelper<u8> {
-        &self.helper
-    }
-
-    #[inline]
-    pub fn as_binding(&self, index: u32) -> wgpu::Binding {
-        self.helper.as_binding(index, &self.buffer, 0)
-    }
-
-    pub fn size(&self) -> wgpu::BufferAddress {
-        self.helper.desc().buffer_len as _
-    }
-}
-
 pub struct InstancedBuffer {
     desc: InstancedBufferDesc,
     helper: BufferSyncHelper<u8>,
@@ -452,6 +345,7 @@ impl InstancedBuffer {
     }
 
     #[inline]
+    #[allow(dead_code)]
     pub fn sync_helper(&self) -> &BufferSyncHelper<u8> {
         &self.helper
     }
@@ -479,28 +373,5 @@ impl InstancedBuffer {
             0,
             std::iter::repeat(&[0u8, 0, 0, 0]).take(self.size() as usize / 4),
         );
-    }
-}
-
-pub struct Swappable<T> {
-    active: T,
-    inactive: T,
-}
-
-impl<T> Swappable<T> {
-    pub fn new(active: T, inactive: T) -> Self {
-        Self { active, inactive }
-    }
-
-    pub fn swap(&mut self) {
-        std::mem::swap(&mut self.active, &mut self.inactive)
-    }
-
-    pub fn active(&self) -> &T {
-        &self.active
-    }
-
-    pub fn inactive(&self) -> &T {
-        &self.inactive
     }
 }

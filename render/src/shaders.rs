@@ -1,4 +1,6 @@
-#[derive(Debug, Clone, Copy)]
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum ShaderKind {
     Fragment,
     Vertex,
@@ -12,44 +14,50 @@ pub struct CompileParams {
 
 /// Real implementation when "shader-compiler" feature is enabled.
 #[cfg(feature = "shader-compiler")]
-mod detail {
+mod shaderc_impl {
     use super::*;
 
-    use anyhow::{anyhow, Context, Result};
+    use std::cell::RefCell;
     use std::fs::File;
     use std::io::Read;
     use std::path::Path;
 
-    pub struct Compiler {
+    use anyhow::{anyhow, Context, Result};
+
+    pub struct ShaderCompiler {
         params: CompileParams,
-        compiler: shaderc::Compiler,
+        compiler: RefCell<shaderc::Compiler>,
     }
 
-    impl Compiler {
+    impl ShaderCompiler {
         pub fn new(params: CompileParams) -> Result<Self> {
             Ok(Self {
                 params,
-                compiler: shaderc::Compiler::new().context("Instantiating shaderc compiler")?,
+                compiler: RefCell::new(
+                    shaderc::Compiler::new().context("Instantiating shaderc compiler")?,
+                ),
             })
         }
 
-        pub fn compile(&mut self, path: &Path, kind: ShaderKind) -> Result<Vec<u32>> {
+        pub fn compile(&self, path: &Path, kind: ShaderKind) -> Result<Vec<u32>> {
             let fname = path
                 .file_name()
                 .ok_or_else(|| anyhow!("Expected file path, got directory path"))?;
 
             let mut source = String::new();
+
             File::open(path)
-                .context("Opening shader file")?
+                .map_err(|err| anyhow!("Could not open shader file {:?}: {:?}", fname, err))?
                 .read_to_string(&mut source)
-                .context("Reading shader file")?;
+                .map_err(|err| anyhow!("Could not read shader file {:?}: {:?}", fname, err))?;
 
             let mut options = shaderc::CompileOptions::new()
                 .ok_or_else(|| anyhow!("Creating shaderc compile options"))?;
             options_from_params(&self.params, &mut options);
 
-            let compiled = self
-                .compiler
+            let mut compiler = self.compiler.borrow_mut();
+
+            let compiled = compiler
                 .compile_into_spirv(
                     &source,
                     kind_to_shaderc(kind),
@@ -57,7 +65,7 @@ mod detail {
                     "main",
                     Some(&options),
                 )
-                .context("Compiling shader")?;
+                .map_err(|err| anyhow!("Could not compile shader {:?}: {:?}", fname, err))?;
 
             Ok(compiled.as_binary().into())
         }
@@ -86,29 +94,32 @@ mod detail {
 }
 
 /// Dummy implementation when "shader-compiler" feature is not enabled.
-#[cfg(not(feature = "shader-compiler"))]
 #[allow(dead_code)]
-mod detail {
+mod dummy_impl {
     use super::*;
 
     use anyhow::{anyhow, Result};
     use std::path::Path;
 
-    pub struct Compiler {
+    pub struct ShaderCompiler {
         params: CompileParams,
     }
 
-    impl Compiler {
+    impl ShaderCompiler {
         pub fn new(params: CompileParams) -> Result<Self> {
             Ok(Self { params })
         }
 
-        pub fn compile(&mut self, _path: &Path, _kind: ShaderKind) -> Result<Vec<u32>> {
+        pub fn compile(&self, _path: &Path, _kind: ShaderKind) -> Result<Vec<u32>> {
             Err(anyhow!(
-                "Cannot compile shaders: simgame_shaders not built with 'shader-compiler' feature"
+                "Cannot compile shaders: simgame_render not built with \"shader-compiler\" feature"
             ))
         }
     }
 }
 
-pub use detail::Compiler;
+#[cfg(not(feature = "shader-compiler"))]
+pub use dummy_impl::ShaderCompiler;
+
+#[cfg(feature = "shader-compiler")]
+pub use shaderc_impl::ShaderCompiler;

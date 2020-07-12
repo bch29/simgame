@@ -12,9 +12,9 @@ use winit::{
 use simgame_core::world::World;
 use simgame_core::{convert_point, convert_vec};
 
-use simgame_render::world;
-use simgame_render::{RenderInit, RenderState, WorldRenderInit};
-pub use simgame_render::{RenderParams, WorldShaderData, WorldShaders};
+use simgame_render::resource::ResourceLoader;
+pub use simgame_render::RenderParams;
+use simgame_render::{visible_size_to_chunks, RenderInit, RenderState, ViewParams};
 
 mod controls;
 pub mod files;
@@ -27,10 +27,17 @@ pub async fn test_render<'a>(
     world: World,
     test_params: RenderTestParams,
     render_params: RenderParams<'a>,
-    shaders: WorldShaders<&'a [u32]>,
+    resource_loader: ResourceLoader,
 ) -> Result<()> {
     let event_loop = EventLoop::new();
-    let game = TestRender::new(&event_loop, world, test_params, render_params, shaders).await?;
+    let game = TestRender::new(
+        &event_loop,
+        world,
+        test_params,
+        render_params,
+        resource_loader,
+    )
+    .await?;
     Ok(game.run(event_loop))
 }
 
@@ -42,7 +49,7 @@ pub struct TestRender {
     cursor_reset_position: Point2<f64>,
     time_tracker: TimeTracker,
     render_state: RenderState,
-    view_state: world::ViewParams,
+    view_state: ViewParams,
     has_cursor_control: bool,
 }
 
@@ -117,7 +124,7 @@ impl TestRender {
         world: World,
         test_params: RenderTestParams,
         render_params: RenderParams<'a>,
-        shaders: WorldShaders<&'a [u32]>,
+        resource_loader: ResourceLoader,
     ) -> Result<Self> {
         let window = build_window(&event_loop, &test_params.video_settings)?;
 
@@ -134,7 +141,7 @@ impl TestRender {
         );
 
         if visible_size != test_params.initial_visible_size {
-            let new_visible_chunks = world::visible_size_to_chunks(visible_size);
+            let new_visible_chunks = visible_size_to_chunks(visible_size);
             log::warn!(
                 "Initial visible size of {:?} would exceed max_visible_chunks setting of {}. Decreasing to {:?}. This will use {} out of {} chunks.",
                 test_params.initial_visible_size,
@@ -145,7 +152,7 @@ impl TestRender {
                 );
         }
 
-        let view_state = world::ViewParams {
+        let view_state = ViewParams {
             camera_pos: test_params.initial_camera_pos,
             z_level: test_params.initial_z_level,
             visible_size,
@@ -157,13 +164,11 @@ impl TestRender {
             RenderInit {
                 window: &window,
                 physical_win_size,
-                world: WorldRenderInit {
-                    shaders,
-                    display_size: physical_win_size,
-                    world: &world,
-                    view_params: view_state.clone(),
-                    max_visible_chunks: test_params.max_visible_chunks,
-                },
+                resource_loader,
+                display_size: physical_win_size,
+                world: &world,
+                view_params: view_state.clone(),
+                max_visible_chunks: test_params.max_visible_chunks,
             },
         )
         .await?;

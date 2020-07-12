@@ -1,27 +1,33 @@
 use anyhow::{anyhow, Result};
-use raw_window_handle::HasRawWindowHandle;
 use cgmath::Vector2;
+use raw_window_handle::HasRawWindowHandle;
 
 use simgame_core::world::{UpdatedWorldState, World};
 
-pub mod buffer_util;
-pub mod mesh;
-mod stable_map;
-pub mod world;
+pub mod resource;
+pub mod shaders;
 
-pub use world::Shaders as WorldShaders;
-pub use world::WorldRenderInit;
+mod buffer_util;
+mod gui;
+mod mesh;
+mod stable_map;
+mod world;
+
+pub use world::{visible_size_to_chunks, ViewParams};
+
+use resource::ResourceLoader;
 
 // TODO: UI rendering pipeline
 
-pub type WorldShaderData = WorldShaders<Vec<u32>>;
-pub(crate) type LoadedWorldShaders = WorldShaders<wgpu::ShaderModule>;
-
-#[derive(Debug)]
 pub struct RenderInit<'a, W> {
     pub window: &'a W,
-    pub world: WorldRenderInit<'a>,
     pub physical_win_size: Vector2<u32>,
+    pub resource_loader: ResourceLoader,
+
+    pub display_size: Vector2<u32>,
+    pub view_params: ViewParams,
+    pub world: &'a World,
+    pub max_visible_chunks: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -35,9 +41,10 @@ pub struct RenderState {
     swap_chain: wgpu::SwapChain,
     queue: wgpu::Queue,
     world: world::WorldRenderState,
+    _resource_loader: ResourceLoader,
 }
 
-pub struct DeviceResult {
+pub(crate) struct DeviceResult {
     pub device: wgpu::Device,
     pub queue: wgpu::Queue,
     pub multi_draw_enabled: bool,
@@ -66,10 +73,18 @@ impl RenderState {
         let device_result = Self::request_device(&params, &adapter).await?;
         let device = &device_result.device;
 
-        let swap_chain = Self::create_swap_chain(
-            &device, &surface, init.physical_win_size)?;
+        let swap_chain = Self::create_swap_chain(&device, &surface, init.physical_win_size)?;
 
-        let world_render_state = world::WorldRenderState::new(init.world, &device_result)?;
+        let world_render_state = world::WorldRenderState::new(
+            world::WorldRenderInit {
+                display_size: init.display_size,
+                view_params: init.view_params,
+                world: init.world,
+                max_visible_chunks: init.max_visible_chunks,
+                resource_loader: &init.resource_loader,
+            },
+            &device_result,
+        )?;
 
         Ok(RenderState {
             surface,
@@ -77,13 +92,15 @@ impl RenderState {
             world: world_render_state,
             queue: device_result.queue,
             device: device_result.device,
+            _resource_loader: init.resource_loader,
         })
     }
 
     pub fn update_win_size(&mut self, physical_win_size: Vector2<u32>) -> Result<()> {
-        let swap_chain = Self::create_swap_chain(
-            &self.device, &self.surface, physical_win_size)?;
+        let swap_chain = Self::create_swap_chain(&self.device, &self.surface, physical_win_size)?;
         self.swap_chain = swap_chain;
+        self.world
+            .update_win_size(&self.device, physical_win_size)?;
         Ok(())
     }
 

@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 
 use simgame_core::block::BlockConfig;
 use simgame_worldgen::tree::TreeConfig;
+use simgame_render::resource::ResourceConfig;
 
 /// Settings specific to this particular game.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -18,6 +19,7 @@ pub struct CoreSettings {
     pub block_data_file_name: String,
     pub world_meta_file_name: String,
     pub block_config: BlockConfig,
+    pub resources: ResourceConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

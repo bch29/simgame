@@ -8,8 +8,8 @@ edition = "2018"
 
 [dependencies]
 simgame_core = { path = "../core/" }
-rand = "*"
-cgmath = "*"
-log = "*"
-anyhow = "*"
-serde = { version = "*", features = ["derive"] }
+rand = "0.7"
+cgmath = "0.17"
+log = "0.4"
+anyhow = "1.0"
+serde = { version = "1.0", features = ["derive"] }

@@ -7,6 +7,8 @@ use simgame_core::{
     world::{UpdatedWorldState, World},
 };
 
+use crate::resource::ResourceLoader;
+
 mod blocks;
 
 pub use blocks::visible_size_to_chunks;
@@ -26,23 +28,15 @@ pub struct ViewState {
     rotation: Matrix4<f32>,
 }
 
-#[derive(Debug, Clone)]
-pub struct Shaders<R> {
-    pub vert: R,
-    pub frag: R,
-    pub comp: R,
-}
-
-#[derive(Debug)]
 pub struct WorldRenderInit<'a> {
-    pub shaders: Shaders<&'a [u32]>,
     pub display_size: Vector2<u32>,
     pub view_params: ViewParams,
     pub world: &'a World,
     pub max_visible_chunks: usize,
+    pub resource_loader: &'a ResourceLoader
 }
 
-pub struct WorldRenderState {
+pub(crate) struct WorldRenderState {
     render_blocks: blocks::BlocksRenderState,
 
     view_state: ViewState,
@@ -51,7 +45,7 @@ pub struct WorldRenderState {
     // block_master_texture: wgpu::TextureView
 }
 
-pub struct FrameRender<'a> {
+pub(crate) struct FrameRender<'a> {
     pub queue: &'a wgpu::Queue,
     pub device: &'a wgpu::Device,
     pub frame: &'a wgpu::SwapChainFrame,
@@ -71,10 +65,6 @@ impl WorldRenderState {
             multi_draw_enabled,
         } = device_result;
 
-        let shaders = init.shaders.map_result::<std::io::Error, _, _>(|stream| {
-            Ok(device.create_shader_module(wgpu::ShaderModuleSource::SpirV(stream)))
-        })?;
-
         let depth_texture = Self::make_depth_texture(&device_result.device, init.display_size);
 
         let aspect_ratio = init.display_size.x as f32 / init.display_size.y as f32;
@@ -88,16 +78,16 @@ impl WorldRenderState {
 
         let render_blocks = blocks::BlocksRenderState::new(
             blocks::BlocksRenderInit {
-                shaders: &shaders,
                 view_state: &view_state,
                 depth_texture: &depth_texture,
                 blocks: &init.world.blocks,
                 max_visible_chunks: init.max_visible_chunks,
                 multi_draw_enabled: *multi_draw_enabled,
+                resource_loader: init.resource_loader,
             },
             device,
             queue,
-        );
+        )?;
 
         Ok(WorldRenderState {
             render_blocks,
@@ -219,30 +209,6 @@ impl ViewState {
 
     pub fn camera_pos(&self) -> Point3<f32> {
         self.params.effective_camera_pos()
-    }
-}
-
-impl<R> Shaders<R> {
-    pub fn map<'a, R2, F>(&'a self, mut f: F) -> Shaders<R2>
-    where
-        F: FnMut(&'a R) -> R2,
-    {
-        Shaders {
-            vert: f(&self.vert),
-            frag: f(&self.frag),
-            comp: f(&self.comp),
-        }
-    }
-
-    pub fn map_result<'a, E, R2, F>(&'a self, mut f: F) -> std::result::Result<Shaders<R2>, E>
-    where
-        F: FnMut(&'a R) -> std::result::Result<R2, E>,
-    {
-        Ok(Shaders {
-            vert: f(&self.vert)?,
-            frag: f(&self.frag)?,
-            comp: f(&self.comp)?,
-        })
     }
 }
 

@@ -4,15 +4,21 @@ version = "0.1.0"
 authors = ["Bradley Hardy"]
 edition = "2018"
 
+[features]
+shader-compiler = ["shaderc"]
+
 [dependencies]
 simgame_core = { path = "../core" }
-cgmath = "*"
-directories = "*"
-anyhow = "*"
-log = "*"
-raw-window-handle = "*"
-zerocopy = "*"
-rand = "*"
+serde = { version = "1.0", features = ["derive"] }
+cgmath = "0.17"
+anyhow = "1.0"
+log = "0.4"
+raw-window-handle = "0.3"
+zerocopy = "0.3"
+rand = "0.7"
+image = "0.23"
+shaderc = { version = "0.6", optional = true }
+byteorder = "*"
 
 [dependencies.wgpu]
 package = "wgpu"
