@@ -1,4 +1,6 @@
-use cgmath::{InnerSpace, Point3, Vector2, Vector3, VectorSpace, Zero};
+use cgmath::{
+    Angle, Basis3, Deg, InnerSpace, Point3, Rad, Rotation, Rotation3, Vector2, Vector3, Zero,
+};
 
 use simgame_core::{convert_point, convert_vec};
 use simgame_render::world::visible_size_to_chunks;
@@ -158,36 +160,44 @@ impl ControlState {
             return;
         }
 
+        let speed = 0.5;
+
         let up = Vector3::new(0., 0., 1.);
-        let mut right = self.look_at_dir.cross(up);
-        right.z = 0.;
-        right = right.normalize();
+        let right = {
+            let mut right = self.look_at_dir.cross(up);
+            right.z = 0.;
+            right = right.normalize();
+            right
+        };
 
-        let axis = offset.x * up + offset.y * right;
-        if axis.magnitude2() < 1e-15 {
-            return;
-        }
+        let pitch = {
+            let pitch = -Rad::atan(offset.y * speed);
 
-        let rotated = self.look_at_dir.cross(axis.normalize());
+            // Prevent camera from turning too close to straight up or down to avoid Gimbal lock.
+            let max_angle_from_vertical: Rad<f64> = Deg(15.).into();
 
-        let result = self.look_at_dir.lerp(rotated, 0.01);
-        if result.x.is_finite()
-            && result.y.is_finite()
-            && result.z.is_finite()
-            && !result.x.is_nan()
-            && !result.y.is_nan()
-            && !result.z.is_nan()
-        {
-            let mut result = result.normalize();
-            if result.z < -0.9 {
-                result.z = -0.9;
-                result = result.normalize();
-            } else if result.z > 0.9 {
-                result.z = 0.9;
-                result = result.normalize();
+            let angle_from_up = Rad::acos(self.look_at_dir.dot(up));
+            let angle_from_down = Rad::acos(self.look_at_dir.dot(-up));
+
+            let max_pitch: Rad<f64> = (angle_from_up - max_angle_from_vertical).normalize_signed();
+            let min_pitch: Rad<f64> =
+                -(angle_from_down - max_angle_from_vertical).normalize_signed();
+
+            if pitch < min_pitch {
+                min_pitch
+            } else if pitch > max_pitch {
+                max_pitch
+            } else {
+                pitch
             }
-            self.look_at_dir = result;
-        }
+        };
+
+        let yaw = -Rad::atan(offset.x * speed);
+
+        let rotation: Basis3<f64> =
+            Basis3::from_axis_angle(up, yaw) * Basis3::from_axis_angle(right, pitch);
+
+        self.look_at_dir = rotation.rotate_vector(self.look_at_dir);
     }
 
     pub fn tick(&mut self, elapsed: f64, view_state: &mut simgame_render::world::ViewParams) {
