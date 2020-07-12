@@ -1,15 +1,17 @@
 //! Types used to represent the voxel-based world.
 
+use std::collections::{HashMap, HashSet};
 use std::io::{self, Read, Write};
 use std::slice;
-use std::collections::{HashMap, HashSet};
 
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
-use cgmath::{ElementWise, EuclideanSpace, Point3};
+use cgmath::{ElementWise, EuclideanSpace, Point3, Vector3};
 use serde::{Deserialize, Serialize};
 
 use crate::octree::Octree;
+use crate::ray::{Intersection, Ray};
 use crate::util::Bounds;
+use crate::{convert_bounds, convert_vec};
 
 pub mod index_utils;
 
@@ -44,9 +46,10 @@ pub struct BlockConfig {
     block_info: Vec<BlockInfo>,
 }
 
+#[derive(Debug, Clone)]
 pub struct BlockConfigHelper {
     blocks_by_name: HashMap<String, (Block, BlockInfo)>,
-    blocks_by_id: Vec<BlockInfo>
+    blocks_by_id: Vec<BlockInfo>,
 }
 
 /// Stores the world's blocks, but not other things like entities.
@@ -57,8 +60,7 @@ pub struct WorldBlockData {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct UpdatedBlocksState
-{
+pub struct UpdatedBlocksState {
     pub modified_chunks: HashSet<Point3<i64>>,
 }
 
@@ -66,6 +68,13 @@ pub struct UpdatedBlocksState
 pub struct BlockUpdater<'a> {
     blocks: &'a mut WorldBlockData,
     updated_state: &'a mut UpdatedBlocksState,
+}
+
+#[derive(Debug, Clone)]
+pub struct RaycastHit {
+    pub block: Block,
+    pub block_pos: Point3<i64>,
+    pub intersection: Intersection<f64>,
 }
 
 /// Encapsulates a single chunk of blocks. The world is split into chunks to help with cache
@@ -121,6 +130,52 @@ impl Chunk {
     pub fn empty() -> Chunk {
         let blocks = [Block(0); index_utils::chunk_size_total() as usize];
         Chunk { blocks }
+    }
+
+    pub fn cast_ray(
+        &self,
+        ray: &Ray<f64>,
+        origin: Point3<i64>,
+        _block_helper: &BlockConfigHelper,
+    ) -> Option<RaycastHit> {
+        // TODO: use space subdivision to avoid looping through every single block
+        // TODO: use collision info in block config to handle blocks that are not full cubes
+
+        let mut nearest_hit: Option<RaycastHit> = None;
+
+        for z in 0..index_utils::chunk_size().z {
+            for y in 0..index_utils::chunk_size().y {
+                for x in 0..index_utils::chunk_size().x {
+                    let block_offset = Vector3::new(x, y, z);
+                    let block = self.get_block(Point3::origin() + block_offset);
+
+                    if block.is_empty() {
+                        continue;
+                    }
+
+                    let block_pos = origin + block_offset;
+                    let bounds =
+                        convert_bounds!(Bounds::new(block_pos, Vector3::new(1, 1, 1)), f64);
+                    let hit = match bounds.cast_ray(ray).entry() {
+                        Some(intersection) => RaycastHit {
+                            block,
+                            block_pos,
+                            intersection,
+                        },
+                        None => continue,
+                    };
+
+                    nearest_hit = match nearest_hit.take() {
+                        Some(old_hit) if old_hit.intersection.t < hit.intersection.t => {
+                            Some(old_hit)
+                        }
+                        _ => Some(hit),
+                    }
+                }
+            }
+        }
+
+        nearest_hit
     }
 }
 
@@ -270,6 +325,30 @@ impl WorldBlockData {
     /// guarantees are made about whether it is the smallest such bounding box.
     pub fn bounds(&self) -> Bounds<i64> {
         self.chunks.bounds().scale_up(index_utils::chunk_size())
+    }
+
+    pub fn cast_ray(
+        &self,
+        ray: &Ray<f64>,
+        block_helper: &BlockConfigHelper,
+    ) -> Option<RaycastHit> {
+        let chunk_size = convert_vec!(index_utils::chunk_size(), f64);
+
+        let chunk_ray = Ray {
+            origin: ray.origin.div_element_wise(Point3::origin() + chunk_size),
+            dir: ray.dir.div_element_wise(chunk_size),
+        };
+
+        let chunk_hit: RaycastHit = self
+            .chunks
+            .cast_ray(&chunk_ray, |chunk_pos, chunk| {
+                let chunk_origin =
+                    chunk_pos.mul_element_wise(Point3::origin() + index_utils::chunk_size());
+                chunk.cast_ray(ray, chunk_origin, block_helper)
+            })?
+            .data;
+
+        Some(chunk_hit)
     }
 
     /// Serialize the blocks in the world. Returns the number of bytes written.
@@ -474,15 +553,23 @@ impl BlockInfo {
 
 impl BlockConfigHelper {
     pub fn new(config: &BlockConfig) -> Self {
-        let blocks_by_name = config.block_info.iter().enumerate().map(|(i, block_info)| {
-            let name = block_info.name.clone();
-            let block = Block::from_u16(i as u16);
-            (name, (block, block_info.clone()))
-        }).collect();
+        let blocks_by_name = config
+            .block_info
+            .iter()
+            .enumerate()
+            .map(|(i, block_info)| {
+                let name = block_info.name.clone();
+                let block = Block::from_u16(i as u16);
+                (name, (block, block_info.clone()))
+            })
+            .collect();
 
         let blocks_by_id = config.block_info.clone();
 
-        Self { blocks_by_name, blocks_by_id }
+        Self {
+            blocks_by_name,
+            blocks_by_id,
+        }
     }
 
     pub fn block_by_name(&self, name: &str) -> Option<(Block, &BlockInfo)> {

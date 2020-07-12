@@ -50,8 +50,24 @@ pub fn unpack_index(indices: (Point3<i64>, i64)) -> Point3<i64> {
 #[inline]
 pub fn to_chunk_pos(p: Point3<i64>) -> (Point3<i64>, Point3<i64>) {
     let origin = Point3::from((0, 0, 0));
-    let inner_pos = p.rem_element_wise(origin + chunk_size());
-    let chunk_pos = p.div_element_wise(origin + chunk_size());
+    let mut inner_pos = p.rem_element_wise(origin + chunk_size());
+    let mut chunk_pos = p.div_element_wise(origin + chunk_size());
+
+    if inner_pos.x < 0 {
+        inner_pos.x += chunk_size().x;
+        chunk_pos.x -= 1;
+    }
+
+    if inner_pos.y < 0 {
+        inner_pos.y += chunk_size().y;
+        chunk_pos.y -= 1;
+    }
+
+    if inner_pos.z < 0 {
+        inner_pos.z += chunk_size().z;
+        chunk_pos.z -= 1;
+    }
+
     (chunk_pos, inner_pos)
 }
 

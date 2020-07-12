@@ -47,7 +47,8 @@ impl<T> Bounds<T> {
     }
 
     /// Moves the origin while keeping the size the same. Note this also changes the limit.
-    pub fn translate(mut self, new_origin: Point3<T>) -> Self {
+    #[inline]
+    pub fn with_origin(mut self, new_origin: Point3<T>) -> Self {
         self.origin = new_origin;
         self
     }
@@ -335,16 +336,10 @@ impl<T: BaseNum> Bounds<T> {
         }
     }
 
-    /// Moves the origin while keeping the limit the same. Note this also changes the size.
+    /// Moves the origin and limit by a vector while keeping the size the same.
     #[inline]
-    pub fn with_origin(self, origin: Point3<T>) -> Self {
-        let limit = self.limit();
-        assert!(origin.x <= limit.x);
-        assert!(origin.y <= limit.y);
-        assert!(origin.z <= limit.z);
-        let size = limit - origin;
-
-        Bounds { origin, size }
+    pub fn translate(self, offset: Vector3<T>) -> Self {
+        Bounds { origin: self.origin() + offset, size: self.size }
     }
 
     /// Changes the size while keeping the origin the same. Note this also changes the limit.
@@ -456,7 +451,7 @@ impl<T: BaseNum> Bounds<T> {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
-struct OrdFloat<T>(T);
+pub struct OrdFloat<T>(pub T);
 
 impl<T> Eq for OrdFloat<T> where T: PartialEq {}
 impl<T> Ord for OrdFloat<T>

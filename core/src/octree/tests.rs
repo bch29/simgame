@@ -201,6 +201,14 @@ fn test_cast_ray() {
     assert_eq!(
         hits,
         vec![
+            RaycastHit {
+                data: 9,
+                pos: Point3::new(1, 1, 2)
+            },
+            RaycastHit {
+                data: 6,
+                pos: Point3::new(4, 2, 5)
+            }
         ]
     );
 
@@ -228,12 +236,19 @@ fn test_cast_ray() {
         ]
     );
 
-    // let ray = Ray {
-    //     origin: Point3::new(0., 0., 0.),
-    //     dir: Vector3::new(-6.1, 7., 0.),
-    // };
+    let ray = Ray {
+        origin: Point3::new(0., 0., 0.),
+        dir: Vector3::new(-5.9, 7.3, 0.2),
+    };
 
-    // println!("{:?}", tree.cast_ray(&ray, |_, &v| { Some(v) }));
+    let hits = collect_ray_hits(&tree, ray);
+    assert_eq!(
+        hits,
+        vec![RaycastHit {
+            pos: Point3::new(-6, 7, 0),
+            data: 2
+        }]
+    );
 }
 
 fn collect_ray_hits<T>(tree: &Octree<T>, ray: Ray<f64>) -> Vec<RaycastHit<T>>

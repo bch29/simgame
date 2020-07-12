@@ -909,7 +909,7 @@ impl RenderUniforms {
             proj: view_state.proj().into(),
             model: view_state.model().into(),
             view: view_state.view().into(),
-            camera_pos: view_state.params().camera_pos.into(),
+            camera_pos: view_state.camera_pos().into()
         }
     }
 }

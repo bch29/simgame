@@ -1,8 +1,9 @@
-use crate::block::{WorldBlockData, UpdatedBlocksState};
+use crate::block::{WorldBlockData, UpdatedBlocksState, BlockConfigHelper};
 
 #[derive(Debug)]
 pub struct World {
     pub blocks: WorldBlockData,
+    pub block_helper: BlockConfigHelper,
 }
 
 #[derive(Debug)]
@@ -11,8 +12,8 @@ pub struct UpdatedWorldState {
 }
 
 impl World {
-    pub fn from_blocks(blocks: WorldBlockData) -> World {
-        World { blocks }
+    pub fn new(blocks: WorldBlockData, block_helper: BlockConfigHelper) -> World {
+        World { blocks, block_helper }
     }
 }
 

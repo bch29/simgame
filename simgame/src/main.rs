@@ -96,7 +96,7 @@ async fn run_render_world(ctx: &FileContext, options: &RenderWorldOpts) -> Resul
     };
     info!("Loaded world: {:?}", blocks.debug_summary());
 
-    let world = World::from_blocks(blocks);
+    let world = World::new(blocks, BlockConfigHelper::new(&ctx.core_settings.block_config));
 
     let ref_shaders: simgame::WorldShaders<&[u32]> = shaders.map(|x| &x[..]);
 

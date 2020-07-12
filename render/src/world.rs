@@ -171,12 +171,14 @@ impl ViewParams {
         let size = convert_vec!(self.visible_size, f32);
         let float_bounds = Bounds::new(center - 0.5 * size, size);
 
-        Some(
-            Bounds::new(
-                convert_point!(float_bounds.origin(), i32),
-                convert_vec!(float_bounds.size(), i32),
-            )
-        )
+        Some(Bounds::new(
+            convert_point!(float_bounds.origin(), i32),
+            convert_vec!(float_bounds.size(), i32),
+        ))
+    }
+
+    pub fn effective_camera_pos(&self) -> Point3<f32> {
+        self.camera_pos + Vector3::unit_z() * self.z_level as f32
     }
 }
 
@@ -209,9 +211,14 @@ impl ViewState {
     }
 
     pub fn model(&self) -> Matrix4<f32> {
-        let translation =
-            Matrix4::from_translation(Vector3::new(0.0, 0.0, -self.params.z_level as f32));
-        translation * self.rotation
+        // let translation =
+        //     Matrix4::from_translation(Vector3::new(0.0, 0.0, -self.params.z_level as f32));
+        // translation * self.rotation
+        self.rotation
+    }
+
+    pub fn camera_pos(&self) -> Point3<f32> {
+        self.params.effective_camera_pos()
     }
 }
 

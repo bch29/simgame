@@ -1,11 +1,11 @@
 use anyhow::anyhow;
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
-use cgmath::{EuclideanSpace, Point3, Vector3};
+use cgmath::{EuclideanSpace, InnerSpace, Point3, Vector3};
 use serde::{Deserialize, Serialize};
 use std::io::{self, Read, Write};
 
 use crate::ray::{ConvexRaycastResult, Ray};
-use crate::util::Bounds;
+use crate::util::{Bounds, OrdFloat};
 use crate::{convert_bounds, convert_vec};
 
 /// A tree structure providing a sparse representation of values in a 3D grid.
@@ -17,6 +17,7 @@ pub struct Octree<T> {
 
 /// Refers to one octant of an area that has been split into 8, along 3 orthogonal planes.
 #[derive(Clone, Debug, Copy, PartialEq, Eq)]
+#[repr(packed)]
 pub struct Octant {
     x: i8,
     y: i8,
@@ -266,27 +267,32 @@ impl<T> Octree<T> {
         }
     }
 
+    /// Find items in the octree which intersect the given ray. The `test` function is called on
+    /// each position whose bounding box (with origin at the posiition and of size (1, 1, 1))
+    /// intersects with the ray. Stops if the `test` function returns `Some`. Guaranteed to visit
+    /// items in sorted order of t-value.
     pub fn cast_ray<'a, R, F>(&'a self, ray: &Ray<f64>, mut test: F) -> Option<RaycastHit<R>>
     where
         F: FnMut(Point3<i64>, &'a T) -> Option<R>,
         R: 'a,
     {
-        let near_octant = {
-            let x = if ray.dir.x > 0.0 { -1 } else { 1 };
-            let y = if ray.dir.y > 0.0 { -1 } else { 1 };
-            let z = if ray.dir.z > 0.0 { -1 } else { 1 };
-            Octant { x, y, z }
-        };
+        // The octant order ensures that octants nearer to the ray's origin (w.r.t. the ray's
+        // direction) are tested first.
+        //
+        // When an octant's offset from the octree origin is in the opposite direction to the ray
+        // direction (i.e. less far along the ray), it comes first. When its offset is in the same
+        // direction as the ray direction (i.e. farther along the ray), it comes last.
+        let mut octant_order = Octant::enumerate();
+        octant_order
+            .sort_by_key(|octant| OrdFloat(convert_vec!(octant.as_direction(), f64).dot(ray.dir)));
 
-        println!("near octant: {:?}", near_octant);
-
-        self.cast_ray_impl(Point3::origin(), near_octant, ray, &mut test)
+        self.cast_ray_impl(Vector3::new(0, 0, 0), &octant_order, ray, &mut test)
     }
 
     fn cast_ray_impl<'a, R, F>(
         &'a self,
-        origin: Point3<i64>,
-        near_octant: Octant,
+        offset: Vector3<i64>,
+        octant_order: &[Octant; 8],
         ray: &Ray<f64>,
         test: &mut F,
     ) -> Option<RaycastHit<R>>
@@ -294,7 +300,7 @@ impl<T> Octree<T> {
         F: FnMut(Point3<i64>, &'a T) -> Option<R>,
         R: 'a,
     {
-        let test_bounds = self.bounds().translate(origin);
+        let test_bounds = self.bounds().translate(offset);
 
         match convert_bounds!(test_bounds, f64).cast_ray(ray) {
             ConvexRaycastResult::Miss => return None,
@@ -303,31 +309,26 @@ impl<T> Octree<T> {
 
         match &self.node {
             None => None,
-            Some(node) => {
-                println!("Hit bounds {:?}, current origin {:?}", test_bounds, origin);
-                match &**node {
-                    Node::Leaf(ref data) => Some(RaycastHit {
-                        pos: origin,
-                        data: test(origin, data)?,
-                    }),
-                    Node::Branch(children) => {
-                        let first_ix = near_octant.as_index();
-
-                        for i in 0..8 {
-                            let octant = Octant::from_index((first_ix + i) % 8);
-                            let child = &children[octant];
-                            let offset = Self::octant_offset(self.height, octant);
-                            if let Some(res) =
-                                child.cast_ray_impl(origin + offset, near_octant, ray, test)
-                            {
-                                return Some(res);
-                            }
+            Some(node) => match &**node {
+                Node::Leaf(ref data) => Some(RaycastHit {
+                    pos: Point3::origin() + offset,
+                    data: test(Point3::origin() + offset, data)?,
+                }),
+                Node::Branch(children) => {
+                    for i in 0..8 {
+                        let octant = octant_order[i];
+                        let child = &children[octant];
+                        let child_offset = Self::octant_offset(self.height, octant);
+                        if let Some(res) =
+                            child.cast_ray_impl(offset + child_offset, octant_order, ray, test)
+                        {
+                            return Some(res);
                         }
-
-                        None
                     }
+
+                    None
                 }
-            }
+            },
         }
     }
 
@@ -871,6 +872,15 @@ impl Octant {
             y: -self.y,
             z: -self.z,
         }
+    }
+
+    #[inline]
+    pub fn enumerate() -> [Self; 8] {
+        let mut octants = [Self::from_index(0); 8];
+        for i in 0..8 {
+            octants[i] = Self::from_index(i);
+        }
+        octants
     }
 }
 

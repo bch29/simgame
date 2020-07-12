@@ -9,16 +9,17 @@ use winit::{
     window::{Window, WindowBuilder},
 };
 
-use simgame_core::world::{UpdatedWorldState, World};
+use simgame_core::world::World;
+use simgame_core::{convert_point, convert_vec};
 
 use simgame_render::world;
 use simgame_render::{RenderInit, RenderState, WorldRenderInit};
 pub use simgame_render::{RenderParams, WorldShaderData, WorldShaders};
 
 mod controls;
-mod world_state;
-pub mod settings;
 pub mod files;
+pub mod settings;
+mod world_state;
 
 use settings::RenderTestParams;
 
@@ -31,6 +32,33 @@ pub async fn test_render<'a>(
     let event_loop = EventLoop::new();
     let game = TestRender::new(&event_loop, world, test_params, render_params, shaders).await?;
     Ok(game.run(event_loop))
+}
+
+pub struct TestRender {
+    world_state: world_state::WorldState,
+    win_dimensions: Vector2<f64>,
+    window: Window,
+    control_state: controls::ControlState,
+    cursor_reset_position: Point2<f64>,
+    time_tracker: TimeTracker,
+    render_state: RenderState,
+    view_state: world::ViewParams,
+    has_cursor_control: bool,
+}
+
+struct TimingParams {
+    window_len: usize,
+    tick_size: Duration,
+    render_interval: Option<Duration>,
+}
+
+struct TimeTracker {
+    params: TimingParams,
+    samples: VecDeque<Duration>,
+    start_time: Instant,
+    prev_sample_time: Instant,
+    total_ticks: i64,
+    prev_render_time: Instant,
 }
 
 fn build_window(event_loop: &EventLoop<()>, settings: &settings::VideoSettings) -> Result<Window> {
@@ -81,34 +109,6 @@ fn build_window(event_loop: &EventLoop<()>, settings: &settings::VideoSettings) 
     };
 
     Ok(builder.build(event_loop)?)
-}
-
-pub struct TestRender {
-    world_state: world_state::WorldState,
-    win_dimensions: Vector2<f64>,
-    window: Window,
-    control_state: controls::ControlState,
-    cursor_reset_position: Point2<f64>,
-    time_tracker: TimeTracker,
-    render_state: RenderState,
-    view_state: world::ViewParams,
-    world_diff: UpdatedWorldState,
-    has_cursor_control: bool,
-}
-
-struct TimingParams {
-    window_len: usize,
-    tick_size: Duration,
-    render_interval: Option<Duration>,
-}
-
-struct TimeTracker {
-    params: TimingParams,
-    samples: VecDeque<Duration>,
-    start_time: Instant,
-    prev_sample_time: Instant,
-    total_ticks: i64,
-    prev_render_time: Instant,
 }
 
 impl TestRender {
@@ -183,8 +183,6 @@ impl TestRender {
 
         let cursor_reset_position = Point2::origin() + win_dimensions / 2.;
 
-        let world_diff = UpdatedWorldState::empty();
-
         Ok(TestRender {
             world_state: world_state::WorldState::new(world),
             win_dimensions,
@@ -194,7 +192,6 @@ impl TestRender {
             time_tracker,
             render_state,
             view_state,
-            world_diff,
             has_cursor_control: false,
         })
     }
@@ -220,7 +217,7 @@ impl TestRender {
         _window_target: &EventLoopWindowTarget<()>,
         control_flow: &mut ControlFlow,
     ) -> Result<()> {
-        use event::{VirtualKeyCode, WindowEvent};
+        use event::{ElementState, KeyboardInput, MouseButton, VirtualKeyCode, WindowEvent};
 
         *control_flow = if cfg!(feature = "metal-auto-capture") {
             ControlFlow::Exit
@@ -234,23 +231,29 @@ impl TestRender {
                 WindowEvent::KeyboardInput { input, .. } => {
                     self.control_state.handle_keyboad_input(input);
                     match input {
-                        event::KeyboardInput {
+                        KeyboardInput {
                             virtual_keycode: Some(key),
-                            state: event::ElementState::Pressed,
+                            state: ElementState::Pressed,
                             ..
                         } => match key {
                             VirtualKeyCode::Escape => *control_flow = ControlFlow::Exit,
                             VirtualKeyCode::Space => self.world_state.toggle_updates(),
-                            VirtualKeyCode::E => {
-                                self.world_state.modify_filled_blocks(1, &mut self.world_diff)
-                            }
-                            VirtualKeyCode::Q => {
-                                self.world_state.modify_filled_blocks(-1, &mut self.world_diff)
-                            }
+                            VirtualKeyCode::E => self.world_state.modify_filled_blocks(1),
+                            VirtualKeyCode::Q => self.world_state.modify_filled_blocks(-1),
                             _ => {}
                         },
                         _ => {}
                     }
+                }
+                WindowEvent::MouseInput {
+                    state: ElementState::Pressed,
+                    button: MouseButton::Left,
+                    ..
+                } => {
+                    self.world_state.on_click(
+                        convert_point!(self.view_state.effective_camera_pos(), f64),
+                        convert_vec!(self.view_state.look_at_dir, f64),
+                    );
                 }
                 WindowEvent::CursorMoved { position, .. } => {
                     if self.has_cursor_control {
@@ -301,9 +304,10 @@ impl TestRender {
 
     fn redraw(&mut self) -> Result<()> {
         self.render_state.set_world_view(self.view_state.clone());
-        self.render_state.update(&self.world_state.world(), &self.world_diff);
+        self.render_state
+            .update(&self.world_state.world(), &self.world_state.world_diff());
         self.render_state.render_frame();
-        self.world_diff.clear();
+        self.world_state.world_diff_mut().clear();
         self.time_tracker.sample(Instant::now());
 
         log::debug!(
@@ -318,7 +322,7 @@ impl TestRender {
     fn handle_cursor_move(&mut self, position: winit::dpi::PhysicalPosition<f64>) -> Result<()> {
         let pos_logical = position.to_logical(self.window.scale_factor());
         let pos: Point2<f64> = Point2::new(pos_logical.x, pos_logical.y);
-        let offset = (pos - self.cursor_reset_position) / self.win_dimensions.x;
+        let offset = (pos - self.cursor_reset_position) / (self.win_dimensions.x / 2.);
         self.control_state.move_cursor(offset);
         reset_cursor(&self.window, self.cursor_reset_position)?;
         Ok(())
@@ -327,7 +331,7 @@ impl TestRender {
     fn tick(&mut self, _now: Instant, elapsed: Duration) -> Result<()> {
         let elapsed = elapsed.as_secs_f64();
 
-        self.world_state.tick(elapsed, &mut self.world_diff)?;
+        self.world_state.tick(elapsed)?;
         self.control_state.tick(elapsed, &mut self.view_state);
         Ok(())
     }
