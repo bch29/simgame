@@ -3,12 +3,12 @@ use cgmath::{Angle, EuclideanSpace, InnerSpace, Matrix4, Point3, Rad, Vector3};
 
 use simgame_core::block::Block;
 
-use crate::primitives;
+use crate::primitive;
 
 pub struct Turtle {
     state: TurtleState,
     state_stack: Vec<TurtleState>,
-    components: Vec<primitives::ShapeComponent>,
+    components: Vec<primitive::ShapeComponent>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -62,8 +62,8 @@ impl Turtle {
         }
     }
 
-    pub fn into_shape(self) -> primitives::Shape {
-        primitives::Shape::new(self.components)
+    pub fn into_shape(self) -> primitive::Shape {
+        primitive::Shape::new(self.components)
     }
 
     pub fn push_state(&mut self) {
@@ -98,9 +98,9 @@ impl Turtle {
                 fill_block,
                 round_start,
                 round_end,
-            } => self.components.push(primitives::ShapeComponent {
+            } => self.components.push(primitive::ShapeComponent {
                 fill_block,
-                primitive: Box::new(primitives::FilledLine {
+                primitive: Box::new(primitive::FilledLine {
                     start: self.state.pos,
                     end: end_pos,
                     radius: self.state.thickness,
@@ -112,7 +112,7 @@ impl Turtle {
                 fill_block,
                 stretch,
             } => {
-                let sphere = primitives::Sphere {
+                let sphere = primitive::Sphere {
                     center: Point3::origin(),
                     radius: 1.,
                 };
@@ -145,10 +145,10 @@ impl Turtle {
 
                 let transform = translation * rotation * scale;
 
-                let primitive = primitives::AffineTransform::new(sphere, transform)
+                let primitive = primitive::AffineTransform::new(sphere, transform)
                     .expect("spheroid brush resulted in uninvertible transform");
 
-                self.components.push(primitives::ShapeComponent {
+                self.components.push(primitive::ShapeComponent {
                     fill_block,
                     primitive: Box::new(primitive),
                 });

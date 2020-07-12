@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 
 pub type WeightedList<T> = Vec<(f64, T)>;
 
+#[derive(Debug, Clone)]
 pub enum Production<Symbol> {
     /// Produces a fixed list of symbols.
     Fixed(Vec<Symbol>),
@@ -16,6 +17,7 @@ pub enum Production<Symbol> {
 
 pub type Productions<Symbol> = HashMap<Symbol, Production<Symbol>>;
 
+#[derive(Debug, Clone)]
 pub struct LSystem<Symbol> {
     pub axiom: Vec<Symbol>,
     pub productions: Productions<Symbol>,

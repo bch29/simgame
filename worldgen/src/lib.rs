@@ -9,7 +9,7 @@ use simgame_core::util::Bounds;
 use simgame_core::world::{UpdatedWorldState};
 
 pub mod lsystem;
-pub mod primitives;
+pub mod primitive;
 pub mod tree;
 pub mod turtle;
 

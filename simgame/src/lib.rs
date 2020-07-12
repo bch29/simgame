@@ -184,7 +184,10 @@ impl TestRender {
         let cursor_reset_position = Point2::origin() + win_dimensions / 2.;
 
         Ok(TestRender {
-            world_state: world_state::WorldState::new(world),
+            world_state: world_state::WorldState::new(world_state::WorldStateInit {
+                world,
+                tree_config: test_params.tree.as_ref(),
+            })?,
             win_dimensions,
             window,
             control_state,
@@ -253,7 +256,7 @@ impl TestRender {
                     self.world_state.on_click(
                         convert_point!(self.view_state.effective_camera_pos(), f64),
                         convert_vec!(self.view_state.look_at_dir, f64),
-                    );
+                    )?;
                 }
                 WindowEvent::CursorMoved { position, .. } => {
                     if self.has_cursor_control {

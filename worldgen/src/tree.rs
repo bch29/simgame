@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use simgame_core::block::{Block, BlockConfigHelper};
 
 use crate::lsystem;
-use crate::primitives;
+use crate::primitive;
 use crate::turtle::{Turtle, TurtleBrush, TurtleInterpreter, TurtleState};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -48,12 +48,13 @@ pub fn generate<R: Rng>(
     config: &TreeConfig,
     blocks: &BlockConfigHelper,
     rng: &mut R,
-) -> Result<primitives::Shape> {
+) -> Result<primitive::Shape> {
     let mut system = TreeSystem::new(config, blocks)?;
     system.generate(rng)
 }
 
-struct TreeSystem {
+#[derive(Debug, Clone)]
+pub struct TreeSystem {
     root_pos: Point3<f64>,
     trunk_block: Block,
     foliage_block: Block,
@@ -81,7 +82,7 @@ impl TreeSystem {
             .0;
 
         Ok(Self {
-            root_pos: Point3::new(32., 32., 32.),
+            root_pos: Point3::new(0., 0., 0.),
             trunk_block,
             foliage_block,
             l_system,
@@ -89,7 +90,7 @@ impl TreeSystem {
         })
     }
 
-    pub fn generate<R: Rng>(&mut self, rng: &mut R) -> Result<primitives::Shape> {
+    pub fn generate<R: Rng>(&mut self, rng: &mut R) -> Result<primitive::Shape> {
         let symbols = self.l_system.run(self.config.steps, rng);
         let turtle = self.run(symbols)?;
         Ok(turtle.into_shape())

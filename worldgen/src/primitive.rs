@@ -1,8 +1,8 @@
 use cgmath::{InnerSpace, Matrix4, Point3, Transform, Vector3};
 
 use simgame_core::block::{index_utils, Block, BlockUpdater};
-use simgame_core::util::Bounds;
 use simgame_core::convert_point;
+use simgame_core::util::Bounds;
 
 pub trait Primitive {
     /// Returns true if the given point is within the shape.
@@ -18,6 +18,30 @@ pub trait Primitive {
                 .filter(|p| self.test(convert_point!(p, f64)))
                 .zip(std::iter::repeat(fill_block)),
         );
+    }
+}
+
+impl<P> Primitive for &P where P: Primitive {
+    fn test(&self, point: Point3<f64>) -> bool {
+        use std::ops::Deref;
+        self.deref().test(point)
+    }
+
+    fn bounds(&self) -> Bounds<f64> {
+        use std::ops::Deref;
+        self.deref().bounds()
+    }
+}
+
+impl Primitive for &dyn Primitive {
+    fn test(&self, point: Point3<f64>) -> bool {
+        use std::ops::Deref;
+        self.deref().test(point)
+    }
+
+    fn bounds(&self) -> Bounds<f64> {
+        use std::ops::Deref;
+        self.deref().bounds()
     }
 }
 
@@ -113,6 +137,20 @@ impl Shape {
             fill_block,
             primitive: Box::new(primitive),
         }])
+    }
+
+    pub fn draw_transformed(&self, blocks: &mut BlockUpdater, transform: Matrix4<f64>) {
+        let inv_transform = transform
+            .inverse_transform()
+            .expect("draw_transformed expects an invertible transform matrix");
+        for component in &self.components {
+            let primitive = AffineTransform {
+                primitive: &*component.primitive,
+                transform,
+                inv_transform,
+            };
+            primitive.draw(blocks, component.fill_block);
+        }
     }
 
     pub fn draw(&self, blocks: &mut BlockUpdater) {

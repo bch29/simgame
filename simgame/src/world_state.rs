@@ -1,8 +1,10 @@
 use anyhow::Result;
-use cgmath::{Point3, Vector3};
+use cgmath::{Point3, Vector3, Matrix4, EuclideanSpace};
+
+use simgame_worldgen::tree::{TreeConfig, TreeSystem};
 
 use simgame_core::block::{index_utils, Block, BlockUpdater};
-use simgame_core::convert_vec;
+use simgame_core::convert_point;
 use simgame_core::ray::Ray;
 use simgame_core::util::Bounds;
 use simgame_core::world::{UpdatedWorldState, World};
@@ -10,20 +12,33 @@ use simgame_core::world::{UpdatedWorldState, World};
 pub struct WorldState {
     world: World,
     world_diff: UpdatedWorldState,
-    _rng: rand::rngs::ThreadRng,
+    rng: rand::rngs::ThreadRng,
     updating: bool,
     filled_blocks: i32,
+
+    tree_system: Option<TreeSystem>,
+}
+
+pub struct WorldStateInit<'a> {
+    pub world: World,
+    pub tree_config: Option<&'a TreeConfig>,
 }
 
 impl WorldState {
-    pub fn new(world: World) -> Self {
-        Self {
-            world,
+    pub fn new(init: WorldStateInit) -> Result<Self> {
+        let tree_system = match init.tree_config {
+            Some(tree_config) => Some(TreeSystem::new(tree_config, &init.world.block_helper)?),
+            None => None
+        };
+
+        Ok(Self {
+            world: init.world,
             world_diff: UpdatedWorldState::empty(),
-            _rng: rand::thread_rng(),
+            rng: rand::thread_rng(),
             updating: false,
             filled_blocks: (16 * 16 * 4) / 8,
-        }
+            tree_system
+        })
     }
 
     pub fn world(&self) -> &World {
@@ -125,33 +140,51 @@ impl WorldState {
             self.world_diff.blocks.record_chunk_update(chunk_pos);
         }
 
-        log::info!(
+        log::debug!(
             "Setting number of filled blocks to {}/{}",
             count_filled as f64 * index_utils::chunk_size_total() as f64 / bounds.volume() as f64,
             index_utils::chunk_size_total()
         );
     }
 
-    pub fn on_click(&mut self, camera_pos: Point3<f64>, camera_facing: Vector3<f64>) {
+    pub fn on_click(
+        &mut self,
+        camera_pos: Point3<f64>,
+        camera_facing: Vector3<f64>,
+    ) -> Result<()> {
         let ray = Ray {
             origin: camera_pos,
             dir: camera_facing,
         };
-        if let Some(raycast_hit) = self.world.blocks.cast_ray(&ray, &self.world.block_helper) {
-            log::info!(
-                "Clicked on block {:?} at pos {:?} with intersection {:?}",
-                raycast_hit.block,
-                raycast_hit.block_pos,
-                raycast_hit.intersection
-            );
-            let mut updater =
-                BlockUpdater::new(&mut self.world.blocks, &mut self.world_diff.blocks);
 
-            let new_block_pos =
-                raycast_hit.block_pos + convert_vec!(raycast_hit.intersection.normal, i64);
+        let raycast_hit = match self.world.blocks.cast_ray(&ray, &self.world.block_helper) {
+            None => return Ok(()),
+            Some(raycast_hit) => raycast_hit,
+        };
 
-            updater.set_block(new_block_pos, Block::from_u16(1));
-        }
+        log::debug!(
+            "Clicked on block {:?} at pos {:?} with intersection {:?}",
+            raycast_hit.block,
+            raycast_hit.block_pos,
+            raycast_hit.intersection
+        );
+
+        let mut tree_system = match &self.tree_system {
+            None => return Ok(()),
+            Some(system) => system.clone()
+        };
+
+        let mut updater = BlockUpdater::new(&mut self.world.blocks, &mut self.world_diff.blocks);
+        let tree = tree_system.generate(&mut self.rng)?;
+
+        let root_pos =
+            convert_point!(raycast_hit.block_pos, f64) + raycast_hit.intersection.normal;
+
+        let draw_transform = Matrix4::from_translation(root_pos - Point3::origin());
+
+        tree.draw_transformed(&mut updater, draw_transform);
+
+        Ok(())
     }
 
     pub fn toggle_updates(&mut self) {
