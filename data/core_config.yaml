@@ -23,11 +23,13 @@ block_config:
 resources:
   root: ./resources
   artifact_root: ./resources_bin
-  force_shader_compile: false
+  force_shader_compile: true
   resources:
+    # Images
     - name: crosshair
       relative_path: crosshair.png
       kind: Image
+    # World blocks shaders
     - name: blocks_compute
       relative_path: shaders/blocks_compute.glsl
       kind: 
@@ -40,6 +42,17 @@ resources:
           kind: Vertex
     - name: blocks_fragment
       relative_path: shaders/blocks_fragment.glsl
+      kind: 
+        Shader:
+          kind: Fragment
+    # GUI shaders
+    - name: gui_vertex
+      relative_path: shaders/gui_vertex.glsl
+      kind: 
+        Shader:
+          kind: Vertex
+    - name: gui_fragment
+      relative_path: shaders/gui_fragment.glsl
       kind: 
         Shader:
           kind: Fragment

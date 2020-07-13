@@ -8,6 +8,7 @@ use simgame_core::{
 };
 
 use crate::resource::ResourceLoader;
+use crate::FrameRender;
 
 mod blocks;
 
@@ -29,11 +30,11 @@ pub struct ViewState {
 }
 
 pub struct WorldRenderInit<'a> {
-    pub display_size: Vector2<u32>,
     pub view_params: ViewParams,
     pub world: &'a World,
     pub max_visible_chunks: usize,
-    pub resource_loader: &'a ResourceLoader
+    pub resource_loader: &'a ResourceLoader,
+    pub swapchain: &'a wgpu::SwapChainDescriptor,
 }
 
 pub(crate) struct WorldRenderState {
@@ -43,13 +44,6 @@ pub(crate) struct WorldRenderState {
     // /// Contains textures for each block type.
     // /// Dimensions are 16x16xN, where N is number of block types.
     // block_master_texture: wgpu::TextureView
-}
-
-pub(crate) struct FrameRender<'a> {
-    pub queue: &'a wgpu::Queue,
-    pub device: &'a wgpu::Device,
-    pub frame: &'a wgpu::SwapChainFrame,
-    pub view_state: &'a ViewState,
 }
 
 impl WorldRenderState {
@@ -65,14 +59,14 @@ impl WorldRenderState {
             multi_draw_enabled,
         } = device_result;
 
-        let depth_texture = Self::make_depth_texture(&device_result.device, init.display_size);
+        let display_size = Vector2::new(init.swapchain.width, init.swapchain.height);
+        let depth_texture = Self::make_depth_texture(&device_result.device, display_size);
 
-        let aspect_ratio = init.display_size.x as f32 / init.display_size.y as f32;
+        let aspect_ratio = display_size.x as f32 / display_size.y as f32;
 
         let view_state = ViewState {
             params: init.view_params,
-            proj: OPENGL_TO_WGPU_MATRIX
-                * cgmath::perspective(Deg(70f32), aspect_ratio, 1.0, 1000.0),
+            proj: Self::create_projection_matrix(aspect_ratio),
             rotation: Matrix4::identity(),
         };
 
@@ -111,36 +105,29 @@ impl WorldRenderState {
         })
     }
 
-    pub fn update_win_size(
+    pub fn update_swapchain(
         &mut self,
         device: &wgpu::Device,
-        display_size: Vector2<u32>,
+        swapchain: &wgpu::SwapChainDescriptor,
     ) -> Result<()> {
+        let display_size = Vector2::new(swapchain.width, swapchain.height);
+
         let depth_texture = Self::make_depth_texture(device, display_size);
         self.render_blocks.set_depth_texture(&depth_texture);
 
         let aspect_ratio = display_size.x as f32 / display_size.y as f32;
-
-        self.view_state.proj =
-            OPENGL_TO_WGPU_MATRIX * cgmath::perspective(Deg(70f32), aspect_ratio, 1.0, 1000.0);
+        self.view_state.proj = Self::create_projection_matrix(aspect_ratio);
 
         Ok(())
     }
 
-    pub fn render_frame(
-        &mut self,
-        queue: &wgpu::Queue,
-        device: &wgpu::Device,
-        frame: &wgpu::SwapChainFrame,
-        encoder: &mut wgpu::CommandEncoder,
-    ) {
-        let render = FrameRender {
-            queue,
-            device,
-            frame,
-            view_state: &self.view_state,
-        };
-        self.render_blocks.render_frame(&render, encoder);
+    fn create_projection_matrix(aspect_ratio: f32) -> Matrix4<f32> {
+        OPENGL_TO_WGPU_MATRIX * cgmath::perspective(Deg(70f32), aspect_ratio, 1.0, 1000.0)
+    }
+
+    pub fn render_frame(&mut self, render: &FrameRender, encoder: &mut wgpu::CommandEncoder) {
+        self.render_blocks
+            .render_frame(render, &self.view_state, encoder);
     }
 
     pub fn update(&mut self, queue: &wgpu::Queue, world: &World, diff: &UpdatedWorldState) {

@@ -47,9 +47,9 @@ mod shaderc_impl {
             let mut source = String::new();
 
             File::open(path)
-                .map_err(|err| anyhow!("Could not open shader file {:?}: {:?}", fname, err))?
+                .with_context(|| format!("Could not open shader file {:?}", fname))?
                 .read_to_string(&mut source)
-                .map_err(|err| anyhow!("Could not read shader file {:?}: {:?}", fname, err))?;
+                .with_context(|| format!("Could not read shader file {:?}", fname))?;
 
             let mut options = shaderc::CompileOptions::new()
                 .ok_or_else(|| anyhow!("Creating shaderc compile options"))?;
@@ -65,7 +65,7 @@ mod shaderc_impl {
                     "main",
                     Some(&options),
                 )
-                .map_err(|err| anyhow!("Could not compile shader {:?}: {:?}", fname, err))?;
+                .with_context(|| format!("Could not compile shader {:?}", fname))?;
 
             Ok(compiled.as_binary().into())
         }

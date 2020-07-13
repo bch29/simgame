@@ -108,10 +108,6 @@ struct ChunkMeta {
 }
 
 impl BlocksRenderState {
-    pub fn set_view(&mut self, params: &ViewParams) {
-        self.chunk_state.set_visible_size(params.visible_size);
-    }
-
     pub fn new(
         init: BlocksRenderInit,
         device: &wgpu::Device,
@@ -408,6 +404,10 @@ impl BlocksRenderState {
         })
     }
 
+    pub fn set_view(&mut self, params: &ViewParams) {
+        self.chunk_state.set_visible_size(params.visible_size);
+    }
+
     pub fn set_depth_texture(&mut self, depth_texture: &wgpu::Texture) {
         self.render_stage.depth_texture = depth_texture.create_default_view();
     }
@@ -415,6 +415,7 @@ impl BlocksRenderState {
     pub fn render_frame(
         &mut self,
         frame_render: &world::FrameRender,
+        _view_state: &world::ViewState,
         encoder: &mut wgpu::CommandEncoder,
     ) {
         if self.needs_compute_pass {
@@ -949,7 +950,7 @@ impl BufferSyncable for RenderUniforms {
 impl IntoBufferSynced for RenderUniforms {
     fn buffer_sync_desc(&self) -> BufferSyncHelperDesc {
         BufferSyncHelperDesc {
-            label: "render uniforms",
+            label: "world blocks render uniforms",
             buffer_len: 1,
             max_chunk_len: 1,
             usage: wgpu::BufferUsage::UNIFORM | wgpu::BufferUsage::COPY_DST,
@@ -968,7 +969,7 @@ impl BufferSyncable for RenderLocals {
 impl IntoBufferSynced for RenderLocals {
     fn buffer_sync_desc(&self) -> BufferSyncHelperDesc {
         BufferSyncHelperDesc {
-            label: "render locals",
+            label: "world blocks render locals",
             buffer_len: 1,
             max_chunk_len: 1,
             usage: wgpu::BufferUsage::STORAGE | wgpu::BufferUsage::COPY_DST,

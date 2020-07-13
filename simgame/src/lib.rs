@@ -277,6 +277,7 @@ impl TestRender {
                         let _ = self.window.set_cursor_grab(false);
                         self.control_state.clear_key_states();
                         self.has_cursor_control = false;
+                        self.window.set_cursor_visible(true);
                     }
                 }
                 WindowEvent::Resized(new_size) => {
@@ -305,6 +306,7 @@ impl TestRender {
         if self.window.set_cursor_grab(true).is_ok() {
             self.has_cursor_control = true;
             reset_cursor(&self.window, self.cursor_reset_position)?;
+            self.window.set_cursor_visible(false);
         }
 
         Ok(())
