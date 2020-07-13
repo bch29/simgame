@@ -280,8 +280,14 @@ impl TestRender {
                         self.window.set_cursor_visible(true);
                     }
                 }
-                WindowEvent::Resized(new_size) => {
-                    log::info!("Window resized to {:?}", new_size);
+                WindowEvent::Resized(event_size) => {
+                    let new_size = self.window.inner_size();
+                    log::info!(
+                        "Window resized to {:?} (event reported {:?})",
+                        new_size,
+                        event_size
+                    );
+
                     self.render_state
                         .update_win_size(Vector2::new(new_size.width, new_size.height))?;
                 }
