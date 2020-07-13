@@ -1,13 +1,14 @@
-use anyhow::{anyhow, Result};
-use log::{error, info};
 use std::env;
 use std::path::PathBuf;
+
+use anyhow::{anyhow, Result};
+use log::{error, info};
 use structopt::StructOpt;
 
 use simgame::files::FileContext;
 use simgame_core::block::BlockConfigHelper;
 use simgame_core::world::World;
-use simgame_render::resource::ResourceLoader;
+use simgame_render::resource::{self, ResourceLoader};
 use simgame_worldgen as worldgen;
 
 #[derive(Debug, StructOpt)]
@@ -25,6 +26,18 @@ struct RenderWorldOpts {
 
     #[structopt(short = "t", long)]
     graphics_trace_path: Option<PathBuf>,
+
+    #[structopt(flatten)]
+    resource_options: ResourceOptions,
+}
+
+#[derive(Debug, StructOpt)]
+struct ResourceOptions {
+    #[structopt(long)]
+    force_recompile_all_shaders: bool,
+
+    #[structopt(long)]
+    force_recompile_shaders: Vec<String>,
 }
 
 #[derive(Debug, StructOpt)]
@@ -73,8 +86,28 @@ fn run(opt: Opts) -> Result<()> {
 async fn run_render_world(ctx: &FileContext, options: &RenderWorldOpts) -> Result<()> {
     let settings = ctx.load_settings()?;
 
-    let resource_loader =
-        ResourceLoader::new(ctx.data_root.as_path(), ctx.core_settings.resources.clone())?;
+    let force_recompile_shaders = if options.resource_options.force_recompile_all_shaders {
+        resource::ForceRecompileOption::All
+    } else if !options.resource_options.force_recompile_shaders.is_empty() {
+        resource::ForceRecompileOption::Subset(
+            options
+                .resource_options
+                .force_recompile_shaders
+                .iter()
+                .cloned()
+                .collect(),
+        )
+    } else {
+        resource::ForceRecompileOption::None
+    };
+
+    let resource_loader = ResourceLoader::new(
+        ctx.data_root.as_path(),
+        ctx.core_settings.resources.clone(),
+        resource::ResourceOptions {
+            force_recompile_shaders,
+        },
+    )?;
 
     let blocks = match &options.save_name {
         Some(save_name) => ctx.load_world_blocks(save_name)?,

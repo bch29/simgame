@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::{BufReader, Read};
 use std::path::{Path, PathBuf};
@@ -15,7 +15,20 @@ pub struct ResourceLoader {
     artifact_root: PathBuf,
     resources: HashMap<String, Resource>,
     shader_compiler: ShaderCompiler,
-    config: ResourceConfig,
+    _config: ResourceConfig,
+    options: ResourceOptions,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResourceOptions {
+    pub force_recompile_shaders: ForceRecompileOption,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ForceRecompileOption {
+    None,
+    All,
+    Subset(HashSet<String>),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -23,7 +36,6 @@ pub struct ResourceConfig {
     pub root: PathBuf,
     pub artifact_root: PathBuf,
     pub resources: Vec<Resource>,
-    pub force_shader_compile: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -40,12 +52,40 @@ pub struct Resource {
 }
 
 impl ResourceLoader {
-    pub fn new(data_root: &Path, config: ResourceConfig) -> Result<Self> {
+    pub fn new(
+        data_root: &Path,
+        config: ResourceConfig,
+        options: ResourceOptions,
+    ) -> Result<Self> {
         let resources = config
             .resources
             .iter()
             .map(|res| (res.name.clone(), res.clone()))
             .collect();
+
+        match &options.force_recompile_shaders {
+            ForceRecompileOption::Subset(subset) => {
+                let all_shaders: HashSet<String> = config
+                    .resources
+                    .iter()
+                    .filter(|resource| match &resource.kind {
+                        ResourceKind::Shader { .. } => true,
+                        _ => false,
+                    })
+                    .map(|resource| resource.name.clone())
+                    .collect();
+                let missing: Vec<&String> = subset
+                    .iter()
+                    .filter(|name| !all_shaders.contains(name.as_str()))
+                    .collect();
+
+                if !missing.is_empty() {
+                    bail!("Invalid --force-recompile-shaders arguments {:?}. Valid arguments are {:?}.",
+                          missing, all_shaders);
+                }
+            }
+            _ => {}
+        }
 
         std::fs::create_dir_all(&config.artifact_root)?;
 
@@ -64,7 +104,8 @@ impl ResourceLoader {
             artifact_root,
             resources,
             shader_compiler,
-            config,
+            _config: config,
+            options,
         })
     }
 
@@ -128,7 +169,13 @@ impl ResourceLoader {
             Ok(())
         };
 
-        if self.config.force_shader_compile {
+        let force_recompile = match &self.options.force_recompile_shaders {
+            ForceRecompileOption::All => true,
+            ForceRecompileOption::Subset(subset) => subset.contains(name),
+            ForceRecompileOption::None => false,
+        };
+
+        if force_recompile {
             log::info!("Compiling shader from source: {:?}", src_path);
             let result = self
                 .shader_compiler

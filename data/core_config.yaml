@@ -23,7 +23,6 @@ block_config:
 resources:
   root: ./resources
   artifact_root: ./resources_bin
-  force_shader_compile: true
   resources:
     # Images
     - name: crosshair
