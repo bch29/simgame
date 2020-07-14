@@ -35,15 +35,15 @@ impl GuiRenderState {
         let device = &device_result.device;
 
         let vert_shader = device.create_shader_module(wgpu::ShaderModuleSource::SpirV(
-            init.resource_loader.load_shader("gui_vertex")?.as_slice(),
+            init.resource_loader.load_shader("shader/gui/vertex")?.as_slice(),
         ));
 
         let frag_shader = device.create_shader_module(wgpu::ShaderModuleSource::SpirV(
-            init.resource_loader.load_shader("gui_fragment")?.as_slice(),
+            init.resource_loader.load_shader("shader/gui/fragment")?.as_slice(),
         ));
 
         let crosshair_texture: wgpu::TextureView = {
-            let image = init.resource_loader.load_image("crosshair")?.into_rgba();
+            let image = init.resource_loader.load_image("tex/gui/crosshair")?.into_rgba();
 
             let (width, height) = image.dimensions();
 

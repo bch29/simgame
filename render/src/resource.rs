@@ -60,8 +60,13 @@ impl ResourceLoader {
         let resources = config
             .resources
             .iter()
-            .map(|res| (res.name.clone(), res.clone()))
-            .collect();
+            .map(|res| {
+                if res.name.is_empty() {
+                    bail!("Resource {:?} has empty name", res);
+                }
+                Ok((res.name.clone(), res.clone()))
+            })
+            .collect::<Result<_>>()?;
 
         match &options.force_recompile_shaders {
             ForceRecompileOption::Subset(subset) => {
@@ -213,24 +218,37 @@ impl ResourceLoader {
     }
 
     fn make_artifact_path(&self, resource: &Resource) -> Result<PathBuf> {
-        match resource.kind {
-            ResourceKind::Shader { .. } => {
-                let dir_path = {
-                    let mut path = self.artifact_root.clone();
-                    path.push("shaders");
-                    path
-                };
-                std::fs::create_dir_all(&dir_path)?;
-                let mut res = dir_path;
-                res.push(format!("{}.spirv", resource.name));
-                Ok(res)
-            }
+        if resource.name.is_empty() {
+            bail!("Cannot make artifact path from empty resource name");
+        }
+
+        let extension = match resource.kind {
+            ResourceKind::Shader { .. } => "spirv",
             _ => bail!(
                 "Cannot make artifact path for resource {:?} of kind {:?}",
                 resource.name,
                 resource.kind
             ),
-        }
+        };
+
+        let mut path = self.artifact_root.clone();
+        let mut path_components = resource.name.split_terminator("/").peekable();
+
+        let fname = loop {
+            let component = path_components
+                .next()
+                .ok_or_else(|| anyhow!("got empty iterator after splitting on '/'"))?;
+            if path_components.peek().is_none() {
+                break format!("{}.{}", component, extension);
+            } else {
+                path.push(component);
+            }
+        };
+
+        std::fs::create_dir_all(&path)?;
+        path.push(fname);
+
+        Ok(path)
     }
 
     fn path_to_absolute(&self, relative_path: &Path) -> PathBuf {

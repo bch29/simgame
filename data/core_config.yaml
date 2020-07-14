@@ -8,49 +8,53 @@ block_config:
     - name: Rock
       category: rock
       char_repr: "*"
+      texture: "tex/block/rock"
     - name: Leaf
       category: foliage
       char_repr: "%"
       speed_modifier: 0.5
+      texture: "tex/block/leaf"
     - name: Wood
       category: wood
       char_repr: "@"
+      texture: "tex/block/wood"
     - name: Dirt
       category: dirt
       char_repr: "#"
       speed_modifier: 0.8
+      texture: "tex/block/dirt"
 
 resources:
   root: ./resources
   artifact_root: ./resources_bin
   resources:
     # Images
-    - name: crosshair
+    - name: tex/gui/crosshair
       relative_path: crosshair.png
       kind: Image
     # World blocks shaders
-    - name: blocks_compute
+    - name: shader/blocks/compute
       relative_path: shaders/blocks_compute.glsl
       kind: 
         Shader:
           kind: Compute
-    - name: blocks_vertex
+    - name: shader/blocks/vertex
       relative_path: shaders/blocks_vertex.glsl
       kind: 
         Shader:
           kind: Vertex
-    - name: blocks_fragment
+    - name: shader/blocks/fragment
       relative_path: shaders/blocks_fragment.glsl
       kind: 
         Shader:
           kind: Fragment
     # GUI shaders
-    - name: gui_vertex
+    - name: shader/gui/vertex
       relative_path: shaders/gui_vertex.glsl
       kind: 
         Shader:
           kind: Vertex
-    - name: gui_fragment
+    - name: shader/gui/fragment
       relative_path: shaders/gui_fragment.glsl
       kind: 
         Shader:

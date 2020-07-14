@@ -117,19 +117,19 @@ impl BlocksRenderState {
 
         let compute_shader = device.create_shader_module(wgpu::ShaderModuleSource::SpirV(
             init.resource_loader
-                .load_shader("blocks_compute")?
+                .load_shader("shader/blocks/compute")?
                 .as_slice(),
         ));
 
         let vert_shader = device.create_shader_module(wgpu::ShaderModuleSource::SpirV(
             init.resource_loader
-                .load_shader("blocks_vertex")?
+                .load_shader("shader/blocks/vertex")?
                 .as_slice(),
         ));
 
         let frag_shader = device.create_shader_module(wgpu::ShaderModuleSource::SpirV(
             init.resource_loader
-                .load_shader("blocks_fragment")?
+                .load_shader("shader/blocks/fragment")?
                 .as_slice(),
         ));
 
