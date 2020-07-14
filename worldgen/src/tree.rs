@@ -17,6 +17,7 @@ pub struct TreeSystemConfig {
     branch_radius_factor: f64,
     trunk_length: f64,
     foliage_length: f64,
+    foliage_radius: f64,
     steps: i32,
 }
 
@@ -28,20 +29,20 @@ pub struct TreeConfig {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Symbol {
-    BaseA,    // "A"
-    BaseL,    // "L"
-    BaseS,    //  "S"
-    Push,     // "["
-    Pop,      // "]"
-    Wood,     // "F"
-    Leaf,     // "Q"
-    YawCW,    // "\"
-    YawCCW,   // "/"
-    PitchCW,  // "&"
-    PitchCCW, // "^"
-    RollCW,   // "+"
-    RollCCW,  // "-"
-    Flip,     // "|"
+    Expand,
+    Contract,
+    Base { id: u8 },
+    Push,
+    Pop,
+    Wood { id: u8 },
+    Leaf { id: u8 },
+    YawCW,
+    YawCCW,
+    PitchCW,
+    PitchCCW,
+    RollCW,
+    RollCCW,
+    Flip,
 }
 
 pub fn generate<R: Rng>(
@@ -68,7 +69,12 @@ impl TreeSystem {
 
         let trunk_block = blocks
             .block_by_name(&config.tree.trunk_block[..])
-            .ok_or_else(|| anyhow!("Unknown block configured for trunk: {}", config.tree.trunk_block))?
+            .ok_or_else(|| {
+                anyhow!(
+                    "Unknown block configured for trunk: {}",
+                    config.tree.trunk_block
+                )
+            })?
             .0;
 
         let foliage_block = blocks
@@ -86,12 +92,12 @@ impl TreeSystem {
             trunk_block,
             foliage_block,
             l_system,
-            config: config.tree.clone()
+            config: config.tree.clone(),
         })
     }
 
     pub fn generate<R: Rng>(&mut self, rng: &mut R) -> Result<primitive::Shape> {
-        let symbols = self.l_system.run(self.config.steps, rng);
+        let symbols = self.l_system.run(self.config.steps, rng)?;
         let turtle = self.run(symbols)?;
         Ok(turtle.into_shape())
     }
@@ -119,27 +125,15 @@ impl TurtleInterpreter<Symbol> for TreeSystem {
             *direction = transformed;
         };
 
-        let rot_amount = Deg(60.);
+        let rot_amount = Deg(30.);
 
-        // BaseA,    // "A"
-        // BaseL,    // "L"
-        // BaseS,    //  "S"
-        // Push,     // "["
-        // Pop,      // "]"
-        // Wood,     // "F"
-        // Leaf,     // "Q"
-        // YawCW,    // "\"
-        // YawCCW,   // "/"
-        // PitchCW,  // "&"
-        // PitchCCW, // "^"
-        // RollCW,   // "+"
-        // RollCCW,  // "-"
-        // Flip,     // "|"
         use Symbol::*;
         match symbol {
             Push => turtle.push_state(),
             Pop => turtle.pop_state()?,
-            Wood => {
+            Expand => turtle.state_mut().thickness /= self.config.branch_radius_factor,
+            Contract => turtle.state_mut().thickness *= self.config.branch_radius_factor,
+            Wood { .. } => {
                 turtle.state_mut().brush = TurtleBrush::FilledLine {
                     fill_block: self.trunk_block,
                     round_end: true,
@@ -147,33 +141,65 @@ impl TurtleInterpreter<Symbol> for TreeSystem {
                 };
                 turtle.draw(self.config.trunk_length);
             }
-            Leaf => {
+            Leaf { .. } => {
+                turtle.push_state();
+                turtle.state_mut().thickness = self.config.foliage_radius;
+
                 turtle.state_mut().brush = TurtleBrush::Spheroid {
                     stretch: true,
                     fill_block: self.foliage_block,
                 };
                 turtle.draw(self.config.foliage_length);
+                turtle.pop_state()?;
             }
             YawCW => {
-                apply_rotate(Vector3::unit_z(), rot_amount, &mut turtle.state_mut().direction);
+                apply_rotate(
+                    Vector3::unit_z(),
+                    rot_amount,
+                    &mut turtle.state_mut().direction,
+                );
             }
             YawCCW => {
-                apply_rotate(-Vector3::unit_z(), rot_amount, &mut turtle.state_mut().direction);
+                apply_rotate(
+                    -Vector3::unit_z(),
+                    rot_amount,
+                    &mut turtle.state_mut().direction,
+                );
             }
             PitchCW => {
-                apply_rotate(Vector3::unit_x(), rot_amount, &mut turtle.state_mut().direction);
+                apply_rotate(
+                    Vector3::unit_x(),
+                    rot_amount,
+                    &mut turtle.state_mut().direction,
+                );
             }
             PitchCCW => {
-                apply_rotate(-Vector3::unit_x(), rot_amount, &mut turtle.state_mut().direction);
+                apply_rotate(
+                    -Vector3::unit_x(),
+                    rot_amount,
+                    &mut turtle.state_mut().direction,
+                );
             }
             RollCW => {
-                apply_rotate(Vector3::unit_y(), rot_amount, &mut turtle.state_mut().direction);
+                apply_rotate(
+                    Vector3::unit_y(),
+                    rot_amount,
+                    &mut turtle.state_mut().direction,
+                );
             }
             RollCCW => {
-                apply_rotate(-Vector3::unit_y(), rot_amount, &mut turtle.state_mut().direction);
+                apply_rotate(
+                    -Vector3::unit_y(),
+                    rot_amount,
+                    &mut turtle.state_mut().direction,
+                );
             }
             Flip => {
-                apply_rotate(Vector3::unit_y(), Deg(180.), &mut turtle.state_mut().direction);
+                apply_rotate(
+                    Vector3::unit_y(),
+                    Deg(180.),
+                    &mut turtle.state_mut().direction,
+                );
             }
             _ => {}
         };

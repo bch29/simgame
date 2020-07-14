@@ -1,9 +1,11 @@
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use std::collections::HashMap;
 
 use rand::distributions::{Distribution, WeightedIndex};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
+
+pub const MAX_LSYSTEM_BYTES: usize = 1 << 20;
 
 pub type WeightedList<T> = Vec<(f64, T)>;
 
@@ -75,7 +77,7 @@ impl<Symbol> LSystemConfig<Symbol> {
 }
 
 impl<Symbol> LSystem<Symbol> {
-    pub fn run<R>(&self, steps: i32, rng: &mut R) -> Vec<Symbol>
+    pub fn run<R>(&self, steps: i32, rng: &mut R) -> Result<Vec<Symbol>>
     where
         R: Rng,
         Symbol: Clone + Eq + std::hash::Hash,
@@ -86,11 +88,13 @@ impl<Symbol> LSystem<Symbol> {
             rng: rng,
         };
 
-        for _ in 0..steps {
-            runner.step();
+        for i in 0..steps {
+            runner
+                .step()
+                .with_context(|| format!("L system failed after {} steps", i))?;
         }
 
-        runner.state
+        Ok(runner.state)
     }
 
     fn produce<R>(&self, symbol: Symbol, rng: &mut R, result: &mut Vec<Symbol>)
@@ -136,12 +140,20 @@ where
     Symbol: Clone + Eq + std::hash::Hash,
     R: Rng,
 {
-    fn step(&mut self) {
+    fn step(&mut self) -> Result<()> {
+        let max_len = MAX_LSYSTEM_BYTES / std::mem::size_of::<Symbol>();
+
         let mut prev_state = Vec::new();
         std::mem::swap(&mut self.state, &mut prev_state);
         for symbol in prev_state.into_iter() {
             self.description
                 .produce(symbol, &mut self.rng, &mut self.state);
+
+            if self.state.len() > max_len {
+                bail!("L system length exceeded max of {}", max_len);
+            }
         }
+
+        Ok(())
     }
 }

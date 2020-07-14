@@ -1,5 +1,5 @@
 use anyhow::{anyhow, Result};
-use cgmath::{Angle, EuclideanSpace, InnerSpace, Matrix4, Point3, Rad, Vector3};
+use cgmath::{Angle, EuclideanSpace, InnerSpace, Matrix4, Point3, Rad, SquareMatrix, Vector3};
 
 use simgame_core::block::Block;
 
@@ -120,9 +120,15 @@ impl Turtle {
                 let rotation: Matrix4<f64> = {
                     let dir = self.state.direction.normalize();
                     let up = Vector3::unit_z();
-                    let rot_axis = up.cross(dir).normalize();
-                    let rot_angle = Rad::acos(up.dot(dir));
-                    Matrix4::from_axis_angle(rot_axis, rot_angle)
+                    let rot_axis = up.cross(dir);
+
+                    if rot_axis.magnitude2() < 1e-9 {
+                        Matrix4::identity()
+                    } else {
+                        let rot_axis = rot_axis.normalize();
+                        let rot_angle = Rad::acos(up.dot(dir));
+                        Matrix4::from_axis_angle(rot_axis, rot_angle)
+                    }
                 };
 
                 let scale = {
@@ -143,6 +149,12 @@ impl Turtle {
                     Matrix4::from_translation(center - Point3::origin())
                 };
 
+                if cfg!(debug) {
+                    check_matrix_valid(translation);
+                    check_matrix_valid(rotation);
+                    check_matrix_valid(scale);
+                }
+
                 let transform = translation * rotation * scale;
 
                 let primitive = primitive::AffineTransform::new(sphere, transform)
@@ -156,5 +168,14 @@ impl Turtle {
         }
 
         self.state.pos = end_pos;
+    }
+}
+
+fn check_matrix_valid(matrix: Matrix4<f64>) {
+    let cols: [[f64; 4]; 4] = matrix.into();
+    for col in &cols {
+        for cell in col {
+            assert!(!cell.is_nan());
+        }
     }
 }

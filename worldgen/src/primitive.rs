@@ -21,30 +21,6 @@ pub trait Primitive {
     }
 }
 
-impl<P> Primitive for &P where P: Primitive {
-    fn test(&self, point: Point3<f64>) -> bool {
-        use std::ops::Deref;
-        self.deref().test(point)
-    }
-
-    fn bounds(&self) -> Bounds<f64> {
-        use std::ops::Deref;
-        self.deref().bounds()
-    }
-}
-
-impl Primitive for &dyn Primitive {
-    fn test(&self, point: Point3<f64>) -> bool {
-        use std::ops::Deref;
-        self.deref().test(point)
-    }
-
-    fn bounds(&self) -> Bounds<f64> {
-        use std::ops::Deref;
-        self.deref().bounds()
-    }
-}
-
 pub struct ShapeComponent {
     pub fill_block: Block,
     pub primitive: Box<dyn Primitive>,
@@ -160,10 +136,23 @@ impl Shape {
     }
 }
 
+fn check_matrix_valid(matrix: Matrix4<f64>) {
+    let cols: [[f64; 4]; 4] = matrix.into();
+    for col in &cols {
+        for cell in col {
+            assert!(!cell.is_nan());
+        }
+    }
+}
+
 impl<T> AffineTransform<T> {
     /// Returns `None` if `transform` is not invertible.
     pub fn new(primitive: T, transform: Matrix4<f64>) -> Option<Self> {
         let inv_transform = transform.inverse_transform()?;
+        if cfg!(debug) {
+            check_matrix_valid(transform);
+            check_matrix_valid(inv_transform);
+        }
         Some(Self {
             primitive,
             transform,
@@ -369,5 +358,32 @@ mod util {
             self.is_start = false;
             Some((is_start, is_end, item))
         }
+    }
+}
+
+impl<P> Primitive for &P
+where
+    P: Primitive,
+{
+    fn test(&self, point: Point3<f64>) -> bool {
+        use std::ops::Deref;
+        self.deref().test(point)
+    }
+
+    fn bounds(&self) -> Bounds<f64> {
+        use std::ops::Deref;
+        self.deref().bounds()
+    }
+}
+
+impl Primitive for &dyn Primitive {
+    fn test(&self, point: Point3<f64>) -> bool {
+        use std::ops::Deref;
+        self.deref().test(point)
+    }
+
+    fn bounds(&self) -> Bounds<f64> {
+        use std::ops::Deref;
+        self.deref().bounds()
     }
 }
