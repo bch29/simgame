@@ -12,6 +12,15 @@ const uint MAX_UINT = 4294967295;
 const float scale = 1.0;
 const float half_scale = scale / 2.;
 
+const vec4[6] faceNormals = vec4[](
+    vec4(0., 0., 1., 0.),
+    vec4(0., 0., -1., 0.),
+    vec4(1., 0., 0., 0.),
+    vec4(-1., 0., 0., 0.),
+    vec4(0., 1., 0., 0.),
+    vec4(0., -1., 0., 0.)
+);
+
 layout(local_size_x = CHUNK_SIZE_X, local_size_y = CHUNK_SIZE_Y, local_size_z = CHUNK_SIZE_Z) in;
 
 struct ChunkMetadata {
@@ -49,21 +58,35 @@ struct CubeFace {
   vec2[4] vertexTexCoords;
 };
 
+struct BlockRenderInfo {
+  uint[8] faceTexIds;
+  CubeFace[6] cube;
+};
+
+struct BlockInfo {
+  ivec4 addr;
+  uint visibleFaceCount;
+  bool[6] visibleFaces;
+};
+
 layout(set = 0, binding = 0) readonly buffer Locals {
   vec4 u_VisibleBoxOrigin;
   vec4 u_VisibleBoxLimit;
-  CubeFace[6] u_CubeFaces;
 };
 
-layout(set = 0, binding = 1) readonly buffer BlockTypes {
+/* layout(set = 0, binding = 1) readonly buffer BlockRenderInfoBuf { */
+/*   BlockRenderInfo[] b_BlockRenderInfo; */
+/* }; */
+
+layout(set = 0, binding = 2) readonly buffer BlockTypes {
   int[] b_BlockTypes;
 };
 
-layout(set = 0, binding = 2) readonly buffer ChunkMetadataArr {
+layout(set = 0, binding = 3) readonly buffer ChunkMetadataArr {
   ChunkMetadata[] b_ChunkMetadata;
 };
 
-layout(set = 0, binding = 3) buffer OutputFacePairs {
+layout(set = 0, binding = 4) buffer OutputFacePairs {
   uint[] c_OutputFacePairs;
 };
 
@@ -194,13 +217,6 @@ bool isBlockVisible(ivec4 blockAddr, int blockType)
   return activeChunk && blockType != 0 && inVisibleBox;
 }
 
-struct BlockInfo {
-  ivec4 addr;
-  uint visibleFaceCount;
-  bool[6] visibleFaces;
-};
-
-
 BlockInfo getBlockInfo(ivec4 blockAddr) {
   BlockInfo res;
   res.addr = blockAddr;
@@ -211,8 +227,9 @@ BlockInfo getBlockInfo(ivec4 blockAddr) {
     return res;
 
   for (uint faceIx = 0; faceIx < 6; faceIx++) {
-    CubeFace face = u_CubeFaces[faceIx];
-    ivec4 neighborAddr = neighborBlockAddr(blockAddr, face.normal.xyz);
+    vec4 faceNormal = faceNormals[faceIx];
+
+    ivec4 neighborAddr = neighborBlockAddr(blockAddr, faceNormal.xyz);
     int neighborBlockType = getBlockType(neighborAddr);
 
     // do not render a face if its neighbor covers it completely.
@@ -393,9 +410,6 @@ void main() {
   command.first = 12 * info.addr.w; // (gl_VertexID / 12) encodes chunk index in vertex shader
   command.baseInstance = startChunkIx_g;
   c_IndirectCommands[info.addr.w] = command;
-
-  /* // DEBUG */
-  /* pushDebugCommands2(); */
 
   // ensure buffer writes are flushed
   memoryBarrierBuffer();

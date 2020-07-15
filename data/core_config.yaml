@@ -4,58 +4,86 @@ block_data_file_name: world_block_data.dat
 world_meta_file_name: world_meta.yaml
 
 block_config:
-  block_info:
+  blocks:
+    - name: Air
+      category: air
+      texture:
+        Nonuniform:
+          top: {SolidColor: {red: 255, green: 127, blue: 127}}
+          bottom: {SolidColor: {red: 0, green: 127, blue: 127}}
+          side: {SolidColor: {red: 0, green: 127, blue: 0}}
     - name: Rock
       category: rock
-      char_repr: "*"
-      texture: "tex/block/rock"
+      texture:
+        Uniform: {Texture: {resource: "tex/block/rock"}}
     - name: Leaf
       category: foliage
-      char_repr: "%"
       speed_modifier: 0.5
-      texture: "tex/block/leaf"
+      texture:
+        Uniform: {Texture: {resource: "tex/block/leaf"}}
     - name: Wood
       category: wood
-      char_repr: "@"
-      texture: "tex/block/wood"
+      texture:
+        Uniform: {Texture: {resource: "tex/block/wood"}}
     - name: Dirt
       category: dirt
-      char_repr: "#"
       speed_modifier: 0.8
-      texture: "tex/block/dirt"
+      texture:
+        Uniform: {Texture: {resource: "tex/block/dirt"}}
+    # - name: Grass
+    #   category: dirt
+    #   speed_modifier: 0.8
+    #   texture: "tex/block/dirt"
+    #     NonuniformTex:
+    #       top: "tex/block/grass_top"
+    #       side: "tex/block/grass_side"
+    #       bottom: "tex/block/dirt"
 
 resources:
   root: ./resources
   artifact_root: ./resources_bin
   resources:
-    # Images
+    # GUI textures
     - name: tex/gui/crosshair
-      relative_path: crosshair.png
+      relative_path: tex/gui/crosshair.png
+      kind: Image
+    # Block textures
+    - name: tex/block/rock
+      relative_path: tex/block/rock.png
+      kind: Image
+    - name: tex/block/leaf
+      relative_path: tex/block/leaf.png
+      kind: Image
+    - name: tex/block/wood
+      relative_path: tex/block/wood.png
+      kind: Image
+    - name: tex/block/dirt
+      relative_path: tex/block/dirt.png
       kind: Image
     # World blocks shaders
     - name: shader/blocks/compute
-      relative_path: shaders/blocks_compute.glsl
+      relative_path: shader/blocks_compute.glsl
       kind: 
         Shader:
           kind: Compute
     - name: shader/blocks/vertex
-      relative_path: shaders/blocks_vertex.glsl
+      relative_path: shader/blocks_vertex.glsl
       kind: 
         Shader:
           kind: Vertex
     - name: shader/blocks/fragment
-      relative_path: shaders/blocks_fragment.glsl
+      relative_path: shader/blocks_fragment.glsl
       kind: 
         Shader:
           kind: Fragment
     # GUI shaders
     - name: shader/gui/vertex
-      relative_path: shaders/gui_vertex.glsl
+      relative_path: shader/gui_vertex.glsl
       kind: 
         Shader:
           kind: Vertex
     - name: shader/gui/fragment
-      relative_path: shaders/gui_fragment.glsl
+      relative_path: shader/gui_fragment.glsl
       kind: 
         Shader:
           kind: Fragment

@@ -124,7 +124,7 @@ impl<'a, R> WorldGenerator<'a, R> {
                 let block = if p.z * world_size.z > height_here {
                     Block::air()
                 } else {
-                    let block_val = 1 + rng.gen::<u16>() % 8;
+                    let block_val = 1 + rng.gen::<u16>() % 4;
                     Block::from_u16(block_val)
                 };
 

@@ -1,11 +1,17 @@
 #version 450
 
+#extension GL_EXT_nonuniform_qualifier : require
+
 layout(location = 0) in vec2 v_TexCoord;
 layout(location = 1) in vec3 v_Normal;
 layout(location = 2) in vec4 v_Pos;
 layout(location = 3) flat in uint v_BlockType;
 layout(location = 4) in vec3 v_CameraPos;
+layout(location = 5) flat in uint v_TexId;
 layout(location = 0) out vec4 o_Target;
+
+layout(set = 0, binding = 5) uniform texture2D[] t_Textures;
+layout(set = 0, binding = 6) uniform sampler s_Textures;
 
 const vec4 ambientColor = vec4(1.0, 1.0, 1.0, 1.0);
 const float ambientStrength = 0.1;
@@ -39,11 +45,7 @@ void main() {
   float colorScale = 0.3 + (float(v_BlockType) / 8.0) * 0.7;
   vec4 colorScaleV = vec4(colorScale * 0.7, colorScale * 0.5, colorScale, 1.);
 
-  const float period = 64.0;
-  vec3 posScaled = (mod(v_Pos.xyz, period) - period / 2.0) / (period / 2.0);
-  posScaled *= posScaled;
-
-  vec4 texColor = vec4(posScaled, 1.) * colorScaleV;
+  vec4 texColor = texture(sampler2D(t_Textures[v_TexId], s_Textures), v_TexCoord);
 
   o_Target = (ambient + diffuse) * texColor;
 }

@@ -51,6 +51,8 @@ pub struct Resource {
     pub kind: ResourceKind,
 }
 
+pub type ImageReader = image::io::Reader<BufReader<File>>;
+
 impl ResourceLoader {
     pub fn new(
         data_root: &Path,
@@ -114,7 +116,7 @@ impl ResourceLoader {
         })
     }
 
-    pub fn load_image(&self, name: &str) -> Result<DynamicImage> {
+    pub fn open_image(&self, name: &str) -> Result<ImageReader> {
         let resource = self.get_resource(name)?;
 
         if resource.kind != ResourceKind::Image {
@@ -126,8 +128,11 @@ impl ResourceLoader {
         }
 
         let file = self.open_resource(&resource)?;
-        let reader = image::io::Reader::new(file).with_guessed_format()?;
-        Ok(reader.decode()?)
+        Ok(image::io::Reader::new(file).with_guessed_format()?)
+    }
+
+    pub fn load_image(&self, name: &str) -> Result<DynamicImage> {
+        Ok(self.open_image(name)?.decode()?)
     }
 
     pub fn get_resource(&self, name: &str) -> Result<&Resource> {

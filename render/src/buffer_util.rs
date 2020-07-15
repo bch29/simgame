@@ -253,7 +253,8 @@ impl<'a, Item> FillBuffer<'a, Item> {
         let item_size = std::mem::size_of::<Item>();
         let begin = item_size * (self.pos + self.batch_len);
 
-        self.queue.write_buffer(self.target, begin as _, chunk_slice.as_bytes());
+        self.queue
+            .write_buffer(self.target, begin as _, chunk_slice.as_bytes());
         self.batch_len += chunk_len;
     }
 
@@ -373,5 +374,16 @@ impl InstancedBuffer {
             0,
             std::iter::repeat(&[0u8, 0, 0, 0]).take(self.size() as usize / 4),
         );
+    }
+
+    #[inline]
+    pub fn write(&self, queue: &Queue, instance: usize, data: &[u8]) {
+        let mut fill = self.helper.begin_fill_buffer(
+            queue,
+            &self.buffer,
+            self.instance_offset(instance) as usize,
+        );
+        fill.advance(data);
+        fill.finish();
     }
 }

@@ -11,6 +11,7 @@ layout(location = 1) out vec3 v_Normal;
 layout(location = 2) out vec4 v_Pos;
 layout(location = 3) out uint v_BlockType;
 layout(location = 4) out vec3 v_CameraPos;
+layout(location = 5) out uint v_TexId;
 
 struct Attributes {
   // mesh data
@@ -22,6 +23,7 @@ struct Attributes {
   ivec4 blockAddr;
   vec3 chunkOffset;
   uint blockType;
+  uint texId;
 };
 
 struct CubeFace {
@@ -29,6 +31,11 @@ struct CubeFace {
   uint[8] indices;
   vec4[4] vertexLocs;
   vec2[4] vertexTexCoords;
+} cube;
+
+struct BlockRenderInfo {
+  uint[8] faceTexIds;
+  CubeFace[6] cube;
 };
 
 struct ChunkMetadata {
@@ -45,8 +52,8 @@ layout(set = 0, binding = 0) uniform Locals {
   vec4 u_CameraPos;
 };
 
-layout(set = 0, binding = 1) readonly buffer BufLocals {
-  CubeFace[6] b_CubeFaces;
+layout(set = 0, binding = 1) readonly buffer BlockRenderInfoBuf {
+  BlockRenderInfo[] b_BlockRenderInfo;
 };
 
 layout(set = 0, binding = 2) readonly buffer BlockTypes {
@@ -143,23 +150,23 @@ bool decodeAttributes(out Attributes attrs) {
     // didn't find an enabled face, return failure
     return false;
 
-  // NO DEBUG
-  // look up mesh data
-  CubeFace face = b_CubeFaces[faceId];
-  uint faceVertexIndex = face.indices[faceVertexId];
-  attrs.normal = face.normal;
-  attrs.pos = face.vertexLocs[faceVertexIndex];
-  attrs.texCoord = face.vertexTexCoords[faceVertexIndex];
-
   // look up block/chunk data
   uint blockIndexMask = (1 << 26) - 1;
   uint blockIndex = chunkIndex * CHUNK_SIZE_XYZ + (pairData & blockIndexMask);
   ivec4 blockAddr = decodeBlockIndex(blockIndex);
 
-  ChunkMetadata chunkMeta = b_ChunkMetadata[chunkIndex];
   attrs.blockAddr = blockAddr;
-  attrs.chunkOffset = vec3(chunkMeta.offset.xyz);
+  attrs.chunkOffset = vec3(b_ChunkMetadata[chunkIndex].offset.xyz);
   attrs.blockType = blockTypeAtIndex(blockIndex);
+
+  // look up mesh data
+  CubeFace face = b_BlockRenderInfo[attrs.blockType].cube[faceId];
+  uint faceVertexIndex = face.indices[faceVertexId];
+  attrs.normal = face.normal;
+  attrs.pos = face.vertexLocs[faceVertexIndex];
+  attrs.texCoord = face.vertexTexCoords[faceVertexIndex];
+
+  attrs.texId = b_BlockRenderInfo[attrs.blockType].faceTexIds[faceId];
 
   return true;
 }
@@ -181,20 +188,15 @@ void main() {
   mat4 view = u_View * translation_matrix(-u_CameraPos.xyz);
   mat4 model = fullModelMatrix(attrs.blockAddr, attrs.chunkOffset);
   mat4 proj = u_Projection;
-  /* mat4 view = identity(); */
-  /* mat4 model = identity(); */
-  /* mat4 proj = identity(); */
 
   v_CameraPos = u_CameraPos.xyz;
   v_TexCoord = attrs.texCoord;
   v_Pos = model * attrs.pos;
   v_Normal = (model * attrs.normal).xyz;
+  v_TexId = attrs.texId;
 
   gl_Position = proj * view * v_Pos;
   v_BlockType = attrs.blockType;
 }
-
-/* void main() { */
-/* } */
 
 // vi: ft=c

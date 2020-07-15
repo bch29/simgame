@@ -78,6 +78,7 @@ impl WorldRenderState {
                 max_visible_chunks: init.max_visible_chunks,
                 multi_draw_enabled: *multi_draw_enabled,
                 resource_loader: init.resource_loader,
+                block_config: &init.world.block_helper
             },
             device,
             queue,

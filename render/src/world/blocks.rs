@@ -1,11 +1,11 @@
 use std::collections::{HashMap, HashSet};
 
-use anyhow::Result;
+use anyhow::{anyhow, bail, Result};
 use cgmath::{ElementWise, EuclideanSpace, Point3, Vector3};
 use zerocopy::{AsBytes, FromBytes};
 
 use simgame_core::{
-    block::{self, index_utils, UpdatedBlocksState, WorldBlockData},
+    block::{self, index_utils, BlockConfigHelper, UpdatedBlocksState, WorldBlockData},
     convert_point, convert_vec,
     util::{Bounds, DivUp},
 };
@@ -26,6 +26,7 @@ pub(crate) struct BlocksRenderInit<'a> {
     pub max_visible_chunks: usize,
     pub multi_draw_enabled: bool,
     pub resource_loader: &'a ResourceLoader,
+    pub block_config: &'a BlockConfigHelper,
 }
 
 pub(crate) struct BlocksRenderState {
@@ -35,6 +36,7 @@ pub(crate) struct BlocksRenderState {
     compute_stage: ComputeStage,
     render_stage: RenderStage,
 
+    block_info_handler: BlockInfoHandler,
     geometry_buffers: GeometryBuffers,
 }
 
@@ -49,13 +51,15 @@ struct RenderStage {
     bind_group_layout: wgpu::BindGroupLayout,
     depth_texture: wgpu::TextureView,
     uniforms: BufferSyncedData<RenderUniforms, RenderUniforms>,
-    locals: BufferSyncedData<RenderLocals, RenderLocals>,
 }
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, AsBytes, FromBytes, Default)]
-struct RenderLocals {
-    cube: Cube,
+struct BlockRenderInfo {
+    // index into texture list, by face
+    face_tex_ids: [u32; 6],
+    _padding: [u32; 2],
+    vertex_data: Cube,
 }
 
 #[derive(Debug, Clone, Copy, AsBytes, FromBytes)]
@@ -74,7 +78,6 @@ struct ComputeUniforms {
     _padding0: f32,
     visible_box_limit: [f32; 3],
     _padding1: f32,
-    cube: Cube,
 }
 
 type ActiveChunks = StableMap<Point3<i32>, ()>;
@@ -97,6 +100,16 @@ struct ChunkState {
     max_visible_chunks: usize,
 }
 
+struct ChunkMetaTracker {
+    touched: HashSet<usize>,
+    chunk_metas: EndlessVec<ChunkMeta>,
+    new_metas: HashMap<usize, ChunkMeta>,
+}
+
+struct EndlessVec<T> {
+    data: Vec<T>,
+}
+
 #[repr(C)]
 #[derive(Debug, Clone, Copy, AsBytes, FromBytes, Default, PartialEq)]
 struct ChunkMeta {
@@ -107,13 +120,26 @@ struct ChunkMeta {
     _padding1: i32,
 }
 
+#[allow(unused)]
+struct BlockInfoHandler {
+    index_map: HashMap<block::FaceTexture, usize>,
+    dimensions: (u32, u32),
+
+    texture_arr: wgpu::Texture,
+    texture_arr_views: Vec<wgpu::TextureView>,
+    sampler: wgpu::Sampler,
+
+    block_info_buf: InstancedBuffer,
+}
+
 impl BlocksRenderState {
     pub fn new(
         init: BlocksRenderInit,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
     ) -> Result<Self> {
-        let cube = Cube::new();
+        let block_info_handler =
+            BlockInfoHandler::new(init.block_config, init.resource_loader, device, queue)?;
 
         let compute_shader = device.create_shader_module(wgpu::ShaderModuleSource::SpirV(
             init.resource_loader
@@ -134,7 +160,7 @@ impl BlocksRenderState {
         ));
 
         let compute_stage = {
-            let uniforms = ComputeUniforms::new(init.view_state.params.calculate_view_box(), cube)
+            let uniforms = ComputeUniforms::new(init.view_state.params.calculate_view_box())
                 .into_buffer_synced(device);
 
             let bind_group_layout =
@@ -151,17 +177,17 @@ impl BlocksRenderState {
                                 min_binding_size: None,
                             },
                         ),
+                        // // Block render info
+                        // wgpu::BindGroupLayoutEntry::new(
+                        //     1,
+                        //     wgpu::ShaderStage::COMPUTE,
+                        //     wgpu::BindingType::StorageBuffer {
+                        //         dynamic: false,
+                        //         readonly: true,
+                        //         min_binding_size: None,
+                        //     },
+                        // ),
                         // Block type buffer
-                        wgpu::BindGroupLayoutEntry::new(
-                            1,
-                            wgpu::ShaderStage::COMPUTE,
-                            wgpu::BindingType::StorageBuffer {
-                                dynamic: false,
-                                readonly: true,
-                                min_binding_size: None,
-                            },
-                        ),
-                        // Chunk metadata buffer
                         wgpu::BindGroupLayoutEntry::new(
                             2,
                             wgpu::ShaderStage::COMPUTE,
@@ -171,9 +197,19 @@ impl BlocksRenderState {
                                 min_binding_size: None,
                             },
                         ),
-                        // Output vertex buffer
+                        // Chunk metadata buffer
                         wgpu::BindGroupLayoutEntry::new(
                             3,
+                            wgpu::ShaderStage::COMPUTE,
+                            wgpu::BindingType::StorageBuffer {
+                                dynamic: false,
+                                readonly: true,
+                                min_binding_size: None,
+                            },
+                        ),
+                        // Output vertex buffer
+                        wgpu::BindGroupLayoutEntry::new(
+                            4,
                             wgpu::ShaderStage::COMPUTE,
                             wgpu::BindingType::StorageBuffer {
                                 dynamic: false,
@@ -237,7 +273,7 @@ impl BlocksRenderState {
                                 min_binding_size: None,
                             },
                         ),
-                        // Locals
+                        // Block info
                         wgpu::BindGroupLayoutEntry::new(
                             1,
                             wgpu::ShaderStage::VERTEX,
@@ -276,6 +312,25 @@ impl BlocksRenderState {
                                 readonly: true,
                                 min_binding_size: None,
                             },
+                        ),
+                        // Textures
+                        wgpu::BindGroupLayoutEntry {
+                            count: Some(block_info_handler.index_map.len() as u32),
+                            ..wgpu::BindGroupLayoutEntry::new(
+                                5,
+                                wgpu::ShaderStage::FRAGMENT,
+                                wgpu::BindingType::SampledTexture {
+                                    dimension: wgpu::TextureViewDimension::D2Array,
+                                    component_type: wgpu::TextureComponentType::Float,
+                                    multisampled: false,
+                                },
+                            )
+                        },
+                        // Sampler
+                        wgpu::BindGroupLayoutEntry::new(
+                            6,
+                            wgpu::ShaderStage::FRAGMENT,
+                            wgpu::BindingType::Sampler { comparison: false },
                         ),
                     ],
                 });
@@ -326,8 +381,6 @@ impl BlocksRenderState {
                 alpha_to_coverage_enabled: false,
             });
 
-            let locals = RenderLocals { cube }.into_buffer_synced(device);
-
             let uniforms = RenderUniforms::new(&init.view_state).into_buffer_synced(device);
 
             RenderStage {
@@ -335,7 +388,6 @@ impl BlocksRenderState {
                 uniforms,
                 bind_group_layout,
                 depth_texture: init.depth_texture.create_default_view(),
-                locals,
             }
         };
 
@@ -401,6 +453,7 @@ impl BlocksRenderState {
             compute_stage,
             render_stage,
             geometry_buffers,
+            block_info_handler,
         })
     }
 
@@ -469,9 +522,10 @@ impl BlocksRenderState {
                 layout: &self.compute_stage.bind_group_layout,
                 bindings: &[
                     self.compute_stage.uniforms.as_binding(0),
-                    self.chunk_state.block_type_binding(1),
-                    self.chunk_state.chunk_metadata_binding(2),
-                    bufs.faces.as_binding(3),
+                    // self.block_info_handler.block_info_buf.as_binding(1),
+                    self.chunk_state.block_type_binding(2),
+                    self.chunk_state.chunk_metadata_binding(3),
+                    bufs.faces.as_binding(4),
                     bufs.indirect.as_binding(5),
                     bufs.globals.as_binding(6),
                 ],
@@ -492,7 +546,6 @@ impl BlocksRenderState {
         let background_color = wgpu::Color::BLACK;
 
         self.render_stage.uniforms.sync(frame_render.queue);
-        self.render_stage.locals.sync(frame_render.queue);
 
         let bind_group = frame_render
             .device
@@ -501,10 +554,20 @@ impl BlocksRenderState {
                 layout: &self.render_stage.bind_group_layout,
                 bindings: &[
                     self.render_stage.uniforms.as_binding(0),
-                    self.render_stage.locals.as_binding(1),
+                    self.block_info_handler.block_info_buf.as_binding(1),
                     self.chunk_state.block_type_binding(2),
                     self.chunk_state.chunk_metadata_binding(3),
                     self.geometry_buffers.faces.as_binding(4),
+                    wgpu::Binding {
+                        binding: 5,
+                        resource: wgpu::BindingResource::TextureViewArray(
+                            &self.block_info_handler.texture_arr_views[..],
+                        ),
+                    },
+                    wgpu::Binding {
+                        binding: 6,
+                        resource: wgpu::BindingResource::Sampler(&self.block_info_handler.sampler),
+                    },
                 ],
             });
 
@@ -774,14 +837,283 @@ impl ChunkState {
     }
 }
 
-struct ChunkMetaTracker {
-    touched: HashSet<usize>,
-    chunk_metas: EndlessVec<ChunkMeta>,
-    new_metas: HashMap<usize, ChunkMeta>,
-}
+impl BlockInfoHandler {
+    fn new(
+        config: &BlockConfigHelper,
+        resource_loader: &ResourceLoader,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+    ) -> Result<Self> {
+        let index_map = config.texture_index_map();
+        log::info!("Got {} block textures total", index_map.len());
+        let dimensions = Self::find_max_dimensions(&index_map, resource_loader)?;
+        log::info!(
+            "Block texture dimensions are {}x{}",
+            dimensions.0,
+            dimensions.1
+        );
 
-struct EndlessVec<T> {
-    data: Vec<T>,
+        let texture_arr =
+            Self::make_texture(dimensions, &index_map, resource_loader, device, queue)?;
+
+        let texture_arr_views = (0..index_map.len())
+            .map(|index| {
+                texture_arr.create_view(&wgpu::TextureViewDescriptor {
+                    label: Some("block textures"),
+                    format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                    dimension: wgpu::TextureViewDimension::D2,
+                    aspect: wgpu::TextureAspect::All,
+                    base_mip_level: 0,
+                    level_count: 1,
+                    base_array_layer: index as u32,
+                    array_layer_count: 1,
+                })
+            })
+            .collect();
+
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::FilterMode::Nearest,
+            anisotropy_clamp: None,
+            ..Default::default()
+        });
+
+        let block_info_buf = InstancedBuffer::new(
+            device,
+            InstancedBufferDesc {
+                label: "block info",
+                instance_len: std::mem::size_of::<BlockRenderInfo>(),
+                n_instances: config.blocks().len(),
+                usage: wgpu::BufferUsage::STORAGE | wgpu::BufferUsage::COPY_DST,
+            },
+        );
+
+        for (index, block) in config.blocks().iter().enumerate() {
+            let render_info = BlockRenderInfo {
+                face_tex_ids: Self::get_face_textures(&index_map, block)
+                    .ok_or_else(|| anyhow!("Unable to get face textures for block {:?}", block))?,
+                _padding: [0; 2],
+                vertex_data: Cube::new(),
+            };
+
+            block_info_buf.write(queue, index, render_info.as_bytes());
+        }
+
+        Ok(Self {
+            index_map,
+            dimensions,
+
+            texture_arr_views,
+            texture_arr,
+            sampler,
+
+            block_info_buf,
+        })
+    }
+
+    fn make_texture(
+        dimensions: (u32, u32),
+        index_map: &HashMap<block::FaceTexture, usize>,
+        resource_loader: &ResourceLoader,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+    ) -> Result<wgpu::Texture> {
+        let texture_arr = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("block texture array"),
+            size: wgpu::Extent3d {
+                width: dimensions.0,
+                height: dimensions.1,
+                depth: index_map.len() as u32,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsage::COPY_DST | wgpu::TextureUsage::SAMPLED,
+        });
+
+        let face_texes = {
+            let mut face_texes: Vec<_> = index_map
+                .iter()
+                .map(|(face_tex, &index)| (index, face_tex))
+                .collect();
+            face_texes.sort_by_key(|(index, _)| *index);
+            face_texes
+        };
+
+        for (index, face_tex) in face_texes {
+            let copy_view = wgpu::TextureCopyView {
+                texture: &texture_arr,
+                mip_level: 0,
+                origin: wgpu::Origin3d {
+                    x: 0,
+                    y: 0,
+                    z: index as u32,
+                },
+            };
+
+            let (samples, bytes_per_row) =
+                Self::face_tex_to_samples(face_tex, resource_loader, dimensions.0, dimensions.1)?;
+
+            queue.write_texture(
+                copy_view,
+                samples.as_slice(),
+                wgpu::TextureDataLayout {
+                    offset: 0,
+                    bytes_per_row,
+                    rows_per_image: 0,
+                },
+                wgpu::Extent3d {
+                    width: dimensions.0,
+                    height: dimensions.1,
+                    depth: 1,
+                },
+            );
+        }
+
+        Ok(texture_arr)
+    }
+
+    /// Returns the buffer of samples and the number of bytes per row in the result.
+    fn face_tex_to_samples(
+        face_tex: &block::FaceTexture,
+        resource_loader: &ResourceLoader,
+        width: u32,
+        height: u32,
+    ) -> Result<(Vec<u8>, u32)> {
+        match face_tex {
+            block::FaceTexture::SolidColor { red, green, blue } => {
+                log::info!(
+                    "Creating solid color texture with R/G/B {}/{}/{}",
+                    red,
+                    green,
+                    blue
+                );
+                let mut buf = Vec::with_capacity(width as usize * height as usize * 4);
+                for _row_ix in 0..height {
+                    for _col_ix in 0..width {
+                        buf.push(*red);
+                        buf.push(*green);
+                        buf.push(*blue);
+                        buf.push(255); // alpha
+                    }
+                }
+                Ok((buf, 4 * width))
+            }
+            block::FaceTexture::Texture { resource } => {
+                log::info!("Loading block texture {:?}", resource);
+                let mut image = resource_loader.load_image(&resource[..])?.into_rgba();
+                let (img_width, img_height) = image.dimensions();
+
+                if img_width != width || img_height != height {
+                    log::info!(
+                        "Resizing block texture {:?} from {}x{} to {}x{}",
+                        resource,
+                        img_width,
+                        img_height,
+                        width,
+                        height
+                    );
+
+                    // nearest-neighbor resizing is fine because this is always an upscale from one
+                    // power-of-2 to another
+                    image = image::imageops::resize(
+                        &image,
+                        width,
+                        height,
+                        image::imageops::FilterType::Nearest,
+                    );
+                }
+
+                let samples = image.as_flat_samples();
+                let bytes_per_row = samples.layout.height_stride as u32;
+                Ok((samples.as_slice().to_vec(), bytes_per_row))
+            }
+        }
+    }
+
+    fn find_max_dimensions(
+        index_map: &HashMap<block::FaceTexture, usize>,
+        resource_loader: &ResourceLoader,
+    ) -> Result<(u32, u32)> {
+        // result will be 1x1 if every face texture is a solid color
+        let mut res: (u32, u32) = (1, 1);
+
+        for (face_tex, _) in index_map.iter() {
+            match face_tex {
+                block::FaceTexture::Texture { resource } => {
+                    let reader = resource_loader.open_image(&resource[..])?;
+                    let (width, height) = reader.into_dimensions()?;
+                    if Self::log2_exact(width).is_none() || Self::log2_exact(height).is_none() {
+                        bail!("Block texture resource {:?} has dimensions {}x{}. Expected powers of 2.",
+                              resource, width, height);
+                    }
+
+                    let (old_width, old_height) = &mut res;
+                    if width > *old_width {
+                        *old_width = width;
+                    }
+                    if height > *old_height {
+                        *old_height = height;
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        Ok(res)
+    }
+
+    fn get_face_textures(
+        index_map: &HashMap<block::FaceTexture, usize>,
+        block: &block::BlockInfo,
+    ) -> Option<[u32; 6]> {
+        // Some([0, 1, 2, 3, 0, 1])
+
+        match &block.texture {
+            block::BlockTexture::Uniform(face_tex) => {
+                let index = *index_map.get(face_tex)? as u32;
+                Some([index; 6])
+            }
+            block::BlockTexture::Nonuniform { top, bottom, side } => {
+                let index_top = *index_map.get(top)? as u32;
+                let index_bottom = *index_map.get(bottom)? as u32;
+                let index_sides = *index_map.get(side)? as u32;
+                Some([
+                    index_top,
+                    index_bottom,
+                    index_sides,
+                    index_sides,
+                    index_sides,
+                    index_sides,
+                ])
+            }
+        }
+    }
+
+    /// If the value is a power of 2, returns its log base 2. Otherwise, returns `None`.
+    fn log2_exact(value: u32) -> Option<u32> {
+        if value == 0 {
+            return None;
+        }
+
+        let mut log2 = 0;
+        let mut shifted = value;
+        while shifted > 1 {
+            shifted = shifted >> 1;
+            log2 += 1;
+        }
+
+        if 1 << log2 == value {
+            Some(log2)
+        } else {
+            None
+        }
+    }
 }
 
 impl<T> EndlessVec<T>
@@ -958,27 +1290,8 @@ impl IntoBufferSynced for RenderUniforms {
     }
 }
 
-impl BufferSyncable for RenderLocals {
-    type Item = RenderLocals;
-
-    fn sync<'a>(&self, fill_buffer: &mut FillBuffer<'a, Self::Item>) {
-        fill_buffer.advance(&[*self]);
-    }
-}
-
-impl IntoBufferSynced for RenderLocals {
-    fn buffer_sync_desc(&self) -> BufferSyncHelperDesc {
-        BufferSyncHelperDesc {
-            label: "world blocks render locals",
-            buffer_len: 1,
-            max_chunk_len: 1,
-            usage: wgpu::BufferUsage::STORAGE | wgpu::BufferUsage::COPY_DST,
-        }
-    }
-}
-
 impl ComputeUniforms {
-    fn new(view_box: Option<Bounds<i32>>, cube: Cube) -> Self {
+    fn new(view_box: Option<Bounds<i32>>) -> Self {
         let view_box = match view_box {
             Some(x) => x,
             None => Bounds::new(Point3::new(0, 0, 0), Vector3::new(0, 0, 0)),
@@ -989,7 +1302,6 @@ impl ComputeUniforms {
             _padding0: 0f32,
             visible_box_limit: convert_point!(view_box.limit(), f32).into(),
             _padding1: 0f32,
-            cube,
         }
     }
 

@@ -117,7 +117,7 @@ async fn run_render_world(ctx: &FileContext, options: &RenderWorldOpts) -> Resul
 
     let world = World::new(
         blocks,
-        BlockConfigHelper::new(&ctx.core_settings.block_config),
+        BlockConfigHelper::new(&ctx.core_settings.block_config)?,
     );
 
     let params = simgame::RenderParams {
@@ -128,7 +128,7 @@ async fn run_render_world(ctx: &FileContext, options: &RenderWorldOpts) -> Resul
 }
 
 fn run_generate(ctx: &FileContext, options: &GenerateWorldOpts) -> Result<()> {
-    let block_helper = BlockConfigHelper::new(&ctx.core_settings.block_config);
+    let block_helper = BlockConfigHelper::new(&ctx.core_settings.block_config)?;
 
     let config_file = std::fs::File::open(&options.config)?;
     let config = serde_yaml::from_reader(config_file)?;

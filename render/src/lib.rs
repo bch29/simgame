@@ -117,13 +117,18 @@ impl RenderState {
 
     pub fn update_win_size(&mut self, physical_win_size: Vector2<u32>) -> Result<()> {
         let swapchain_descriptor = Self::swapchain_descriptor(physical_win_size);
-        let swapchain = self.device.create_swap_chain(&self.surface, &swapchain_descriptor);
+        let swapchain = self
+            .device
+            .create_swap_chain(&self.surface, &swapchain_descriptor);
 
         self.swapchain = swapchain;
         self.world_render_state
             .update_swapchain(&self.device, &swapchain_descriptor)?;
-        self.gui_render_state
-            .update_swapchain(&self.device, &self.queue, &swapchain_descriptor)?;
+        self.gui_render_state.update_swapchain(
+            &self.device,
+            &self.queue,
+            &swapchain_descriptor,
+        )?;
         Ok(())
     }
 
@@ -131,10 +136,14 @@ impl RenderState {
         params: &RenderParams<'a>,
         adapter: &wgpu::Adapter,
     ) -> Result<DeviceResult> {
+        let required_features = wgpu::Features::SAMPLED_TEXTURE_BINDING_ARRAY
+            | wgpu::Features::SAMPLED_TEXTURE_ARRAY_DYNAMIC_INDEXING
+            | wgpu::Features::UNSIZED_BINDING_ARRAY;
+
         let result = adapter
             .request_device(
                 &wgpu::DeviceDescriptor {
-                    features: wgpu::Features::MULTI_DRAW_INDIRECT,
+                    features: wgpu::Features::MULTI_DRAW_INDIRECT | required_features,
                     shader_validation: false,
                     limits: wgpu::Limits::default(),
                 },
@@ -162,7 +171,7 @@ impl RenderState {
         let result = adapter
             .request_device(
                 &wgpu::DeviceDescriptor {
-                    features: wgpu::Features::empty(),
+                    features: required_features,
                     shader_validation: false,
                     limits: wgpu::Limits::default(),
                 },
@@ -215,9 +224,7 @@ impl RenderState {
         self.world_render_state.update(&self.queue, world, diff);
     }
 
-    fn swapchain_descriptor(
-        win_size: Vector2<u32>,
-    ) -> wgpu::SwapChainDescriptor {
+    fn swapchain_descriptor(win_size: Vector2<u32>) -> wgpu::SwapChainDescriptor {
         wgpu::SwapChainDescriptor {
             usage: wgpu::TextureUsage::OUTPUT_ATTACHMENT,
             format: wgpu::TextureFormat::Bgra8UnormSrgb,
