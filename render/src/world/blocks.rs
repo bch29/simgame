@@ -1200,7 +1200,7 @@ impl ChunkMetaTracker {
         active_chunks: &ActiveChunks,
     ) -> impl Iterator<Item = (usize, ChunkMeta)> + 'a {
         for &index in &self.touched {
-            if self.new_metas.contains_key(&index) {
+            if index > active_chunks.capacity() || self.new_metas.contains_key(&index) {
                 continue;
             }
 
