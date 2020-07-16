@@ -1,12 +1,12 @@
-use anyhow::Result;
-use cgmath::{EuclideanSpace, Point3, Vector3};
+use anyhow::{anyhow, Result};
+use cgmath::{EuclideanSpace, Point3, Vector3, ElementWise};
 use log::info;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 
-use simgame_core::block::{Block, BlockConfigHelper, WorldBlockData, BlockUpdater};
+use simgame_core::block::{Block, BlockConfigHelper, BlockUpdater, WorldBlockData};
 use simgame_core::util::Bounds;
-use simgame_core::world::{UpdatedWorldState};
+use simgame_core::world::UpdatedWorldState;
 
 pub mod lsystem;
 pub mod primitive;
@@ -99,8 +99,16 @@ impl<'a, R> WorldGenerator<'a, R> {
         let progress_count = 10;
         let mut next_progress_step = 1;
 
+        let rock_block = self
+            .block_helper
+            .block_by_name("Rock")
+            .ok_or_else(|| anyhow!("Missing block config for Rock"))?.0;
+        let dirt_block = self
+            .block_helper
+            .block_by_name("Dirt")
+            .ok_or_else(|| anyhow!("Missing block config for Dirt"))?.0;
+
         info!("Bounds are {:?}", self.bounds);
-        let mut rng = rand::thread_rng();
         self.blocks
             .replace_blocks(self.bounds, |loc, _| -> Result<Block> {
                 // Normalized point with coords in range (0, 1)
@@ -119,13 +127,14 @@ impl<'a, R> WorldGenerator<'a, R> {
 
                 // this is the height of the terrain at current x, y coordinate
                 let height_here = base_z + val * terrain_height;
+                let p = p.mul_element_wise(world_size);
 
-                // fill with air if current z is above height_here, else rock
-                let block = if p.z * world_size.z > height_here {
+                let block = if p.z > height_here {
                     Block::air()
+                } else if p.z > height_here - 2. {
+                    dirt_block
                 } else {
-                    let block_val = 1 + rng.gen::<u16>() % 4;
-                    Block::from_u16(block_val)
+                    rock_block
                 };
 
                 blocks_done += 1;
