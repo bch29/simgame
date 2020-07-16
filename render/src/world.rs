@@ -29,7 +29,7 @@ pub struct ViewState {
     rotation: Matrix4<f32>,
 }
 
-pub struct WorldRenderInit<'a> {
+pub(crate) struct WorldRenderStateBuilder<'a> {
     pub view_params: ViewParams,
     pub world: &'a World,
     pub max_visible_chunks: usize,
@@ -46,48 +46,48 @@ pub(crate) struct WorldRenderState {
     // block_master_texture: wgpu::TextureView
 }
 
-impl WorldRenderState {
-    pub fn set_view(&mut self, params: ViewParams) {
-        self.view_state.params = params;
-        self.render_blocks.set_view(&params);
-    }
-
-    pub fn new(init: WorldRenderInit, device_result: &crate::DeviceResult) -> Result<Self> {
+impl<'a> WorldRenderStateBuilder<'a> {
+    pub fn build(self, device_result: &crate::DeviceResult) -> Result<WorldRenderState> {
         let crate::DeviceResult {
             device,
             queue,
             multi_draw_enabled,
         } = device_result;
 
-        let display_size = Vector2::new(init.swapchain.width, init.swapchain.height);
-        let depth_texture = Self::make_depth_texture(&device_result.device, display_size);
+        let display_size = Vector2::new(self.swapchain.width, self.swapchain.height);
+        let depth_texture =
+            WorldRenderState::make_depth_texture(&device_result.device, display_size);
 
         let aspect_ratio = display_size.x as f32 / display_size.y as f32;
 
         let view_state = ViewState {
-            params: init.view_params,
-            proj: Self::create_projection_matrix(aspect_ratio),
+            params: self.view_params,
+            proj: WorldRenderState::create_projection_matrix(aspect_ratio),
             rotation: Matrix4::identity(),
         };
 
-        let render_blocks = blocks::BlocksRenderState::new(
-            blocks::BlocksRenderInit {
-                view_state: &view_state,
-                depth_texture: &depth_texture,
-                blocks: &init.world.blocks,
-                max_visible_chunks: init.max_visible_chunks,
-                multi_draw_enabled: *multi_draw_enabled,
-                resource_loader: init.resource_loader,
-                block_config: &init.world.block_helper
-            },
-            device,
-            queue,
-        )?;
+        let render_blocks = blocks::BlocksRenderStateBuilder {
+            view_state: &view_state,
+            depth_texture: &depth_texture,
+            blocks: &self.world.blocks,
+            max_visible_chunks: self.max_visible_chunks,
+            multi_draw_enabled: *multi_draw_enabled,
+            resource_loader: self.resource_loader,
+            block_config: &self.world.block_helper,
+        }
+        .build(device, queue)?;
 
         Ok(WorldRenderState {
             render_blocks,
             view_state,
         })
+    }
+}
+
+impl WorldRenderState {
+    pub fn set_view(&mut self, params: ViewParams) {
+        self.view_state.params = params;
+        self.render_blocks.set_view(&params);
     }
 
     fn make_depth_texture(device: &wgpu::Device, size: Vector2<u32>) -> wgpu::Texture {

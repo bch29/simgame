@@ -14,7 +14,7 @@ use simgame_core::{convert_point, convert_vec};
 
 use simgame_render::resource::ResourceLoader;
 pub use simgame_render::RenderParams;
-use simgame_render::{visible_size_to_chunks, RenderInit, RenderState, ViewParams};
+use simgame_render::{visible_size_to_chunks, RenderState, RenderStateBuilder, ViewParams};
 
 mod controls;
 pub mod files;
@@ -30,15 +30,24 @@ pub async fn test_render<'a>(
     resource_loader: ResourceLoader,
 ) -> Result<()> {
     let event_loop = EventLoop::new();
-    let game = TestRender::new(
-        &event_loop,
+    let game = TestRenderBuilder {
+        event_loop: &event_loop,
         world,
         test_params,
         render_params,
         resource_loader,
-    )
+    }
+    .build()
     .await?;
     Ok(game.run(event_loop))
+}
+
+pub struct TestRenderBuilder<'a> {
+    event_loop: &'a EventLoop<()>,
+    world: World,
+    test_params: RenderTestParams,
+    render_params: RenderParams<'a>,
+    resource_loader: ResourceLoader,
 }
 
 pub struct TestRender {
@@ -118,15 +127,9 @@ fn build_window(event_loop: &EventLoop<()>, settings: &settings::VideoSettings) 
     Ok(builder.build(event_loop)?)
 }
 
-impl TestRender {
-    pub async fn new<'a>(
-        event_loop: &EventLoop<()>,
-        world: World,
-        test_params: RenderTestParams,
-        render_params: RenderParams<'a>,
-        resource_loader: ResourceLoader,
-    ) -> Result<Self> {
-        let window = build_window(&event_loop, &test_params.video_settings)?;
+impl<'a> TestRenderBuilder<'a> {
+    pub async fn build(self) -> Result<TestRender> {
+        let window = build_window(self.event_loop, &self.test_params.video_settings)?;
 
         let physical_win_size = window.inner_size();
         let physical_win_size: (u32, u32) = physical_win_size.into();
@@ -136,50 +139,49 @@ impl TestRender {
         let win_dimensions = Vector2::new(logical_win_size.width, logical_win_size.height);
 
         let visible_size = controls::restrict_visible_size(
-            test_params.max_visible_chunks,
-            test_params.initial_visible_size,
+            self.test_params.max_visible_chunks,
+            self.test_params.initial_visible_size,
         );
 
-        if visible_size != test_params.initial_visible_size {
+        if visible_size != self.test_params.initial_visible_size {
             let new_visible_chunks = visible_size_to_chunks(visible_size);
             log::warn!(
                 "Initial visible size of {:?} would exceed max_visible_chunks setting of {}. Decreasing to {:?}. This will use {} out of {} chunks.",
-                test_params.initial_visible_size,
-                test_params.max_visible_chunks,
+                self.test_params.initial_visible_size,
+                self.test_params.max_visible_chunks,
                 visible_size,
                 new_visible_chunks.x * new_visible_chunks.y * new_visible_chunks.z,
-                test_params.max_visible_chunks
+                self.test_params.max_visible_chunks
                 );
         }
 
         let view_state = ViewParams {
-            camera_pos: test_params.initial_camera_pos,
-            z_level: test_params.initial_z_level,
+            camera_pos: self.test_params.initial_camera_pos,
+            z_level: self.test_params.initial_z_level,
             visible_size,
-            look_at_dir: test_params.look_at_dir,
+            look_at_dir: self.test_params.look_at_dir,
         };
 
-        let render_state = RenderState::new(
-            render_params.clone(),
-            RenderInit {
-                window: &window,
-                physical_win_size,
-                resource_loader,
-                display_size: physical_win_size,
-                world: &world,
-                view_params: view_state.clone(),
-                max_visible_chunks: test_params.max_visible_chunks,
-            },
-        )
+        let render_state = RenderStateBuilder {
+            window: &window,
+            physical_win_size,
+            resource_loader: self.resource_loader,
+            display_size: physical_win_size,
+            world: &self.world,
+            view_params: view_state.clone(),
+            max_visible_chunks: self.test_params.max_visible_chunks,
+        }
+        .build(self.render_params.clone())
         .await?;
 
-        let control_state = controls::ControlState::new(&test_params);
+        let control_state = controls::ControlState::new(&self.test_params);
 
         let time_tracker = TimeTracker::new(
             TimingParams {
                 window_len: 30,
-                tick_size: Duration::from_millis(test_params.game_step_millis),
-                render_interval: test_params
+                tick_size: Duration::from_millis(self.test_params.game_step_millis),
+                render_interval: self
+                    .test_params
                     .fixed_refresh_rate
                     .map(|rate| Duration::from_millis(1000 / rate)),
             },
@@ -188,11 +190,14 @@ impl TestRender {
 
         let cursor_reset_position = Point2::origin() + win_dimensions / 2.;
 
+        let world_state = world_state::WorldStateBuilder {
+            world: self.world,
+            tree_config: self.test_params.tree.as_ref(),
+        }
+        .build()?;
+
         Ok(TestRender {
-            world_state: world_state::WorldState::new(world_state::WorldStateInit {
-                world,
-                tree_config: test_params.tree.as_ref(),
-            })?,
+            world_state,
             win_dimensions,
             window,
             control_state,
@@ -203,7 +208,9 @@ impl TestRender {
             has_cursor_control: false,
         })
     }
+}
 
+impl TestRender {
     pub fn run(mut self, event_loop: EventLoop<()>) {
         event_loop.run(move |event, window_target, control_flow| {
             match self.handle_event(event, window_target, control_flow) {

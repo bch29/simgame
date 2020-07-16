@@ -19,7 +19,7 @@ use crate::resource::ResourceLoader;
 use crate::stable_map::StableMap;
 use crate::world::{self, ViewParams};
 
-pub(crate) struct BlocksRenderInit<'a> {
+pub(crate) struct BlocksRenderStateBuilder<'a> {
     pub depth_texture: &'a wgpu::Texture,
     pub view_state: &'a world::ViewState,
     pub blocks: &'a WorldBlockData,
@@ -132,35 +132,31 @@ struct BlockInfoHandler {
     block_info_buf: InstancedBuffer,
 }
 
-impl BlocksRenderState {
-    pub fn new(
-        init: BlocksRenderInit,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-    ) -> Result<Self> {
+impl<'a> BlocksRenderStateBuilder<'a> {
+    pub fn build(self, device: &wgpu::Device, queue: &wgpu::Queue) -> Result<BlocksRenderState> {
         let block_info_handler =
-            BlockInfoHandler::new(init.block_config, init.resource_loader, device, queue)?;
+            BlockInfoHandler::new(self.block_config, self.resource_loader, device, queue)?;
 
         let compute_shader = device.create_shader_module(wgpu::ShaderModuleSource::SpirV(
-            init.resource_loader
+            self.resource_loader
                 .load_shader("shader/blocks/compute")?
                 .as_slice(),
         ));
 
         let vert_shader = device.create_shader_module(wgpu::ShaderModuleSource::SpirV(
-            init.resource_loader
+            self.resource_loader
                 .load_shader("shader/blocks/vertex")?
                 .as_slice(),
         ));
 
         let frag_shader = device.create_shader_module(wgpu::ShaderModuleSource::SpirV(
-            init.resource_loader
+            self.resource_loader
                 .load_shader("shader/blocks/fragment")?
                 .as_slice(),
         ));
 
         let compute_stage = {
-            let uniforms = ComputeUniforms::new(init.view_state.params.calculate_view_box())
+            let uniforms = ComputeUniforms::new(self.view_state.params.calculate_view_box())
                 .into_buffer_synced(device);
 
             let bind_group_layout =
@@ -381,13 +377,13 @@ impl BlocksRenderState {
                 alpha_to_coverage_enabled: false,
             });
 
-            let uniforms = RenderUniforms::new(&init.view_state).into_buffer_synced(device);
+            let uniforms = RenderUniforms::new(&self.view_state).into_buffer_synced(device);
 
             RenderStage {
                 pipeline,
                 uniforms,
                 bind_group_layout,
-                depth_texture: init.depth_texture.create_default_view(),
+                depth_texture: self.depth_texture.create_default_view(),
             }
         };
 
@@ -397,7 +393,7 @@ impl BlocksRenderState {
                 InstancedBufferDesc {
                     label: "block faces",
                     instance_len: (4 * 3 * index_utils::chunk_size_total()) as usize,
-                    n_instances: init.max_visible_chunks,
+                    n_instances: self.max_visible_chunks,
                     usage: wgpu::BufferUsage::STORAGE,
                 },
             );
@@ -407,7 +403,7 @@ impl BlocksRenderState {
                 InstancedBufferDesc {
                     label: "block indirect",
                     instance_len: 4 * 4,
-                    n_instances: init.max_visible_chunks,
+                    n_instances: self.max_visible_chunks,
                     usage: wgpu::BufferUsage::STORAGE | wgpu::BufferUsage::INDIRECT,
                 },
             );
@@ -431,23 +427,23 @@ impl BlocksRenderState {
 
         let mut chunk_state = ChunkState::new(
             device,
-            init.max_visible_chunks,
-            init.view_state.params.visible_size,
+            self.max_visible_chunks,
+            self.view_state.params.visible_size,
         );
         let mut needs_compute_pass = false;
 
-        if let Some(active_view_box) = init.view_state.params.calculate_view_box() {
-            if chunk_state.update_view_box(active_view_box, init.blocks) {
+        if let Some(active_view_box) = self.view_state.params.calculate_view_box() {
+            if chunk_state.update_view_box(active_view_box, self.blocks) {
                 needs_compute_pass = true;
             }
         }
 
-        if chunk_state.update_buffers(queue, init.blocks) {
+        if chunk_state.update_buffers(queue, self.blocks) {
             needs_compute_pass = true;
         }
 
-        Ok(Self {
-            multi_draw_enabled: init.multi_draw_enabled,
+        Ok(BlocksRenderState {
+            multi_draw_enabled: self.multi_draw_enabled,
             needs_compute_pass,
             chunk_state,
             compute_stage,
@@ -456,7 +452,9 @@ impl BlocksRenderState {
             block_info_handler,
         })
     }
+}
 
+impl BlocksRenderState {
     pub fn set_view(&mut self, params: &ViewParams) {
         self.chunk_state.set_visible_size(params.visible_size);
     }

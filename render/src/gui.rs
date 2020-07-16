@@ -1,6 +1,6 @@
 use anyhow::Result;
-use zerocopy::{AsBytes, FromBytes};
 use cgmath::Matrix4;
+use zerocopy::{AsBytes, FromBytes};
 
 use crate::buffer_util::{
     BufferSyncHelperDesc, BufferSyncable, BufferSyncedData, FillBuffer, IntoBufferSynced,
@@ -9,7 +9,7 @@ use crate::resource::ResourceLoader;
 use crate::DeviceResult;
 use crate::FrameRender;
 
-pub(crate) struct GuiRenderInit<'a> {
+pub(crate) struct GuiRenderStateBuilder<'a> {
     pub resource_loader: &'a ResourceLoader,
     pub swapchain: &'a wgpu::SwapChainDescriptor,
 }
@@ -27,23 +27,30 @@ pub(crate) struct GuiRenderState {
 #[derive(Debug, Clone, Copy, AsBytes, FromBytes)]
 #[repr(C)]
 struct RenderUniforms {
-    model: [[f32; 4]; 4]
+    model: [[f32; 4]; 4],
 }
 
-impl GuiRenderState {
-    pub fn new(init: GuiRenderInit, device_result: &DeviceResult) -> Result<Self> {
+impl<'a> GuiRenderStateBuilder<'a> {
+    pub fn build(self, device_result: &DeviceResult) -> Result<GuiRenderState> {
         let device = &device_result.device;
 
         let vert_shader = device.create_shader_module(wgpu::ShaderModuleSource::SpirV(
-            init.resource_loader.load_shader("shader/gui/vertex")?.as_slice(),
+            self.resource_loader
+                .load_shader("shader/gui/vertex")?
+                .as_slice(),
         ));
 
         let frag_shader = device.create_shader_module(wgpu::ShaderModuleSource::SpirV(
-            init.resource_loader.load_shader("shader/gui/fragment")?.as_slice(),
+            self.resource_loader
+                .load_shader("shader/gui/fragment")?
+                .as_slice(),
         ));
 
         let crosshair_texture: wgpu::TextureView = {
-            let image = init.resource_loader.load_image("tex/gui/crosshair")?.into_rgba();
+            let image = self
+                .resource_loader
+                .load_image("tex/gui/crosshair")?
+                .into_rgba();
 
             let (width, height) = image.dimensions();
 
@@ -150,7 +157,7 @@ impl GuiRenderState {
             }),
             primitive_topology: wgpu::PrimitiveTopology::TriangleStrip,
             color_states: &[wgpu::ColorStateDescriptor {
-                format: init.swapchain.format,
+                format: self.swapchain.format,
                 color_blend: wgpu::BlendDescriptor {
                     src_factor: wgpu::BlendFactor::SrcAlpha,
                     dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
@@ -173,15 +180,15 @@ impl GuiRenderState {
             alpha_to_coverage_enabled: false,
         });
 
-        let aspect_ratio = init.swapchain.width as f32 / init.swapchain.height as f32;
+        let aspect_ratio = self.swapchain.width as f32 / self.swapchain.height as f32;
 
         let uniforms = RenderUniforms::new(aspect_ratio).into_buffer_synced(device);
         uniforms.sync(&device_result.queue);
 
         // let multisampled_framebuffer =
-        //     Self::create_multisampled_framebuffer(device, init.swapchain, SAMPLE_COUNT);
+        //     GuiRenderState::create_multisampled_framebuffer(device, self.swapchain, SAMPLE_COUNT);
 
-        Ok(Self {
+        Ok(GuiRenderState {
             pipeline,
             uniforms,
             bind_group_layout,
@@ -191,7 +198,9 @@ impl GuiRenderState {
             crosshair_texture,
         })
     }
+}
 
+impl GuiRenderState {
     pub fn update_swapchain(
         &mut self,
         _device: &wgpu::Device,
@@ -288,7 +297,7 @@ impl RenderUniforms {
         let height = width * aspect_ratio;
 
         Self {
-            model: Matrix4::from_nonuniform_scale(width, height, 1.0).into()
+            model: Matrix4::from_nonuniform_scale(width, height, 1.0).into(),
         }
     }
 }

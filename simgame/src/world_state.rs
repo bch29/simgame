@@ -1,5 +1,5 @@
 use anyhow::Result;
-use cgmath::{Point3, Vector3, Matrix4, EuclideanSpace};
+use cgmath::{EuclideanSpace, Matrix4, Point3, Vector3};
 
 use simgame_worldgen::tree::{TreeConfig, TreeSystem};
 
@@ -19,28 +19,30 @@ pub struct WorldState {
     tree_system: Option<TreeSystem>,
 }
 
-pub struct WorldStateInit<'a> {
+pub struct WorldStateBuilder<'a> {
     pub world: World,
     pub tree_config: Option<&'a TreeConfig>,
 }
 
-impl WorldState {
-    pub fn new(init: WorldStateInit) -> Result<Self> {
-        let tree_system = match init.tree_config {
-            Some(tree_config) => Some(TreeSystem::new(tree_config, &init.world.block_helper)?),
-            None => None
+impl<'a> WorldStateBuilder<'a> {
+    pub fn build(self) -> Result<WorldState> {
+        let tree_system = match self.tree_config {
+            Some(tree_config) => Some(TreeSystem::new(tree_config, &self.world.block_helper)?),
+            None => None,
         };
 
-        Ok(Self {
-            world: init.world,
+        Ok(WorldState {
+            world: self.world,
             world_diff: UpdatedWorldState::empty(),
             rng: rand::thread_rng(),
             updating: false,
             filled_blocks: (16 * 16 * 4) / 8,
-            tree_system
+            tree_system,
         })
     }
+}
 
+impl WorldState {
     pub fn world(&self) -> &World {
         &self.world
     }
@@ -59,57 +61,8 @@ impl WorldState {
             return Ok(());
         }
 
-        let shape = {
-            use simgame_worldgen::turtle::{Turtle, TurtleBrush, TurtleState};
-
-            let trunk_brush = TurtleBrush::FilledLine {
-                fill_block: Block::from_u16(10),
-                round_start: false,
-                round_end: false,
-            };
-
-            let leaf_brush = TurtleBrush::Spheroid {
-                fill_block: Block::from_u16(1),
-                stretch: true,
-            };
-
-            let mut turtle = Turtle::new(TurtleState {
-                pos: Point3::new(32., 32., 32.),
-                direction: Vector3::new(0., 0., 1.),
-                thickness: 5.,
-                brush: trunk_brush,
-            });
-
-            // this should look a bit like a tree
-            turtle.draw(30.);
-
-            turtle.push_state();
-            turtle.state_mut().direction = Vector3::new(0.5, 0.5, 0.5);
-            turtle.state_mut().thickness *= 0.5;
-            turtle.draw(20.);
-            turtle.push_state();
-            turtle.state_mut().brush = leaf_brush;
-            turtle.state_mut().thickness *= 4.;
-            turtle.draw(2.);
-            turtle.pop_state()?;
-            turtle.pop_state()?;
-
-            turtle.push_state();
-            turtle.state_mut().direction = Vector3::new(-0.5, 0.5, 0.5);
-            turtle.state_mut().thickness *= 0.5;
-            turtle.draw(20.);
-            turtle.push_state();
-            turtle.state_mut().brush = leaf_brush;
-            turtle.state_mut().thickness *= 4.;
-            turtle.draw(2.);
-            turtle.pop_state()?;
-            turtle.pop_state()?;
-
-            turtle.into_shape()
-        };
-
-        let mut updater = BlockUpdater::new(&mut self.world.blocks, &mut self.world_diff.blocks);
-        shape.draw(&mut updater);
+        // let mut updater = BlockUpdater::new(&mut self.world.blocks, &mut self.world_diff.blocks);
+        // shape.draw(&mut updater);
 
         self.updating = false;
 
@@ -171,7 +124,7 @@ impl WorldState {
 
         let mut tree_system = match &self.tree_system {
             None => return Ok(()),
-            Some(system) => system.clone()
+            Some(system) => system.clone(),
         };
 
         let mut updater = BlockUpdater::new(&mut self.world.blocks, &mut self.world_diff.blocks);

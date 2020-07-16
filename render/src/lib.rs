@@ -15,13 +15,13 @@ mod world;
 
 pub use world::{visible_size_to_chunks, ViewParams};
 
-use gui::{GuiRenderInit, GuiRenderState};
+use gui::{GuiRenderState, GuiRenderStateBuilder};
 use resource::ResourceLoader;
-use world::{WorldRenderInit, WorldRenderState};
+use world::{WorldRenderState, WorldRenderStateBuilder};
 
 // TODO: UI rendering pipeline
 
-pub struct RenderInit<'a, W> {
+pub struct RenderStateBuilder<'a, W> {
     pub window: &'a W,
     pub physical_win_size: Vector2<u32>,
     pub resource_loader: ResourceLoader,
@@ -59,14 +59,14 @@ pub(crate) struct FrameRender<'a> {
     pub frame: &'a wgpu::SwapChainFrame,
 }
 
-impl RenderState {
-    pub async fn new<'a, W>(params: RenderParams<'a>, init: RenderInit<'a, W>) -> Result<Self>
-    where
-        W: HasRawWindowHandle,
-    {
+impl<'a, W> RenderStateBuilder<'a, W>
+where
+    W: HasRawWindowHandle,
+{
+    pub async fn build(self, params: RenderParams<'a>) -> Result<RenderState> {
         let instance = wgpu::Instance::new(wgpu::BackendBit::PRIMARY);
 
-        let surface = unsafe { instance.create_surface(init.window) };
+        let surface = unsafe { instance.create_surface(self.window) };
 
         let adapter = instance
             .request_adapter(
@@ -79,30 +79,26 @@ impl RenderState {
             .await
             .ok_or_else(|| anyhow!("Failed to request wgpu::Adaptor"))?;
 
-        let device_result = Self::request_device(&params, &adapter).await?;
+        let device_result = RenderState::request_device(&params, &adapter).await?;
         let device = &device_result.device;
 
-        let swapchain_descriptor = Self::swapchain_descriptor(init.physical_win_size);
+        let swapchain_descriptor = RenderState::swapchain_descriptor(self.physical_win_size);
         let swapchain = device.create_swap_chain(&surface, &swapchain_descriptor);
 
-        let world_render_state = WorldRenderState::new(
-            WorldRenderInit {
-                view_params: init.view_params,
-                world: init.world,
-                max_visible_chunks: init.max_visible_chunks,
-                resource_loader: &init.resource_loader,
-                swapchain: &swapchain_descriptor,
-            },
-            &device_result,
-        )?;
+        let world_render_state = WorldRenderStateBuilder {
+            view_params: self.view_params,
+            world: self.world,
+            max_visible_chunks: self.max_visible_chunks,
+            resource_loader: &self.resource_loader,
+            swapchain: &swapchain_descriptor,
+        }
+        .build(&device_result)?;
 
-        let gui_render_state = GuiRenderState::new(
-            GuiRenderInit {
-                swapchain: &swapchain_descriptor,
-                resource_loader: &init.resource_loader,
-            },
-            &device_result,
-        )?;
+        let gui_render_state = GuiRenderStateBuilder {
+            swapchain: &swapchain_descriptor,
+            resource_loader: &self.resource_loader,
+        }
+        .build(&device_result)?;
 
         Ok(RenderState {
             surface,
@@ -111,10 +107,12 @@ impl RenderState {
             gui_render_state,
             queue: device_result.queue,
             device: device_result.device,
-            _resource_loader: init.resource_loader,
+            _resource_loader: self.resource_loader,
         })
     }
+}
 
+impl RenderState {
     pub fn update_win_size(&mut self, physical_win_size: Vector2<u32>) -> Result<()> {
         let swapchain_descriptor = Self::swapchain_descriptor(physical_win_size);
         let swapchain = self
