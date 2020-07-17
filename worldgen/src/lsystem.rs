@@ -91,7 +91,7 @@ impl<Symbol> LSystem<Symbol> {
         for i in 0..steps {
             runner
                 .step()
-                .with_context(|| format!("L system failed after {} steps", i))?;
+                .with_context(|| format!("L-system failed during step number {}", 1 + i))?;
         }
 
         Ok(runner.state)
@@ -150,7 +150,7 @@ where
                 .produce(symbol, &mut self.rng, &mut self.state);
 
             if self.state.len() > max_len {
-                bail!("L system length exceeded max of {}", max_len);
+                bail!("L-system length exceeded max of {}", max_len);
             }
         }
 

@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 use cgmath::{Deg, Matrix3, Point3, Transform, Vector3};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
@@ -14,10 +14,11 @@ pub struct TreeSystemConfig {
     trunk_block: String,
     foliage_block: String,
     trunk_radius: f64,
-    branch_radius_factor: f64,
+    branch_radius_step: f64,
     trunk_length: f64,
     foliage_length: f64,
     foliage_radius: f64,
+    rotate_degrees: f64,
     steps: i32,
 }
 
@@ -97,7 +98,11 @@ impl TreeSystem {
     }
 
     pub fn generate<R: Rng>(&mut self, rng: &mut R) -> Result<primitive::Shape> {
-        let symbols = self.l_system.run(self.config.steps, rng)?;
+        let symbols = self
+            .l_system
+            .run(self.config.steps, rng)
+            .with_context(|| "tree L-system failed")?;
+        log::info!("Generated tree L-system with {} symbols", symbols.len());
         let turtle = self.run(symbols)?;
         Ok(turtle.into_shape())
     }
@@ -125,14 +130,14 @@ impl TurtleInterpreter<Symbol> for TreeSystem {
             *direction = transformed;
         };
 
-        let rot_amount = Deg(30.);
+        let rot_amount = Deg(self.config.rotate_degrees);
 
         use Symbol::*;
         match symbol {
             Push => turtle.push_state(),
             Pop => turtle.pop_state()?,
-            Expand => turtle.state_mut().thickness /= self.config.branch_radius_factor,
-            Contract => turtle.state_mut().thickness *= self.config.branch_radius_factor,
+            Expand => turtle.state_mut().thickness += self.config.branch_radius_step,
+            Contract => turtle.state_mut().thickness -= self.config.branch_radius_step,
             Wood { .. } => {
                 turtle.state_mut().brush = TurtleBrush::FilledLine {
                     fill_block: self.trunk_block,
