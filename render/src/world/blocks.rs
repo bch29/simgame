@@ -851,8 +851,17 @@ impl BlockInfoHandler {
             dimensions.1
         );
 
-        let texture_arr =
-            Self::make_texture(dimensions, &index_map, resource_loader, device, queue)?;
+        let mip_level_count = Self::log2_exact(dimensions.0.min(dimensions.1))
+            .expect("expected dimensions to be powers of 2");
+
+        let texture_arr = Self::make_texture(
+            dimensions,
+            mip_level_count,
+            &index_map,
+            resource_loader,
+            device,
+            queue,
+        )?;
 
         let texture_arr_views = (0..index_map.len())
             .map(|index| {
@@ -862,7 +871,7 @@ impl BlockInfoHandler {
                     dimension: wgpu::TextureViewDimension::D2,
                     aspect: wgpu::TextureAspect::All,
                     base_mip_level: 0,
-                    level_count: 1,
+                    level_count: mip_level_count,
                     base_array_layer: index as u32,
                     array_layer_count: 1,
                 })
@@ -875,7 +884,7 @@ impl BlockInfoHandler {
             address_mode_w: wgpu::AddressMode::ClampToEdge,
             mag_filter: wgpu::FilterMode::Linear,
             min_filter: wgpu::FilterMode::Linear,
-            mipmap_filter: wgpu::FilterMode::Nearest,
+            mipmap_filter: wgpu::FilterMode::Linear,
             anisotropy_clamp: None,
             ..Default::default()
         });
@@ -915,6 +924,7 @@ impl BlockInfoHandler {
 
     fn make_texture(
         dimensions: (u32, u32),
+        mip_level_count: u32,
         index_map: &HashMap<block::FaceTexture, usize>,
         resource_loader: &ResourceLoader,
         device: &wgpu::Device,
@@ -927,7 +937,7 @@ impl BlockInfoHandler {
                 height: dimensions.1,
                 depth: index_map.len() as u32,
             },
-            mip_level_count: 1,
+            mip_level_count,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: wgpu::TextureFormat::Rgba8UnormSrgb,
@@ -944,94 +954,42 @@ impl BlockInfoHandler {
         };
 
         for (index, face_tex) in face_texes {
-            let copy_view = wgpu::TextureCopyView {
-                texture: &texture_arr,
-                mip_level: 0,
-                origin: wgpu::Origin3d {
-                    x: 0,
-                    y: 0,
-                    z: index as u32,
-                },
-            };
+            let sample_generator = face_tex::to_sample_generator(resource_loader, face_tex)?;
 
-            let (samples, bytes_per_row) =
-                Self::face_tex_to_samples(face_tex, resource_loader, dimensions.0, dimensions.1)?;
+            for mip_level in 0..mip_level_count {
+                let mip_dimensions = (dimensions.0 >> mip_level, dimensions.1 >> mip_level);
 
-            queue.write_texture(
-                copy_view,
-                samples.as_slice(),
-                wgpu::TextureDataLayout {
-                    offset: 0,
-                    bytes_per_row,
-                    rows_per_image: 0,
-                },
-                wgpu::Extent3d {
-                    width: dimensions.0,
-                    height: dimensions.1,
-                    depth: 1,
-                },
-            );
+                let copy_view = wgpu::TextureCopyView {
+                    texture: &texture_arr,
+                    mip_level,
+                    origin: wgpu::Origin3d {
+                        x: 0,
+                        y: 0,
+                        z: index as u32,
+                    },
+                };
+
+                let (samples, bytes_per_row) =
+                    sample_generator.generate(mip_dimensions.0, mip_dimensions.1);
+
+                queue.write_texture(
+                    copy_view,
+                    samples.as_slice(),
+                    wgpu::TextureDataLayout {
+                        offset: 0,
+                        bytes_per_row,
+                        rows_per_image: 0,
+                    },
+                    wgpu::Extent3d {
+                        width: mip_dimensions.0,
+                        height: mip_dimensions.1,
+                        depth: 1,
+                    },
+                );
+            }
         }
 
         Ok(texture_arr)
-    }
-
-    /// Returns the buffer of samples and the number of bytes per row in the result.
-    fn face_tex_to_samples(
-        face_tex: &block::FaceTexture,
-        resource_loader: &ResourceLoader,
-        width: u32,
-        height: u32,
-    ) -> Result<(Vec<u8>, u32)> {
-        match face_tex {
-            block::FaceTexture::SolidColor { red, green, blue } => {
-                log::info!(
-                    "Creating solid color texture with R/G/B {}/{}/{}",
-                    red,
-                    green,
-                    blue
-                );
-                let mut buf = Vec::with_capacity(width as usize * height as usize * 4);
-                for _row_ix in 0..height {
-                    for _col_ix in 0..width {
-                        buf.push(*red);
-                        buf.push(*green);
-                        buf.push(*blue);
-                        buf.push(255); // alpha
-                    }
-                }
-                Ok((buf, 4 * width))
-            }
-            block::FaceTexture::Texture { resource } => {
-                log::info!("Loading block texture {:?}", resource);
-                let mut image = resource_loader.load_image(&resource[..])?.into_rgba();
-                let (img_width, img_height) = image.dimensions();
-
-                if img_width != width || img_height != height {
-                    log::info!(
-                        "Resizing block texture {:?} from {}x{} to {}x{}",
-                        resource,
-                        img_width,
-                        img_height,
-                        width,
-                        height
-                    );
-
-                    // nearest-neighbor resizing is fine because this is always an upscale from one
-                    // power-of-2 to another
-                    image = image::imageops::resize(
-                        &image,
-                        width,
-                        height,
-                        image::imageops::FilterType::Nearest,
-                    );
-                }
-
-                let samples = image.as_flat_samples();
-                let bytes_per_row = samples.layout.height_stride as u32;
-                Ok((samples.as_slice().to_vec(), bytes_per_row))
-            }
-        }
     }
 
     fn find_max_dimensions(
@@ -1110,6 +1068,94 @@ impl BlockInfoHandler {
             Some(log2)
         } else {
             None
+        }
+    }
+}
+
+mod face_tex {
+    use anyhow::Result;
+
+    use simgame_core::block;
+
+    use crate::resource::ResourceLoader;
+
+    pub trait SampleGenerator {
+        /// Returns the buffer of samples and the number of bytes per row in the result.
+        fn generate(&self, width: u32, height: u32) -> (Vec<u8>, u32);
+    }
+
+    pub fn to_sample_generator(
+        resource_loader: &ResourceLoader,
+        face_tex: &block::FaceTexture,
+    ) -> Result<Box<dyn SampleGenerator>> {
+        match face_tex {
+            block::FaceTexture::SolidColor { red, green, blue } => {
+                log::info!(
+                    "Creating solid color texture with R/G/B {}/{}/{}",
+                    red,
+                    green,
+                    blue
+                );
+                Ok(Box::new(SolidColorSampleGenerator {
+                    red: *red,
+                    green: *green,
+                    blue: *blue,
+                }))
+            }
+            block::FaceTexture::Texture { resource } => {
+                log::info!("Loading block texture {:?}", resource);
+                let image = resource_loader.load_image(&resource[..])?.into_rgba();
+
+                Ok(Box::new(ImageSampleGenerator { image }))
+            }
+        }
+    }
+
+    struct ImageSampleGenerator {
+        image: image::ImageBuffer<image::Rgba<u8>, Vec<u8>>,
+    }
+
+    struct SolidColorSampleGenerator {
+        red: u8,
+        green: u8,
+        blue: u8,
+    }
+
+    impl SampleGenerator for ImageSampleGenerator {
+        fn generate(&self, width: u32, height: u32) -> (Vec<u8>, u32) {
+            let (img_width, img_height) = self.image.dimensions();
+
+            let resized;
+            let image = if img_width != width || img_height != height {
+                resized = image::imageops::resize(
+                    &self.image,
+                    width,
+                    height,
+                    image::imageops::FilterType::CatmullRom,
+                );
+                &resized
+            } else {
+                &self.image
+            };
+
+            let samples = image.as_flat_samples();
+            let bytes_per_row = samples.layout.height_stride as u32;
+            (samples.as_slice().to_vec(), bytes_per_row)
+        }
+    }
+
+    impl SampleGenerator for SolidColorSampleGenerator {
+        fn generate(&self, width: u32, height: u32) -> (Vec<u8>, u32) {
+            let mut buf = Vec::with_capacity(width as usize * height as usize * 4);
+            for _row_ix in 0..height {
+                for _col_ix in 0..width {
+                    buf.push(self.red);
+                    buf.push(self.green);
+                    buf.push(self.blue);
+                    buf.push(255); // alpha
+                }
+            }
+            (buf, 4 * width)
         }
     }
 }

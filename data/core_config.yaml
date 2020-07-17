@@ -8,10 +8,7 @@ block_config:
     - name: Air
       category: air
       texture:
-        Nonuniform:
-          top: {SolidColor: {red: 255, green: 127, blue: 127}}
-          bottom: {SolidColor: {red: 0, green: 127, blue: 127}}
-          side: {SolidColor: {red: 0, green: 127, blue: 0}}
+        Uniform: {SolidColor: {red: 255, green: 255, blue: 255}}
     - name: Rock
       category: rock
       texture:
