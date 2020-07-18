@@ -242,12 +242,12 @@ impl ChunkState {
         any_updates
     }
 
-    pub fn block_type_binding(&self, index: u32) -> wgpu::Binding {
+    pub fn block_type_binding(&self, index: u32) -> wgpu::BindGroupEntry {
         self.block_type_helper
             .as_binding(index, &self.block_type_buf, 0)
     }
 
-    pub fn chunk_metadata_binding(&self, index: u32) -> wgpu::Binding {
+    pub fn chunk_metadata_binding(&self, index: u32) -> wgpu::BindGroupEntry {
         self.chunk_metadata_helper
             .as_binding(index, &self.chunk_metadata_buf, 0)
     }

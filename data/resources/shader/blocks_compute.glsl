@@ -74,27 +74,23 @@ layout(set = 0, binding = 0) readonly buffer Locals {
   vec4 u_VisibleBoxLimit;
 };
 
-/* layout(set = 0, binding = 1) readonly buffer BlockRenderInfoBuf { */
-/*   BlockRenderInfo[] b_BlockRenderInfo; */
-/* }; */
-
-layout(set = 0, binding = 2) readonly buffer BlockTypes {
+layout(set = 0, binding = 1) readonly buffer BlockTypes {
   int[] b_BlockTypes;
 };
 
-layout(set = 0, binding = 3) readonly buffer ChunkMetadataArr {
+layout(set = 0, binding = 2) readonly buffer ChunkMetadataArr {
   ChunkMetadata[] b_ChunkMetadata;
 };
 
-layout(set = 0, binding = 4) buffer OutputFacePairs {
+layout(set = 0, binding = 3) buffer OutputFacePairs {
   uint[] c_OutputFacePairs;
 };
 
-layout(set = 0, binding = 5) buffer IndirectCommands {
+layout(set = 0, binding = 4) buffer IndirectCommands {
   IndirectCommand[] c_IndirectCommands;
 };
 
-layout(set = 0, binding = 6) buffer FaceCounts {
+layout(set = 0, binding = 5) buffer FaceCounts {
   uint g_TotalFaceCount;
   /* uint g_WorkGroupsDone; */
 };

@@ -185,7 +185,7 @@ impl<'a> BlocksRenderStateBuilder<'a> {
             ctx.device
                 .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                     label: Some("blocks compute layout"),
-                    bindings: &[
+                    entries: &[
                         // Uniforms
                         wgpu::BindGroupLayoutEntry::new(
                             0,
@@ -196,19 +196,9 @@ impl<'a> BlocksRenderStateBuilder<'a> {
                                 min_binding_size: None,
                             },
                         ),
-                        // // Block render info
-                        // wgpu::BindGroupLayoutEntry::new(
-                        //     1,
-                        //     wgpu::ShaderStage::COMPUTE,
-                        //     wgpu::BindingType::StorageBuffer {
-                        //         dynamic: false,
-                        //         readonly: true,
-                        //         min_binding_size: None,
-                        //     },
-                        // ),
                         // Block type buffer
                         wgpu::BindGroupLayoutEntry::new(
-                            2,
+                            1,
                             wgpu::ShaderStage::COMPUTE,
                             wgpu::BindingType::StorageBuffer {
                                 dynamic: false,
@@ -218,7 +208,7 @@ impl<'a> BlocksRenderStateBuilder<'a> {
                         ),
                         // Chunk metadata buffer
                         wgpu::BindGroupLayoutEntry::new(
-                            3,
+                            2,
                             wgpu::ShaderStage::COMPUTE,
                             wgpu::BindingType::StorageBuffer {
                                 dynamic: false,
@@ -228,7 +218,7 @@ impl<'a> BlocksRenderStateBuilder<'a> {
                         ),
                         // Output vertex buffer
                         wgpu::BindGroupLayoutEntry::new(
-                            4,
+                            3,
                             wgpu::ShaderStage::COMPUTE,
                             wgpu::BindingType::StorageBuffer {
                                 dynamic: false,
@@ -238,7 +228,7 @@ impl<'a> BlocksRenderStateBuilder<'a> {
                         ),
                         // Output indirect buffer
                         wgpu::BindGroupLayoutEntry::new(
-                            5,
+                            4,
                             wgpu::ShaderStage::COMPUTE,
                             wgpu::BindingType::StorageBuffer {
                                 dynamic: false,
@@ -248,7 +238,7 @@ impl<'a> BlocksRenderStateBuilder<'a> {
                         ),
                         // Globals within a compute invocation
                         wgpu::BindGroupLayoutEntry::new(
-                            6,
+                            5,
                             wgpu::ShaderStage::COMPUTE,
                             wgpu::BindingType::StorageBuffer {
                                 dynamic: false,
@@ -263,6 +253,7 @@ impl<'a> BlocksRenderStateBuilder<'a> {
             .device
             .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 bind_group_layouts: &[&bind_group_layout],
+                push_constant_ranges: &[]
             });
 
         let pipeline = ctx
@@ -278,14 +269,14 @@ impl<'a> BlocksRenderStateBuilder<'a> {
         let bind_group = ctx.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: None,
             layout: &bind_group_layout,
-            bindings: &[
+            entries: &[
                 uniforms.as_binding(0),
                 // self.block_info_handler.block_info_buf.as_binding(1),
-                chunk_state.block_type_binding(2),
-                chunk_state.chunk_metadata_binding(3),
-                geometry_buffers.faces.as_binding(4),
-                geometry_buffers.indirect.as_binding(5),
-                geometry_buffers.globals.as_binding(6),
+                chunk_state.block_type_binding(1),
+                chunk_state.chunk_metadata_binding(2),
+                geometry_buffers.faces.as_binding(3),
+                geometry_buffers.indirect.as_binding(4),
+                geometry_buffers.globals.as_binding(5),
             ],
         });
 
@@ -310,7 +301,7 @@ impl<'a> BlocksRenderStateBuilder<'a> {
             ctx.device
                 .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                     label: Some("blocks vertex layout"),
-                    bindings: &[
+                    entries: &[
                         // Uniforms
                         wgpu::BindGroupLayoutEntry::new(
                             0,
@@ -386,6 +377,7 @@ impl<'a> BlocksRenderStateBuilder<'a> {
             .device
             .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 bind_group_layouts: &[&bind_group_layout],
+                push_constant_ranges: &[]
             });
 
         let pipeline = ctx
@@ -437,19 +429,19 @@ impl<'a> BlocksRenderStateBuilder<'a> {
         let bind_group = ctx.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: None,
             layout: &bind_group_layout,
-            bindings: &[
+            entries: &[
                 uniforms.as_binding(0),
                 block_info_handler.block_info_buf.as_binding(1),
                 chunk_state.block_type_binding(2),
                 chunk_state.chunk_metadata_binding(3),
                 geometry_buffers.faces.as_binding(4),
-                wgpu::Binding {
+                wgpu::BindGroupEntry {
                     binding: 5,
                     resource: wgpu::BindingResource::TextureViewArray(
                         &block_info_handler.texture_arr_views[..],
                     ),
                 },
-                wgpu::Binding {
+                wgpu::BindGroupEntry {
                     binding: 6,
                     resource: wgpu::BindingResource::Sampler(&block_info_handler.sampler),
                 },

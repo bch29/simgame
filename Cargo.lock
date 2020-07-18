@@ -764,7 +764,7 @@ dependencies = [
 [[package]]
 name = "gfx-descriptor"
 version = "0.1.0"
-source = "git+https://github.com/gfx-rs/gfx-extras?rev=6387d81773e29be2220cb15186ceb875ed88303b#6387d81773e29be2220cb15186ceb875ed88303b"
+source = "git+https://github.com/gfx-rs/gfx-extras?rev=473a4cdc63463e7986707507c4a7f6a3a767e329#473a4cdc63463e7986707507c4a7f6a3a767e329"
 dependencies = [
  "fxhash",
  "gfx-hal",
@@ -784,7 +784,7 @@ dependencies = [
 [[package]]
 name = "gfx-memory"
 version = "0.1.3"
-source = "git+https://github.com/gfx-rs/gfx-extras?rev=6387d81773e29be2220cb15186ceb875ed88303b#6387d81773e29be2220cb15186ceb875ed88303b"
+source = "git+https://github.com/gfx-rs/gfx-extras?rev=473a4cdc63463e7986707507c4a7f6a3a767e329#473a4cdc63463e7986707507c4a7f6a3a767e329"
 dependencies = [
  "fxhash",
  "gfx-hal",
@@ -2343,10 +2343,9 @@ dependencies = [
 [[package]]
 name = "wgpu"
 version = "0.5.0"
-source = "git+https://github.com/gfx-rs/wgpu-rs?rev=0c7c3afebb12bf411d6964887b85e5fd152057f5#0c7c3afebb12bf411d6964887b85e5fd152057f5"
+source = "git+https://github.com/gfx-rs/wgpu-rs?rev=8e4d0015862507027f3a6bd68056c64568d11366#8e4d0015862507027f3a6bd68056c64568d11366"
 dependencies = [
  "arrayvec",
- "env_logger",
  "futures",
  "gfx-backend-vulkan",
  "js-sys",
@@ -2366,7 +2365,7 @@ dependencies = [
 [[package]]
 name = "wgpu-core"
 version = "0.5.0"
-source = "git+https://github.com/gfx-rs/wgpu?rev=43c67ac59c2dedaa4d78601bc460aab7c3257973#43c67ac59c2dedaa4d78601bc460aab7c3257973"
+source = "git+https://github.com/gfx-rs/wgpu?rev=a0ed09a6a83dc0d16c6ad711cf139a5fcfbb9c35#a0ed09a6a83dc0d16c6ad711cf139a5fcfbb9c35"
 dependencies = [
  "arrayvec",
  "bitflags",
@@ -2389,14 +2388,13 @@ dependencies = [
  "smallvec",
  "spirv_headers",
  "tracing",
- "vec_map",
  "wgpu-types",
 ]
 
 [[package]]
 name = "wgpu-types"
 version = "0.5.0"
-source = "git+https://github.com/gfx-rs/wgpu?rev=43c67ac59c2dedaa4d78601bc460aab7c3257973#43c67ac59c2dedaa4d78601bc460aab7c3257973"
+source = "git+https://github.com/gfx-rs/wgpu?rev=a0ed09a6a83dc0d16c6ad711cf139a5fcfbb9c35#a0ed09a6a83dc0d16c6ad711cf139a5fcfbb9c35"
 dependencies = [
  "bitflags",
  "serde",

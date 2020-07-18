@@ -73,13 +73,10 @@ where
         let surface = unsafe { instance.create_surface(self.window) };
 
         let adapter = instance
-            .request_adapter(
-                &wgpu::RequestAdapterOptions {
-                    power_preference: wgpu::PowerPreference::HighPerformance,
-                    compatible_surface: None,
-                },
-                wgpu::UnsafeFeatures::disallow(),
-            )
+            .request_adapter(&wgpu::RequestAdapterOptions {
+                power_preference: wgpu::PowerPreference::HighPerformance,
+                compatible_surface: None,
+            })
             .await
             .ok_or_else(|| anyhow!("Failed to request wgpu::Adaptor"))?;
 
@@ -148,7 +145,12 @@ impl RenderState {
                 &wgpu::DeviceDescriptor {
                     features: wgpu::Features::MULTI_DRAW_INDIRECT | required_features,
                     shader_validation: false,
-                    limits: wgpu::Limits::default(),
+                    limits: wgpu::Limits {
+                        max_bind_groups: 6,
+                        max_storage_buffers_per_shader_stage: 6,
+                        max_storage_textures_per_shader_stage: 6,
+                        ..Default::default()
+                    },
                 },
                 params.trace_path,
             )

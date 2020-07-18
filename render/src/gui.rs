@@ -89,7 +89,7 @@ impl<'a> GuiRenderStateBuilder<'a> {
         let bind_group_layout =
             ctx.device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: Some("blocks vertex layout"),
-                bindings: &[
+                entries: &[
                     // Uniforms
                     wgpu::BindGroupLayoutEntry::new(
                         0,
@@ -130,6 +130,7 @@ impl<'a> GuiRenderStateBuilder<'a> {
 
         let pipeline_layout = ctx.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             bind_group_layouts: &[&bind_group_layout],
+            push_constant_ranges: &[]
         });
 
         let pipeline = ctx.device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -223,16 +224,16 @@ impl GuiRenderState {
             .create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("gui render"),
                 layout: &self.bind_group_layout,
-                bindings: &[
-                    wgpu::Binding {
+                entries: &[
+                    wgpu::BindGroupEntry {
                         binding: 0,
                         resource: wgpu::BindingResource::Buffer(self.uniforms.buffer().slice(..)),
                     },
-                    wgpu::Binding {
+                    wgpu::BindGroupEntry {
                         binding: 1,
                         resource: wgpu::BindingResource::TextureView(&self.crosshair_texture),
                     },
-                    wgpu::Binding {
+                    wgpu::BindGroupEntry {
                         binding: 2,
                         resource: wgpu::BindingResource::Sampler(&self.sampler),
                     },
@@ -271,7 +272,7 @@ impl GuiRenderState {
         let multisampled_frame_descriptor = &wgpu::TextureDescriptor {
             size: multisampled_texture_extent,
             mip_level_count: 1,
-            sample_count: sample_count,
+            sample_count,
             dimension: wgpu::TextureDimension::D2,
             format: sc_desc.format,
             usage: wgpu::TextureUsage::OUTPUT_ATTACHMENT,

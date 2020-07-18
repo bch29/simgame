@@ -87,7 +87,7 @@ impl<Data, Item> BufferSyncedData<Data, Item> {
     }
 
     #[inline]
-    pub fn as_binding(&self, index: u32) -> wgpu::Binding {
+    pub fn as_binding(&self, index: u32) -> wgpu::BindGroupEntry {
         self.helper.as_binding(index, &self.buffer, 0)
     }
 }
@@ -207,8 +207,8 @@ impl<Item> BufferSyncHelper<Item> {
         index: u32,
         buffer: &'a Buffer,
         start_offset: wgpu::BufferAddress,
-    ) -> wgpu::Binding<'a> {
-        wgpu::Binding {
+    ) -> wgpu::BindGroupEntry<'a> {
+        wgpu::BindGroupEntry {
             binding: index,
             resource: wgpu::BindingResource::Buffer(
                 buffer.slice(start_offset..start_offset + self.buffer_byte_len()),
@@ -352,7 +352,7 @@ impl InstancedBuffer {
     }
 
     #[inline]
-    pub fn as_binding(&self, index: u32) -> wgpu::Binding {
+    pub fn as_binding(&self, index: u32) -> wgpu::BindGroupEntry {
         self.helper.as_binding(index, &self.buffer, 0)
     }
 
