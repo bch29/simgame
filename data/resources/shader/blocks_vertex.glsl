@@ -45,6 +45,10 @@ struct ChunkMetadata {
   int padding;
 };
 
+struct BlockTextureMetadata {
+  uint periodicity;
+};
+
 layout(set = 0, binding = 0) uniform Locals {
   mat4 u_Projection;
   mat4 u_View;
@@ -66,6 +70,10 @@ layout(set = 0, binding = 3) readonly buffer ChunkMetadataArr {
 
 layout(set = 0, binding = 4) readonly buffer FacePairs {
   uint[] b_FacePairs;
+};
+
+layout(set = 0, binding = 5) readonly buffer BlockTextureMetadataBuf {
+  BlockTextureMetadata[] b_BlockTextureMetadata;
 };
 
 /* 
@@ -111,6 +119,38 @@ mat4 fullModelMatrix(ivec4 blockAddr, vec3 chunkOffset) {
       0.0, 0.0, 0.0, 1.0);
 
   return u_Model * translation_matrix(offset.xyz) * rescale;
+}
+
+/// Calculates which part of the face texture to use.
+vec2 getTexOrigin(float periodicity, vec3 blockPos, vec3 faceNormal) {
+  vec3 unitX = vec3(1., 0., 0.);
+  vec3 unitY = vec3(0., 1., 0.);
+  vec3 unitZ = vec3(0., 0., 1.);
+
+  vec3 unitU; // texture U axis, in terms of world coordinates
+  vec3 unitV; // texture V axis, in terms of world coordinates
+
+  if (faceNormal.x > 0.1 || faceNormal.x < -0.1) {
+    unitU = unitY;
+    unitV = unitZ * faceNormal.x;
+  } else if (faceNormal.y > 0.1 || faceNormal.y < -0.1) {
+    unitU = -unitX;
+    unitV = unitZ * faceNormal.y;
+  } else {
+    unitU = unitX;
+    unitV = unitY * faceNormal.z;
+  }
+
+  // project world coordinates onto texture coordinates
+  vec3 planeOrigin = blockPos * abs(faceNormal);
+  vec2 planeOffset = vec2(
+      dot(blockPos - planeOrigin, unitU),
+      dot(blockPos - planeOrigin, unitV));
+
+  // wrap based on periodicity and scale down to [0, 1]
+  return vec2(
+      mod(planeOffset.x, periodicity),
+      mod(planeOffset.y, periodicity)) / periodicity;
 }
 
 // Based on shader inputs, decode and look up actual attributes for the vertex that we are to
@@ -164,9 +204,13 @@ bool decodeAttributes(out Attributes attrs) {
   uint faceVertexIndex = face.indices[faceVertexId];
   attrs.normal = face.normal;
   attrs.pos = face.vertexLocs[faceVertexIndex];
-  attrs.texCoord = face.vertexTexCoords[faceVertexIndex];
+  vec2 faceTexCoord = face.vertexTexCoords[faceVertexIndex];
 
   attrs.texId = b_BlockRenderInfo[attrs.blockType].faceTexIds[faceId];
+  float periodicity = float(b_BlockTextureMetadata[attrs.texId].periodicity);
+  vec3 blockOffset = attrs.chunkOffset + vec3(blockAddr.xyz);
+  vec2 texOrigin = getTexOrigin(periodicity, blockOffset, attrs.normal.xyz);
+  attrs.texCoord = texOrigin + faceTexCoord / periodicity;
 
   return true;
 }

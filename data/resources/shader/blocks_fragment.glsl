@@ -10,8 +10,8 @@ layout(location = 4) in vec3 v_CameraPos;
 layout(location = 5) flat in uint v_TexId;
 layout(location = 0) out vec4 o_Target;
 
-layout(set = 0, binding = 5) uniform texture2D[] t_Textures;
-layout(set = 0, binding = 6) uniform sampler s_Textures;
+layout(set = 0, binding = 6) uniform texture2D[] t_Textures;
+layout(set = 0, binding = 7) uniform sampler s_Textures;
 
 const vec4 ambientColor = vec4(1.0, 1.0, 1.0, 1.0);
 const float ambientStrength = 0.1;

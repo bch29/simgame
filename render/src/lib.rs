@@ -184,11 +184,10 @@ impl RenderState {
         self.world_render_state.set_view(params);
     }
 
-    pub fn render_frame(&mut self) {
+    pub fn render_frame(&mut self) -> Result<()> {
         let frame = self
             .swapchain
-            .get_next_frame()
-            .expect("failed to get next frame");
+            .get_next_frame()?;
         let encoder = self
             .ctx
             .device
@@ -202,6 +201,8 @@ impl RenderState {
         self.ctx
             .queue
             .submit(std::iter::once(render.encoder.finish()));
+
+        Ok(())
     }
 
     pub fn update(&mut self, world: &World, diff: &UpdatedWorldState) {

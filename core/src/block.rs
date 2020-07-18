@@ -47,7 +47,11 @@ pub enum FaceTexture {
     /// The face has a soid color.
     SolidColor { red: u8, green: u8, blue: u8 },
     /// The face has a texture with the given resource name.
-    Texture { resource: String },
+    Texture {
+        resource: String,
+        /// The texture repeats after this many blocks
+        periodicity: u32
+    },
 }
 
 /// Specification of how a block is textured.

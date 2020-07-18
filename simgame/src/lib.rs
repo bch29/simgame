@@ -329,7 +329,7 @@ impl TestRender {
         self.render_state.set_world_view(self.view_state.clone());
         self.render_state
             .update(&self.world_state.world(), &self.world_state.world_diff());
-        self.render_state.render_frame();
+        self.render_state.render_frame()?;
         self.world_state.world_diff_mut().clear();
         self.time_tracker.sample(Instant::now());
 

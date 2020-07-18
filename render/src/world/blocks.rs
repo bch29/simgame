@@ -68,6 +68,12 @@ struct BlockRenderInfo {
     vertex_data: Cube,
 }
 
+#[repr(C)]
+#[derive(Debug, Clone, Copy, AsBytes, FromBytes, Default)]
+struct BlockTextureMetadata {
+    periodicity: u32
+}
+
 #[derive(Debug, Clone, Copy, AsBytes, FromBytes)]
 #[repr(C)]
 struct RenderUniforms {
@@ -351,11 +357,21 @@ impl<'a> BlocksRenderStateBuilder<'a> {
                                 min_binding_size: None,
                             },
                         ),
+                        // Texture metadata
+                        wgpu::BindGroupLayoutEntry::new(
+                            5,
+                            wgpu::ShaderStage::VERTEX,
+                            wgpu::BindingType::StorageBuffer {
+                                dynamic: false,
+                                readonly: true,
+                                min_binding_size: None,
+                            },
+                        ),
                         // Textures
                         wgpu::BindGroupLayoutEntry {
                             count: Some(block_info_handler.index_map.len() as u32),
                             ..wgpu::BindGroupLayoutEntry::new(
-                                5,
+                                6,
                                 wgpu::ShaderStage::FRAGMENT,
                                 wgpu::BindingType::SampledTexture {
                                     dimension: wgpu::TextureViewDimension::D2Array,
@@ -366,7 +382,7 @@ impl<'a> BlocksRenderStateBuilder<'a> {
                         },
                         // Sampler
                         wgpu::BindGroupLayoutEntry::new(
-                            6,
+                            7,
                             wgpu::ShaderStage::FRAGMENT,
                             wgpu::BindingType::Sampler { comparison: false },
                         ),
@@ -435,14 +451,15 @@ impl<'a> BlocksRenderStateBuilder<'a> {
                 chunk_state.block_type_binding(2),
                 chunk_state.chunk_metadata_binding(3),
                 geometry_buffers.faces.as_binding(4),
+                block_info_handler.texture_metadata_buf.as_binding(5),
                 wgpu::BindGroupEntry {
-                    binding: 5,
+                    binding: 6,
                     resource: wgpu::BindingResource::TextureViewArray(
                         &block_info_handler.texture_arr_views[..],
                     ),
                 },
                 wgpu::BindGroupEntry {
-                    binding: 6,
+                    binding: 7,
                     resource: wgpu::BindingResource::Sampler(&block_info_handler.sampler),
                 },
             ],
