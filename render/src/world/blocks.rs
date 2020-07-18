@@ -15,8 +15,8 @@ use crate::buffer_util::{
 use crate::mesh::cube::Cube;
 use crate::world::{self, ViewParams};
 
-mod chunk_state;
 mod block_info;
+mod chunk_state;
 
 use block_info::BlockInfoHandler;
 use chunk_state::ChunkState;
@@ -71,7 +71,7 @@ struct BlockRenderInfo {
 #[repr(C)]
 #[derive(Debug, Clone, Copy, AsBytes, FromBytes, Default)]
 struct BlockTextureMetadata {
-    periodicity: u32
+    periodicity: u32,
 }
 
 #[derive(Debug, Clone, Copy, AsBytes, FromBytes)]
@@ -156,8 +156,11 @@ impl<'a> BlocksRenderStateBuilder<'a> {
             needs_compute_pass = true;
         }
 
+        log::info!("initializing blocks compute stage");
         let compute_stage =
             self.build_compute_stage(ctx, &chunk_state, &geometry_buffers, compute_shader);
+
+        log::info!("initializing blocks render stage");
         let render_stage = self.build_render_stage(
             ctx,
             &block_info_handler,
@@ -259,7 +262,7 @@ impl<'a> BlocksRenderStateBuilder<'a> {
             .device
             .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 bind_group_layouts: &[&bind_group_layout],
-                push_constant_ranges: &[]
+                push_constant_ranges: &[],
             });
 
         let pipeline = ctx
@@ -393,7 +396,7 @@ impl<'a> BlocksRenderStateBuilder<'a> {
             .device
             .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 bind_group_layouts: &[&bind_group_layout],
-                push_constant_ranges: &[]
+                push_constant_ranges: &[],
             });
 
         let pipeline = ctx

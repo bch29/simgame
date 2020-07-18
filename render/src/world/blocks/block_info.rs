@@ -154,6 +154,7 @@ impl BlockInfoHandler {
             usage: wgpu::TextureUsage::COPY_DST | wgpu::TextureUsage::SAMPLED,
         });
 
+        log::info!("writing mip levels for {:?}", face_tex);
         for mip_level in 0..mip_level_count {
             let (mip_width, mip_height) = (width >> mip_level, height >> mip_level);
 
@@ -186,40 +187,6 @@ impl BlockInfoHandler {
             mip_level_count
         })
     }
-
-    //     fn find_max_dimensions(
-    //         index_map: &HashMap<block::FaceTexture, usize>,
-    //         resource_loader: &ResourceLoader,
-    //     ) -> Result<(u32, u32)> {
-    //         // result will be 1x1 if every face texture is a solid color
-    //         let mut res: (u32, u32) = (1, 1);
-
-    //         for (face_tex, _) in index_map.iter() {
-    //             match face_tex {
-    //                 block::FaceTexture::Texture { resource, periodicity } => {
-    //                     let reader = resource_loader.open_image(&resource[..])?;
-    //                     let (width, height) = reader.into_dimensions()?;
-    //                     if log2_exact(width).is_none() || log2_exact(height).is_none() {
-    //                         bail!("Block texture resource {:?} has dimensions {}x{}. Expected powers of 2.",
-    //                           resource, width, height);
-    //                     }
-
-    //                     let (width, height) = (width / periodicity, height / periodicity);
-
-    //                     let (old_width, old_height) = &mut res;
-    //                     if width > *old_width {
-    //                         *old_width = width;
-    //                     }
-    //                     if height > *old_height {
-    //                         *old_height = height;
-    //                     }
-    //                 }
-    //                 _ => {}
-    //             }
-    //         }
-
-    //         Ok(res)
-    //     }
 
     fn get_block_render_info(
         index_map: &HashMap<block::FaceTexture, usize>,

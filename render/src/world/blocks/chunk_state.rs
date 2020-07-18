@@ -84,6 +84,11 @@ impl ChunkState {
         self.active_chunks.iter().map(|(_, index, _)| index)
     }
 
+    #[allow(dead_code)]
+    pub fn iter_chunk_positions<'a>(&'a self) -> impl Iterator<Item = Point3<i32>> + 'a {
+        self.active_chunks.iter().map(|(&point, _, _)| point)
+    }
+
     pub fn set_visible_size(&mut self, visible_size: Vector3<i32>) {
         let visible_chunk_size = super::visible_size_to_chunks(visible_size);
         let max_visible_chunks =

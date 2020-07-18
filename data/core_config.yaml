@@ -26,7 +26,7 @@ block_config:
       category: dirt
       speed_modifier: 0.8
       texture:
-        Uniform: {Texture: {resource: "tex/block/dirt", periodicity: 16}}
+        Uniform: {Texture: {resource: "tex/block/dirt", periodicity: 2}}
     # - name: Grass
     #   category: dirt
     #   speed_modifier: 0.8
