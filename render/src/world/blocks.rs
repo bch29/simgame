@@ -30,7 +30,6 @@ pub(crate) struct BlocksRenderStateBuilder<'a> {
 }
 
 pub(crate) struct BlocksRenderState {
-    needs_compute_pass: bool,
     chunk_state: ChunkState,
     compute_stage: ComputeStage,
     render_stage: RenderStage,
@@ -144,16 +143,9 @@ impl<'a> BlocksRenderStateBuilder<'a> {
             self.max_visible_chunks,
             self.view_state.params.visible_size,
         );
-        let mut needs_compute_pass = false;
 
         if let Some(active_view_box) = self.view_state.params.calculate_view_box() {
-            if chunk_state.update_view_box(active_view_box, self.blocks) {
-                needs_compute_pass = true;
-            }
-        }
-
-        if chunk_state.update_buffers(&ctx.queue, self.blocks) {
-            needs_compute_pass = true;
+            chunk_state.update_view_box(active_view_box, self.blocks);
         }
 
         log::info!("initializing blocks compute stage");
@@ -171,7 +163,6 @@ impl<'a> BlocksRenderStateBuilder<'a> {
         );
 
         Ok(BlocksRenderState {
-            needs_compute_pass,
             chunk_state,
             compute_stage,
             render_stage,
@@ -532,17 +523,13 @@ impl BlocksRenderState {
         frame_render: &mut crate::FrameRenderContext,
         _view_state: &world::ViewState,
     ) {
-        if self.needs_compute_pass {
-            log::debug!("Running compute pass");
-            self.compute_pass(ctx, frame_render);
-            self.needs_compute_pass = false;
-        }
+        self.chunk_state.update_buffers(&ctx.queue);
+        self.compute_pass(ctx, frame_render);
         self.render_pass(ctx, frame_render);
     }
 
     pub fn update(
         &mut self,
-        queue: &wgpu::Queue,
         blocks: &WorldBlockData,
         diff: &UpdatedBlocksState,
         view_state: &world::ViewState,
@@ -550,18 +537,12 @@ impl BlocksRenderState {
         if let Some(active_view_box) = view_state.params.calculate_view_box() {
             self.compute_stage.uniforms.update_view_box(active_view_box);
 
-            if self.chunk_state.update_view_box(active_view_box, blocks) {
-                self.needs_compute_pass = true;
-            }
-        } else if self.chunk_state.clear_view_box() {
-            self.needs_compute_pass = true;
+            self.chunk_state.update_view_box(active_view_box, blocks);
+        } else {
+            self.chunk_state.clear_view_box() ;
         }
 
         self.chunk_state.apply_chunk_diff(blocks, diff);
-        if self.chunk_state.update_buffers(queue, blocks) {
-            self.needs_compute_pass = true;
-        }
-
         *self.render_stage.uniforms = RenderUniforms::new(view_state);
     }
 

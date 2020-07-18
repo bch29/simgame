@@ -443,6 +443,12 @@ impl UpdatedBlocksState {
     pub fn record_chunk_update(&mut self, chunk_pos: Point3<i64>) {
         self.modified_chunks.insert(chunk_pos);
     }
+
+    pub fn update_from(&mut self, other: UpdatedBlocksState) {
+        for chunk in other.modified_chunks.into_iter() {
+            self.modified_chunks.insert(chunk);
+        }
+    }
 }
 
 impl<'a> BlockUpdater<'a> {

@@ -2,7 +2,6 @@ use std::env;
 use std::path::PathBuf;
 
 use anyhow::{anyhow, Result};
-use log::{error, info};
 use structopt::StructOpt;
 
 use simgame::files::FileContext;
@@ -113,18 +112,24 @@ async fn run_render_world(ctx: &FileContext, options: &RenderWorldOpts) -> Resul
         Some(save_name) => ctx.load_world_blocks(save_name)?,
         None => FileContext::load_debug_world_blocks()?,
     };
-    info!("Loaded world: {:?}", blocks.debug_summary());
+    log::info!("Loaded world: {:?}", blocks.debug_summary());
 
-    let world = World::new(
-        blocks,
-        BlockConfigHelper::new(&ctx.core_settings.block_config)?,
-    );
+    let world = World::new(blocks);
 
     let params = simgame::RenderParams {
         trace_path: options.graphics_trace_path.as_ref().map(|p| p.as_path()),
     };
 
-    simgame::test_render(world, settings.render_test_params, params, resource_loader).await
+    let block_helper = BlockConfigHelper::new(&ctx.core_settings.block_config)?;
+
+    simgame::test_render(
+        world,
+        settings.render_test_params,
+        params,
+        resource_loader,
+        block_helper,
+    )
+    .await
 }
 
 fn run_generate(ctx: &FileContext, options: &GenerateWorldOpts) -> Result<()> {
@@ -134,7 +139,7 @@ fn run_generate(ctx: &FileContext, options: &GenerateWorldOpts) -> Result<()> {
     let config = serde_yaml::from_reader(config_file)?;
     let blocks = worldgen::generate_world(&config, &block_helper)?;
 
-    info!("Saving");
+    log::info!("Saving");
     ctx.save_world_blocks(options.save_name.as_str(), &blocks)?;
 
     Ok(())
@@ -147,8 +152,8 @@ fn main() {
         Ok(()) => (),
         Err(end_error) => {
             for error in end_error.chain() {
-                error!("{}", error);
-                error!("========");
+                log::error!("{}", error);
+                log::error!("========");
             }
         }
     }

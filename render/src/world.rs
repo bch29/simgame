@@ -5,6 +5,7 @@ use simgame_core::{
     convert_point, convert_vec,
     util::Bounds,
     world::{UpdatedWorldState, World},
+    block::BlockConfigHelper
 };
 
 mod blocks;
@@ -29,6 +30,7 @@ pub struct ViewState {
 pub(crate) struct WorldRenderStateBuilder<'a> {
     pub view_params: ViewParams,
     pub world: &'a World,
+    pub block_helper: &'a BlockConfigHelper,
     pub max_visible_chunks: usize,
     pub swapchain: &'a wgpu::SwapChainDescriptor,
 }
@@ -60,7 +62,7 @@ impl<'a> WorldRenderStateBuilder<'a> {
             depth_texture: &depth_texture,
             blocks: &self.world.blocks,
             max_visible_chunks: self.max_visible_chunks,
-            block_config: &self.world.block_helper,
+            block_config: &self.block_helper,
         }
         .build(ctx)?;
 
@@ -122,9 +124,8 @@ impl WorldRenderState {
             .render_frame(ctx, frame_render, &self.view_state);
     }
 
-    pub fn update(&mut self, queue: &wgpu::Queue, world: &World, diff: &UpdatedWorldState) {
-        self.render_blocks
-            .update(queue, &world.blocks, &diff.blocks, &self.view_state);
+    pub fn update(&mut self, world: &World, diff: &UpdatedWorldState) {
+        self.render_blocks.update(&world.blocks, &diff.blocks, &self.view_state);
     }
 }
 

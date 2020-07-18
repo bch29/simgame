@@ -1,4 +1,5 @@
 use std::collections::VecDeque;
+use std::sync::{Mutex, Arc};
 use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Result};
@@ -9,6 +10,7 @@ use winit::{
     window::{Window, WindowBuilder},
 };
 
+use simgame_core::block::BlockConfigHelper;
 use simgame_core::world::World;
 use simgame_core::{convert_point, convert_vec};
 
@@ -22,20 +24,24 @@ pub mod settings;
 mod world_state;
 
 use settings::RenderTestParams;
+use world_state::WorldState;
 
 pub async fn test_render<'a>(
     world: World,
     test_params: RenderTestParams,
     render_params: RenderParams<'a>,
     resource_loader: ResourceLoader,
+    block_helper: BlockConfigHelper,
 ) -> Result<()> {
     let event_loop = EventLoop::new();
+
     let game = TestRenderBuilder {
         event_loop: &event_loop,
         world,
         test_params,
         render_params,
         resource_loader,
+        block_helper,
     }
     .build()
     .await?;
@@ -48,10 +54,12 @@ pub struct TestRenderBuilder<'a> {
     test_params: RenderTestParams,
     render_params: RenderParams<'a>,
     resource_loader: ResourceLoader,
+    block_helper: BlockConfigHelper,
 }
 
 pub struct TestRender {
-    world_state: world_state::WorldState,
+    world: Arc<Mutex<World>>,
+    world_state: WorldState,
     win_dimensions: Vector2<f64>,
     window: Window,
     control_state: controls::ControlState,
@@ -128,7 +136,9 @@ fn build_window(event_loop: &EventLoop<()>, settings: &settings::VideoSettings) 
 }
 
 impl<'a> TestRenderBuilder<'a> {
-    pub async fn build(self) -> Result<TestRender> {
+    pub async fn build(
+        self,
+    ) -> Result<TestRender> {
         let window = build_window(self.event_loop, &self.test_params.video_settings)?;
 
         let physical_win_size = window.inner_size();
@@ -168,6 +178,7 @@ impl<'a> TestRenderBuilder<'a> {
             resource_loader: self.resource_loader,
             display_size: physical_win_size,
             world: &self.world,
+            block_helper: &self.block_helper,
             view_params: view_state.clone(),
             max_visible_chunks: self.test_params.max_visible_chunks,
         }
@@ -190,13 +201,17 @@ impl<'a> TestRenderBuilder<'a> {
 
         let cursor_reset_position = Point2::origin() + win_dimensions / 2.;
 
+        let world = Arc::new(Mutex::new(self.world));
+
         let world_state = world_state::WorldStateBuilder {
-            world: self.world,
+            world: world.clone(),
+            block_helper: self.block_helper.clone(),
             tree_config: self.test_params.tree.as_ref(),
         }
         .build()?;
 
         Ok(TestRender {
+            world,
             world_state,
             win_dimensions,
             window,
@@ -220,6 +235,7 @@ impl TestRender {
                         log::error!("{}", error);
                         log::error!("========");
                     }
+
                     *control_flow = ControlFlow::Exit;
                 }
             }
@@ -252,9 +268,13 @@ impl TestRender {
                             ..
                         } => match key {
                             VirtualKeyCode::Escape => *control_flow = ControlFlow::Exit,
-                            VirtualKeyCode::Space => self.world_state.toggle_updates(),
-                            VirtualKeyCode::E => self.world_state.modify_filled_blocks(1),
-                            VirtualKeyCode::Q => self.world_state.modify_filled_blocks(-1),
+                            VirtualKeyCode::Space => self.world_state.toggle_updates()?,
+                            VirtualKeyCode::E => {
+                                self.world_state.modify_filled_blocks(1)?
+                            }
+                            VirtualKeyCode::Q => {
+                                self.world_state.modify_filled_blocks(-1)?
+                            }
                             _ => {}
                         },
                         _ => {}
@@ -266,6 +286,7 @@ impl TestRender {
                     ..
                 } => {
                     self.world_state.on_click(
+                        &self.world,
                         convert_point!(self.view_state.effective_camera_pos(), f64),
                         convert_vec!(self.view_state.look_at_dir, f64),
                     )?;
@@ -327,10 +348,17 @@ impl TestRender {
 
     fn redraw(&mut self) -> Result<()> {
         self.render_state.set_world_view(self.view_state.clone());
-        self.render_state
-            .update(&self.world_state.world(), &self.world_state.world_diff());
+
+        let world_diff = self.world_state.world_diff()?;
+
+        {
+            let world = self.world.lock().unwrap();
+            self.render_state
+                .update(&*world, world_diff);
+        }
+
         self.render_state.render_frame()?;
-        self.world_state.world_diff_mut().clear();
+        world_diff.clear();
         self.time_tracker.sample(Instant::now());
 
         log::debug!(

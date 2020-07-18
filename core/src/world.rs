@@ -1,9 +1,8 @@
-use crate::block::{WorldBlockData, UpdatedBlocksState, BlockConfigHelper};
+use crate::block::{WorldBlockData, UpdatedBlocksState};
 
 #[derive(Debug)]
 pub struct World {
     pub blocks: WorldBlockData,
-    pub block_helper: BlockConfigHelper,
 }
 
 #[derive(Debug)]
@@ -12,8 +11,8 @@ pub struct UpdatedWorldState {
 }
 
 impl World {
-    pub fn new(blocks: WorldBlockData, block_helper: BlockConfigHelper) -> World {
-        World { blocks, block_helper }
+    pub fn new(blocks: WorldBlockData) -> World {
+        World { blocks }
     }
 }
 
@@ -26,5 +25,9 @@ impl UpdatedWorldState {
 
     pub fn clear(&mut self) {
         self.blocks.clear()
+    }
+
+    pub fn update_from(&mut self, other: UpdatedWorldState) {
+        self.blocks.update_from(other.blocks)
     }
 }

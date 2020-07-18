@@ -2,6 +2,7 @@ use anyhow::{anyhow, bail, Result};
 use cgmath::Vector2;
 use raw_window_handle::HasRawWindowHandle;
 
+use simgame_core::block::BlockConfigHelper;
 use simgame_core::world::{UpdatedWorldState, World};
 
 pub mod resource;
@@ -29,6 +30,7 @@ pub struct RenderStateBuilder<'a, W> {
     pub display_size: Vector2<u32>,
     pub view_params: ViewParams,
     pub world: &'a World,
+    pub block_helper: &'a BlockConfigHelper,
     pub max_visible_chunks: usize,
 }
 
@@ -96,6 +98,7 @@ where
         let world_render_state = WorldRenderStateBuilder {
             view_params: self.view_params,
             world: self.world,
+            block_helper: self.block_helper,
             max_visible_chunks: self.max_visible_chunks,
             swapchain: &swapchain_descriptor,
         }
@@ -206,7 +209,7 @@ impl RenderState {
     }
 
     pub fn update(&mut self, world: &World, diff: &UpdatedWorldState) {
-        self.world_render_state.update(&self.ctx.queue, world, diff);
+        self.world_render_state.update(world, diff);
     }
 
     fn swapchain_descriptor(win_size: Vector2<u32>) -> wgpu::SwapChainDescriptor {

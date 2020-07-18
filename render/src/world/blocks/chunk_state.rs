@@ -9,7 +9,7 @@ use simgame_core::{convert_point, convert_vec};
 use crate::buffer_util::{BufferSyncHelper, BufferSyncHelperDesc};
 use crate::stable_map::StableMap;
 
-type ActiveChunks = StableMap<Point3<i32>, ()>;
+type ActiveChunks = StableMap<Point3<i32>, block::Chunk>;
 
 use super::ChunkMeta;
 
@@ -106,11 +106,11 @@ impl ChunkState {
             convert_point!(view_box.origin(), i64),
             convert_vec!(view_box.size(), i64),
         );
-        for (p, _chunk) in blocks
+        for (p, chunk) in blocks
             .iter_chunks_in_bounds(bounds)
             .map(|(p, chunk)| (convert_point!(p, i32), chunk))
         {
-            self.active_chunks.update(p, ());
+            self.active_chunks.update(p, chunk.clone());
         }
     }
 
@@ -163,8 +163,8 @@ impl ChunkState {
 
         // 2. insert chunks that are newly in the view
         for pos in new_chunk_box.iter_diff(old_chunk_box) {
-            if let Some(_chunk) = blocks.chunks().get(convert_point!(pos, i64)) {
-                self.active_chunks.update(pos, ());
+            if let Some(chunk) = blocks.chunks().get(convert_point!(pos, i64)) {
+                self.active_chunks.update(pos, chunk.clone());
             }
         }
 
@@ -195,15 +195,15 @@ impl ChunkState {
                 continue;
             }
 
-            if let Some(_chunk) = blocks.chunks().get(pos) {
-                self.active_chunks.update(pos_i32, ());
+            if let Some(chunk) = blocks.chunks().get(pos) {
+                self.active_chunks.update(pos_i32, chunk.clone());
             } else {
                 self.active_chunks.remove(&pos_i32);
             }
         }
     }
 
-    pub fn update_buffers(&mut self, queue: &wgpu::Queue, blocks: &WorldBlockData) -> bool {
+    pub fn update_buffers(&mut self, queue: &wgpu::Queue) -> bool {
         let mut any_updates = false;
 
         let mut fill_block_types =
@@ -224,10 +224,9 @@ impl ChunkState {
         for (index, opt_point) in diff.changed_entries().into_iter() {
             any_updates = true;
 
-            if let Some((&point, _)) = opt_point {
+            if let Some((&point, chunk)) = opt_point {
                 self.meta_tracker.modify(point, index, active_chunks);
 
-                let chunk = blocks.chunks().get(convert_point!(point, i64)).unwrap();
                 let chunk_data = block::blocks_to_u16(&chunk.blocks);
                 fill_block_types.seek(index * index_utils::chunk_size_total() as usize);
                 fill_block_types.advance(chunk_data);
