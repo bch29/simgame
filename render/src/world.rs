@@ -7,9 +7,6 @@ use simgame_core::{
     world::{UpdatedWorldState, World},
 };
 
-use crate::resource::ResourceLoader;
-use crate::FrameRender;
-
 mod blocks;
 
 pub use blocks::visible_size_to_chunks;
@@ -33,7 +30,6 @@ pub(crate) struct WorldRenderStateBuilder<'a> {
     pub view_params: ViewParams,
     pub world: &'a World,
     pub max_visible_chunks: usize,
-    pub resource_loader: &'a ResourceLoader,
     pub swapchain: &'a wgpu::SwapChainDescriptor,
 }
 
@@ -47,16 +43,9 @@ pub(crate) struct WorldRenderState {
 }
 
 impl<'a> WorldRenderStateBuilder<'a> {
-    pub fn build(self, device_result: &crate::DeviceResult) -> Result<WorldRenderState> {
-        let crate::DeviceResult {
-            device,
-            queue,
-            multi_draw_enabled,
-        } = device_result;
-
+    pub fn build(self, ctx: &crate::GraphicsContext) -> Result<WorldRenderState> {
         let display_size = Vector2::new(self.swapchain.width, self.swapchain.height);
-        let depth_texture =
-            WorldRenderState::make_depth_texture(&device_result.device, display_size);
+        let depth_texture = WorldRenderState::make_depth_texture(&ctx.device, display_size);
 
         let aspect_ratio = display_size.x as f32 / display_size.y as f32;
 
@@ -71,11 +60,9 @@ impl<'a> WorldRenderStateBuilder<'a> {
             depth_texture: &depth_texture,
             blocks: &self.world.blocks,
             max_visible_chunks: self.max_visible_chunks,
-            multi_draw_enabled: *multi_draw_enabled,
-            resource_loader: self.resource_loader,
             block_config: &self.world.block_helper,
         }
-        .build(device, queue)?;
+        .build(ctx)?;
 
         Ok(WorldRenderState {
             render_blocks,
@@ -108,12 +95,12 @@ impl WorldRenderState {
 
     pub fn update_swapchain(
         &mut self,
-        device: &wgpu::Device,
+        ctx: &crate::GraphicsContext,
         swapchain: &wgpu::SwapChainDescriptor,
     ) -> Result<()> {
         let display_size = Vector2::new(swapchain.width, swapchain.height);
 
-        let depth_texture = Self::make_depth_texture(device, display_size);
+        let depth_texture = Self::make_depth_texture(&ctx.device, display_size);
         self.render_blocks.set_depth_texture(&depth_texture);
 
         let aspect_ratio = display_size.x as f32 / display_size.y as f32;
@@ -126,9 +113,13 @@ impl WorldRenderState {
         OPENGL_TO_WGPU_MATRIX * cgmath::perspective(Deg(70f32), aspect_ratio, 1.0, 1000.0)
     }
 
-    pub fn render_frame(&mut self, render: &FrameRender, encoder: &mut wgpu::CommandEncoder) {
+    pub fn render_frame(
+        &mut self,
+        ctx: &crate::GraphicsContext,
+        frame_render: &mut crate::FrameRenderContext,
+    ) {
         self.render_blocks
-            .render_frame(render, &self.view_state, encoder);
+            .render_frame(ctx, frame_render, &self.view_state);
     }
 
     pub fn update(&mut self, queue: &wgpu::Queue, world: &World, diff: &UpdatedWorldState) {

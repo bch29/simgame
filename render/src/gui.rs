@@ -5,12 +5,8 @@ use zerocopy::{AsBytes, FromBytes};
 use crate::buffer_util::{
     BufferSyncHelperDesc, BufferSyncable, BufferSyncedData, FillBuffer, IntoBufferSynced,
 };
-use crate::resource::ResourceLoader;
-use crate::DeviceResult;
-use crate::FrameRender;
 
 pub(crate) struct GuiRenderStateBuilder<'a> {
-    pub resource_loader: &'a ResourceLoader,
     pub swapchain: &'a wgpu::SwapChainDescriptor,
 }
 
@@ -31,23 +27,21 @@ struct RenderUniforms {
 }
 
 impl<'a> GuiRenderStateBuilder<'a> {
-    pub fn build(self, device_result: &DeviceResult) -> Result<GuiRenderState> {
-        let device = &device_result.device;
-
-        let vert_shader = device.create_shader_module(wgpu::ShaderModuleSource::SpirV(
-            self.resource_loader
+    pub fn build(self, ctx: &crate::GraphicsContext) -> Result<GuiRenderState> {
+        let vert_shader = ctx.device.create_shader_module(wgpu::ShaderModuleSource::SpirV(
+            ctx.resource_loader
                 .load_shader("shader/gui/vertex")?
                 .as_slice(),
         ));
 
-        let frag_shader = device.create_shader_module(wgpu::ShaderModuleSource::SpirV(
-            self.resource_loader
+        let frag_shader = ctx.device.create_shader_module(wgpu::ShaderModuleSource::SpirV(
+            ctx.resource_loader
                 .load_shader("shader/gui/fragment")?
                 .as_slice(),
         ));
 
         let crosshair_texture: wgpu::TextureView = {
-            let image = self
+            let image = ctx
                 .resource_loader
                 .load_image("tex/gui/crosshair")?
                 .into_rgba();
@@ -60,7 +54,7 @@ impl<'a> GuiRenderStateBuilder<'a> {
                 depth: 1,
             };
 
-            let texture = device.create_texture(&wgpu::TextureDescriptor {
+            let texture = ctx.device.create_texture(&wgpu::TextureDescriptor {
                 label: Some("crosshair"),
                 size,
                 mip_level_count: 1,
@@ -78,7 +72,7 @@ impl<'a> GuiRenderStateBuilder<'a> {
 
             let samples = image.as_flat_samples();
 
-            device_result.queue.write_texture(
+            ctx.queue.write_texture(
                 copy_view,
                 samples.as_slice(),
                 wgpu::TextureDataLayout {
@@ -93,7 +87,7 @@ impl<'a> GuiRenderStateBuilder<'a> {
         };
 
         let bind_group_layout =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            ctx.device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: Some("blocks vertex layout"),
                 bindings: &[
                     // Uniforms
@@ -123,7 +117,7 @@ impl<'a> GuiRenderStateBuilder<'a> {
                 ],
             });
 
-        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+        let sampler = ctx.device.create_sampler(&wgpu::SamplerDescriptor {
             address_mode_u: wgpu::AddressMode::ClampToEdge,
             address_mode_v: wgpu::AddressMode::ClampToEdge,
             address_mode_w: wgpu::AddressMode::ClampToEdge,
@@ -134,11 +128,11 @@ impl<'a> GuiRenderStateBuilder<'a> {
             ..Default::default()
         });
 
-        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        let pipeline_layout = ctx.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             bind_group_layouts: &[&bind_group_layout],
         });
 
-        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        let pipeline = ctx.device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             layout: &pipeline_layout,
             vertex_stage: wgpu::ProgrammableStageDescriptor {
                 module: &vert_shader,
@@ -182,8 +176,8 @@ impl<'a> GuiRenderStateBuilder<'a> {
 
         let aspect_ratio = self.swapchain.width as f32 / self.swapchain.height as f32;
 
-        let uniforms = RenderUniforms::new(aspect_ratio).into_buffer_synced(device);
-        uniforms.sync(&device_result.queue);
+        let uniforms = RenderUniforms::new(aspect_ratio).into_buffer_synced(&ctx.device);
+        uniforms.sync(&ctx.queue);
 
         // let multisampled_framebuffer =
         //     GuiRenderState::create_multisampled_framebuffer(device, self.swapchain, SAMPLE_COUNT);
@@ -203,8 +197,7 @@ impl<'a> GuiRenderStateBuilder<'a> {
 impl GuiRenderState {
     pub fn update_swapchain(
         &mut self,
-        _device: &wgpu::Device,
-        queue: &wgpu::Queue,
+        ctx: &crate::GraphicsContext,
         swapchain: &wgpu::SwapChainDescriptor,
     ) -> Result<()> {
         // self.multisampled_framebuffer =
@@ -213,19 +206,19 @@ impl GuiRenderState {
         let aspect_ratio = swapchain.width as f32 / swapchain.height as f32;
 
         *self.uniforms = RenderUniforms::new(aspect_ratio);
-        self.uniforms.sync(queue);
+        self.uniforms.sync(&ctx.queue);
 
         Ok(())
     }
 
     pub fn render_frame(
         &mut self,
-        frame_render: &FrameRender,
-        encoder: &mut wgpu::CommandEncoder,
+        ctx: &crate::GraphicsContext,
+        frame_render: &mut crate::FrameRenderContext,
     ) {
-        self.uniforms.sync(frame_render.queue);
+        self.uniforms.sync(&ctx.queue);
 
-        let bind_group = frame_render
+        let bind_group = ctx
             .device
             .create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("gui render"),
@@ -246,7 +239,7 @@ impl GuiRenderState {
                 ],
             });
 
-        let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+        let mut rpass = frame_render.encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             color_attachments: &[wgpu::RenderPassColorAttachmentDescriptor {
                 attachment: &frame_render.frame.output.view,
                 resolve_target: None,

@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, bail, Result};
 use cgmath::Vector2;
 use raw_window_handle::HasRawWindowHandle;
 
@@ -38,25 +38,29 @@ pub struct RenderParams<'a> {
 }
 
 pub struct RenderState {
-    device: wgpu::Device,
+    ctx: GraphicsContext,
     surface: wgpu::Surface,
     swapchain: wgpu::SwapChain,
-    queue: wgpu::Queue,
     world_render_state: WorldRenderState,
     gui_render_state: GuiRenderState,
-    _resource_loader: ResourceLoader,
 }
 
-pub(crate) struct DeviceResult {
+pub(crate) struct GraphicsContext {
     pub device: wgpu::Device,
     pub queue: wgpu::Queue,
+    pub resource_loader: ResourceLoader,
     pub multi_draw_enabled: bool,
 }
 
-pub(crate) struct FrameRender<'a> {
-    pub queue: &'a wgpu::Queue,
-    pub device: &'a wgpu::Device,
-    pub frame: &'a wgpu::SwapChainFrame,
+struct DeviceResult {
+    device: wgpu::Device,
+    queue: wgpu::Queue,
+    pub multi_draw_enabled: bool,
+}
+
+pub struct FrameRenderContext {
+    pub frame: wgpu::SwapChainFrame,
+    pub encoder: wgpu::CommandEncoder,
 }
 
 impl<'a, W> RenderStateBuilder<'a, W>
@@ -79,35 +83,38 @@ where
             .await
             .ok_or_else(|| anyhow!("Failed to request wgpu::Adaptor"))?;
 
-        let device_result = RenderState::request_device(&params, &adapter).await?;
-        let device = &device_result.device;
+        let device_result: DeviceResult = RenderState::request_device(&params, &adapter).await?;
+        let ctx = GraphicsContext {
+            device: device_result.device,
+            queue: device_result.queue,
+            multi_draw_enabled: device_result.multi_draw_enabled,
+            resource_loader: self.resource_loader,
+        };
 
         let swapchain_descriptor = RenderState::swapchain_descriptor(self.physical_win_size);
-        let swapchain = device.create_swap_chain(&surface, &swapchain_descriptor);
+        let swapchain = ctx
+            .device
+            .create_swap_chain(&surface, &swapchain_descriptor);
 
         let world_render_state = WorldRenderStateBuilder {
             view_params: self.view_params,
             world: self.world,
             max_visible_chunks: self.max_visible_chunks,
-            resource_loader: &self.resource_loader,
             swapchain: &swapchain_descriptor,
         }
-        .build(&device_result)?;
+        .build(&ctx)?;
 
         let gui_render_state = GuiRenderStateBuilder {
             swapchain: &swapchain_descriptor,
-            resource_loader: &self.resource_loader,
         }
-        .build(&device_result)?;
+        .build(&ctx)?;
 
         Ok(RenderState {
+            ctx,
             surface,
             swapchain,
             world_render_state,
             gui_render_state,
-            queue: device_result.queue,
-            device: device_result.device,
-            _resource_loader: self.resource_loader,
         })
     }
 }
@@ -116,17 +123,15 @@ impl RenderState {
     pub fn update_win_size(&mut self, physical_win_size: Vector2<u32>) -> Result<()> {
         let swapchain_descriptor = Self::swapchain_descriptor(physical_win_size);
         let swapchain = self
+            .ctx
             .device
             .create_swap_chain(&self.surface, &swapchain_descriptor);
 
         self.swapchain = swapchain;
         self.world_render_state
-            .update_swapchain(&self.device, &swapchain_descriptor)?;
-        self.gui_render_state.update_swapchain(
-            &self.device,
-            &self.queue,
-            &swapchain_descriptor,
-        )?;
+            .update_swapchain(&self.ctx, &swapchain_descriptor)?;
+        self.gui_render_state
+            .update_swapchain(&self.ctx, &swapchain_descriptor)?;
         Ok(())
     }
 
@@ -138,7 +143,7 @@ impl RenderState {
             | wgpu::Features::SAMPLED_TEXTURE_ARRAY_DYNAMIC_INDEXING
             | wgpu::Features::UNSIZED_BINDING_ARRAY;
 
-        let result = adapter
+        let (device, queue) = match adapter
             .request_device(
                 &wgpu::DeviceDescriptor {
                     features: wgpu::Features::MULTI_DRAW_INDIRECT | required_features,
@@ -147,50 +152,30 @@ impl RenderState {
                 },
                 params.trace_path,
             )
-            .await;
-
-        match result {
-            Ok((device, queue)) => {
-                log::info!("MULTI_DRAW_INDIRECT is enabled");
-                return Ok(DeviceResult {
-                    device,
-                    queue,
-                    multi_draw_enabled: true,
-                });
-            }
-            Err(e) => {
-                log::warn!(
-                    "Failed to get device with MULTI_DRAW_INDIRECT support: {:?}",
-                    e
-                );
+            .await
+        {
+            Ok(res) => res,
+            Err(err) => {
+                bail!("Failed to request graphics device: {:?}", err);
             }
         };
 
-        let result = adapter
-            .request_device(
-                &wgpu::DeviceDescriptor {
-                    features: required_features,
-                    shader_validation: false,
-                    limits: wgpu::Limits::default(),
-                },
-                params.trace_path,
-            )
-            .await;
-
-        match result {
-            Ok((device, queue)) => {
-                return Ok(DeviceResult {
-                    device,
-                    queue,
-                    multi_draw_enabled: true,
-                })
-            }
-            Err(e) => {
-                log::warn!("Failed to get fallback device {:?}", e);
-            }
+        if !device.features().contains(required_features) {
+            bail!("Graphics device does not support required features");
         }
 
-        Err(anyhow!("Failed to request wgpu::Adaptor"))
+        let multi_draw_enabled = device
+            .features()
+            .contains(wgpu::Features::MULTI_DRAW_INDIRECT);
+        if !multi_draw_enabled {
+            log::warn!("Graphics device does not support MULTI_DRAW_INDIRECT");
+        }
+
+        Ok(DeviceResult {
+            device,
+            queue,
+            multi_draw_enabled,
+        })
     }
 
     pub fn set_world_view(&mut self, params: ViewParams) {
@@ -202,24 +187,23 @@ impl RenderState {
             .swapchain
             .get_next_frame()
             .expect("failed to get next frame");
-        let mut encoder = self
+        let encoder = self
+            .ctx
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
 
-        let render = FrameRender {
-            queue: &self.queue,
-            device: &self.device,
-            frame: &frame,
-        };
+        let mut render = FrameRenderContext { encoder, frame };
 
-        self.world_render_state.render_frame(&render, &mut encoder);
-        self.gui_render_state.render_frame(&render, &mut encoder);
+        self.world_render_state.render_frame(&self.ctx, &mut render);
+        self.gui_render_state.render_frame(&self.ctx, &mut render);
 
-        self.queue.submit(std::iter::once(encoder.finish()));
+        self.ctx
+            .queue
+            .submit(std::iter::once(render.encoder.finish()));
     }
 
     pub fn update(&mut self, world: &World, diff: &UpdatedWorldState) {
-        self.world_render_state.update(&self.queue, world, diff);
+        self.world_render_state.update(&self.ctx.queue, world, diff);
     }
 
     fn swapchain_descriptor(win_size: Vector2<u32>) -> wgpu::SwapChainDescriptor {
