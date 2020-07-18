@@ -2,25 +2,16 @@ use std::sync::{Arc, Mutex};
 
 use anyhow::{anyhow, Result};
 use cgmath::{EuclideanSpace, Matrix4, Point3, Vector3};
-use crossbeam::channel;
 use rand::SeedableRng;
 
+use simgame_core::block::{self, index_utils, Block, BlockConfigHelper, BlockUpdater};
+use simgame_core::ray::Ray;
+use simgame_core::world::{UpdatedWorldState, World};
+use simgame_core::{convert_point, util::Bounds};
+use simgame_worldgen::primitive::{self, Primitive};
 use simgame_worldgen::tree::{TreeConfig, TreeSystem};
 
-use simgame_core::block::{self, index_utils, Block, BlockConfigHelper, BlockUpdater};
-use simgame_core::convert_point;
-use simgame_core::ray::Ray;
-use simgame_core::util::Bounds;
-use simgame_core::world::{UpdatedWorldState, World};
-
-pub struct WorldState {
-    join_handle: Option<std::thread::JoinHandle<Result<()>>>,
-    action_sender: channel::Sender<BackgroundAction>,
-    diff_receiver: channel::Receiver<UpdateAction>,
-
-    block_helper: BlockConfigHelper,
-    world_diff: UpdatedWorldState,
-}
+use crate::background_object::{self, BackgroundObject};
 
 pub struct WorldStateBuilder<'a> {
     pub world: Arc<Mutex<World>>,
@@ -28,10 +19,18 @@ pub struct WorldStateBuilder<'a> {
     pub tree_config: Option<&'a TreeConfig>,
 }
 
-struct BackgroundThread {
-    action_receiver: channel::Receiver<BackgroundAction>,
-    diff_sender: channel::Sender<UpdateAction>,
+/// Keeps track of world state. Responds immediately to user input and hands off updates to the
+/// background state.
+pub struct WorldState {
+    connection: Option<background_object::Connection<BackgroundState>>,
+    block_helper: BlockConfigHelper,
+}
 
+/// Handles background updates. While locked on the world mutex, the rendering thread will be
+/// blocked, so care should be taken not to lock it for long. Other blocking in this object will
+/// not block the rendering thread.
+struct BackgroundState {
+    world: Arc<Mutex<World>>,
     world_diff: UpdatedWorldState,
     _block_helper: BlockConfigHelper,
     rng: rand::rngs::StdRng,
@@ -41,17 +40,16 @@ struct BackgroundThread {
     tree_system: Option<TreeSystem>,
 }
 
-enum UpdateAction {
-    Updated { diff: UpdatedWorldState },
-    Died,
+#[derive(Debug, Clone)]
+struct Tick {
+    pub elapsed: f64,
 }
 
-enum BackgroundAction {
+#[derive(Debug, Clone)]
+enum WorldUpdateAction {
     SpawnTree { raycast_hit: block::RaycastHit },
-    Tick { elapsed: f64 },
     ModifyFilledBlocks { delta: i32 },
     ToggleUpdates,
-    Kill,
 }
 
 impl<'a> WorldStateBuilder<'a> {
@@ -61,31 +59,21 @@ impl<'a> WorldStateBuilder<'a> {
             None => None,
         };
 
-        let (action_sender, action_receiver) = channel::bounded(16);
-        let (diff_sender, diff_receiver) = channel::bounded(16);
-
-        let background = BackgroundThread {
-            action_receiver,
-            diff_sender,
-
+        let world_state = BackgroundState {
             _block_helper: self.block_helper.clone(),
             world_diff: UpdatedWorldState::empty(),
             rng: SeedableRng::from_entropy(),
             updating: false,
             filled_blocks: (16 * 16 * 4) / 8,
             tree_system,
+            world: self.world,
         };
 
-        let world = self.world;
-        let join_handle = std::thread::spawn(move || background.run(&*world));
+        let connection = background_object::Connection::new(world_state, Default::default())?;
 
         Ok(WorldState {
-            join_handle: Some(join_handle),
-            action_sender,
-            diff_receiver,
-
+            connection: Some(connection),
             block_helper: self.block_helper,
-            world_diff: UpdatedWorldState::empty(),
         })
     }
 }
@@ -93,17 +81,16 @@ impl<'a> WorldStateBuilder<'a> {
 impl WorldState {
     /// Moves the world forward by one tick.
     pub fn tick(&mut self, elapsed: f64) -> Result<()> {
-        self.action_sender
-            .send(BackgroundAction::Tick { elapsed })?;
-        self.try_collect_diffs()?;
-        Ok(())
+        let connection = self
+            .connection
+            .as_mut()
+            .ok_or_else(|| anyhow!("sending tick on a closed connection"))?;
+
+        connection.send_tick(Tick { elapsed })
     }
 
     pub fn modify_filled_blocks(&mut self, delta: i32) -> Result<()> {
-        self.action_sender
-            .send(BackgroundAction::ModifyFilledBlocks { delta })?;
-        self.try_collect_diffs()?;
-        Ok(())
+        self.send_action(WorldUpdateAction::ModifyFilledBlocks { delta })
     }
 
     pub fn on_click(
@@ -118,106 +105,40 @@ impl WorldState {
         };
 
         let raycast_hit = {
-            let world = world.lock().unwrap();
+            let world = world.lock().map_err(|_| anyhow!("world mutex poisoned"))?;
             match world.blocks.cast_ray(&ray, &self.block_helper) {
                 None => return Ok(()),
                 Some(raycast_hit) => raycast_hit,
             }
         };
 
-        self.action_sender
-            .send(BackgroundAction::SpawnTree { raycast_hit })?;
-        self.try_collect_diffs()?;
-
-        Ok(())
+        self.send_action(WorldUpdateAction::SpawnTree { raycast_hit })
     }
 
     pub fn toggle_updates(&mut self) -> Result<()> {
-        self.action_sender.send(BackgroundAction::ToggleUpdates)?;
-        self.try_collect_diffs()?;
-
-        Ok(())
+        self.send_action(WorldUpdateAction::ToggleUpdates)
     }
 
-    pub fn kill(&mut self) -> Result<()> {
-        let join_handle = match self.join_handle.take() {
-            Some(handle) => handle,
-            None => {
-                log::warn!("Attempted to kill background thread twice");
-                return Ok(());
-            }
-        };
-
-        self.action_sender.send(BackgroundAction::Kill)?;
-        match join_handle.join() {
-            Ok(res) => res,
-            Err(err) => Err(anyhow!("Error joining background thread: {:?}", err)),
-        }
-    }
-
-    fn try_collect_diffs(&mut self) -> Result<()> {
-        loop {
-            match self.diff_receiver.try_recv() {
-                Ok(UpdateAction::Updated { diff }) => self.world_diff.update_from(diff),
-                Ok(UpdateAction::Died) => break self.kill(),
-                Err(channel::TryRecvError::Empty) => break Ok(()),
-                Err(err) => break Err(err.into()),
-            }
-        }
+    fn send_action(&mut self, action: WorldUpdateAction) -> Result<()> {
+        let connection = self
+            .connection
+            .as_mut()
+            .ok_or_else(|| anyhow!("sending action on a closed connection: {:?}", action))?;
+        connection.send_user(action)
     }
 
     pub fn world_diff(&mut self) -> Result<&mut UpdatedWorldState> {
-        self.try_collect_diffs()?;
-        Ok(&mut self.world_diff)
+        let connection = self
+            .connection
+            .as_mut()
+            .ok_or_else(|| anyhow!("collecting diffs on a closed connection"))?;
+        connection.current_response()
     }
 }
 
-impl Drop for WorldState {
-    fn drop(&mut self) {
-        match self.kill() {
-            Ok(()) => {}
-            Err(end_error) => {
-                for error in end_error.chain() {
-                    log::error!("{}", error);
-                    log::error!("========");
-                }
-            }
-        }
-    }
-}
-
-impl BackgroundThread {
-    pub fn run(mut self, world: &Mutex<World>) -> Result<()> {
-        match self.run_impl(world) {
-            Ok(res) => Ok(res),
-            Err(err) => {
-                self.diff_sender.send(UpdateAction::Died)?;
-                Err(err)
-            }
-        }
-    }
-
-    fn run_impl(&mut self, world: &Mutex<World>) -> Result<()> {
-        loop {
-            let action = self.action_receiver.recv()?;
-            match action {
-                BackgroundAction::Kill => break,
-                BackgroundAction::SpawnTree { raycast_hit } => {
-                    self.spawn_tree(world, raycast_hit)?
-                }
-                BackgroundAction::Tick { elapsed } => self.tick(world, elapsed)?,
-                BackgroundAction::ToggleUpdates => self.toggle_updates()?,
-                BackgroundAction::ModifyFilledBlocks { delta } => {
-                    self.modify_filled_blocks(world, delta)?
-                }
-            }
-        }
-
-        Ok(())
-    }
-
+impl BackgroundState {
     /// Moves the world forward by one tick.
-    pub fn tick(&mut self, _world: &Mutex<World>, _elapsed: f64) -> Result<()> {
+    fn tick(&mut self, _elapsed: f64) -> Result<()> {
         if !self.updating {
             return Ok(());
         }
@@ -226,12 +147,10 @@ impl BackgroundThread {
         // shape.draw(&mut updater);
 
         self.updating = false;
-
-        self.send_diff()?;
         Ok(())
     }
 
-    pub fn modify_filled_blocks(&mut self, world: &Mutex<World>, delta: i32) -> Result<()> {
+    fn modify_filled_blocks(&mut self, delta: i32) -> Result<()> {
         self.filled_blocks += delta * 8;
         if self.filled_blocks < 1 {
             self.filled_blocks = 1
@@ -245,7 +164,10 @@ impl BackgroundThread {
         let mut count_filled = 0;
 
         {
-            let mut world = world.lock().expect("mutex poisoned");
+            let mut world = self
+                .world
+                .lock()
+                .map_err(|_| anyhow!("world mutex poisoned"))?;
             for p in bounds.iter_points() {
                 if (p.x + p.y + p.z) % step == 0 {
                     world.blocks.set_block(p, Block::from_u16(1));
@@ -263,16 +185,10 @@ impl BackgroundThread {
             count_filled as f64 * index_utils::chunk_size_total() as f64 / bounds.volume() as f64,
             index_utils::chunk_size_total()
         );
-
-        self.send_diff()?;
         Ok(())
     }
 
-    pub fn spawn_tree(
-        &mut self,
-        world: &Mutex<World>,
-        raycast_hit: block::RaycastHit,
-    ) -> Result<()> {
+    fn spawn_tree(&mut self, raycast_hit: block::RaycastHit) -> Result<()> {
         log::debug!(
             "Clicked on block {:?} at pos {:?} with intersection {:?}",
             raycast_hit.block,
@@ -291,27 +207,66 @@ impl BackgroundThread {
             convert_point!(raycast_hit.block_pos, f64) + raycast_hit.intersection.normal;
 
         let draw_transform = Matrix4::from_translation(root_pos - Point3::origin());
+        self.draw_shape(tree, draw_transform)
+    }
 
-        {
-            let mut world = world.lock().unwrap();
+    /// Draws a complex shape while trying to avoid blocking the rendering thread due to world
+    /// updates.
+    fn draw_shape(&mut self, shape: primitive::Shape, draw_transform: Matrix4<f64>) -> Result<()> {
+        for (fill_block, primitive) in shape.iter_transformed_primitives(draw_transform) {
+            // lock the mutex inside the loop so that the rendering thread isn't blocked while we
+            // update
+            let mut world = self
+                .world
+                .lock()
+                .map_err(|_| anyhow!("world mutex poisoned"))?;
             let mut updater = BlockUpdater::new(&mut world.blocks, &mut self.world_diff.blocks);
-            tree.draw_transformed(&mut updater, draw_transform);
+            primitive.draw(&mut updater, fill_block);
         }
-
-        self.send_diff()?;
         Ok(())
     }
 
-    pub fn toggle_updates(&mut self) -> Result<()> {
+    fn toggle_updates(&mut self) -> Result<()> {
         self.updating = !self.updating;
-        self.send_diff()?;
         Ok(())
     }
+}
 
-    fn send_diff(&mut self) -> Result<()> {
+impl BackgroundObject for BackgroundState {
+    type UserAction = WorldUpdateAction;
+    type TickAction = Tick;
+    type Response = UpdatedWorldState;
+
+    fn receive_user(&mut self, action: WorldUpdateAction) -> Result<()> {
+        match action {
+            WorldUpdateAction::SpawnTree { raycast_hit } => self.spawn_tree(raycast_hit),
+            WorldUpdateAction::ToggleUpdates => self.toggle_updates(),
+            WorldUpdateAction::ModifyFilledBlocks { delta } => self.modify_filled_blocks(delta),
+        }
+    }
+
+    fn receive_tick(&mut self, tick: Tick) -> Result<()> {
+        let Tick { elapsed } = tick;
+        self.tick(elapsed)
+    }
+
+    fn produce_response(&mut self) -> Result<Option<UpdatedWorldState>> {
+        if self.world_diff.is_empty() {
+            return Ok(None);
+        }
         let mut diff = UpdatedWorldState::empty();
         std::mem::swap(&mut self.world_diff, &mut diff);
-        self.diff_sender.send(UpdateAction::Updated { diff })?;
+        Ok(Some(diff))
+    }
+}
+
+impl background_object::Cumulative for UpdatedWorldState {
+    fn empty() -> Self {
+        UpdatedWorldState::empty()
+    }
+
+    fn append(&mut self, other: Self) -> Result<()> {
+        self.update_from(other);
         Ok(())
     }
 }

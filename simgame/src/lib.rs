@@ -18,10 +18,11 @@ use simgame_render::resource::ResourceLoader;
 pub use simgame_render::RenderParams;
 use simgame_render::{visible_size_to_chunks, RenderState, RenderStateBuilder, ViewParams};
 
-mod controls;
 pub mod files;
 pub mod settings;
+mod controls;
 mod world_state;
+mod background_object;
 
 use settings::RenderTestParams;
 use world_state::WorldState;

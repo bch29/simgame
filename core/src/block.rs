@@ -449,6 +449,10 @@ impl UpdatedBlocksState {
             self.modified_chunks.insert(chunk);
         }
     }
+
+    pub fn is_empty(&self) -> bool {
+        self.modified_chunks.is_empty()
+    }
 }
 
 impl<'a> BlockUpdater<'a> {
@@ -470,12 +474,12 @@ impl<'a> BlockUpdater<'a> {
     /// the input iterator has good chunk locality (multiple blocks in the same chunk follow each
     /// other directly).
     #[inline]
-    pub fn set_blocks<I>(&mut self, blocks: I)
+    pub fn set_blocks<I>(&mut self, set_blocks: I)
     where
         I: IntoIterator<Item = (Point3<i64>, Block)>,
     {
         let chunks = self.blocks.chunks_mut();
-        let mut iter = blocks.into_iter();
+        let mut iter = set_blocks.into_iter();
 
         let ((mut chunk_pos, mut first_local_point), mut first_block) =
             if let Some((point, block)) = iter.next() {

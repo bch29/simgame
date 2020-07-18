@@ -30,4 +30,8 @@ impl UpdatedWorldState {
     pub fn update_from(&mut self, other: UpdatedWorldState) {
         self.blocks.update_from(other.blocks)
     }
+
+    pub fn is_empty(&self) -> bool {
+        self.blocks.is_empty()
+    }
 }

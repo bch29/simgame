@@ -115,17 +115,28 @@ impl Shape {
         }])
     }
 
-    pub fn draw_transformed(&self, blocks: &mut BlockUpdater, transform: Matrix4<f64>) {
+    pub fn iter_transformed_primitives<'a>(
+        &'a self,
+        transform: Matrix4<f64>,
+    ) -> impl Iterator<Item = (Block, impl Primitive + 'a)> + 'a {
         let inv_transform = transform
             .inverse_transform()
             .expect("draw_transformed expects an invertible transform matrix");
-        for component in &self.components {
-            let primitive = AffineTransform {
-                primitive: &*component.primitive,
-                transform,
-                inv_transform,
-            };
-            primitive.draw(blocks, component.fill_block);
+        self.components.iter().map(move |component| {
+            (
+                component.fill_block,
+                AffineTransform {
+                    primitive: &*component.primitive,
+                    transform,
+                    inv_transform,
+                },
+            )
+        })
+    }
+
+    pub fn draw_transformed(&self, blocks: &mut BlockUpdater, transform: Matrix4<f64>) {
+        for (fill_block, primitive) in self.iter_transformed_primitives(transform) {
+            primitive.draw(blocks, fill_block);
         }
     }
 
