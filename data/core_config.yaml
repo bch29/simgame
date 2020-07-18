@@ -12,7 +12,7 @@ block_config:
     - name: Rock
       category: rock
       texture:
-        Uniform: {Texture: {resource: "tex/block/rock", periodicity: 16}}
+        Uniform: {Texture: {resource: "tex/block/rock", periodicity: 2}}
     - name: Leaf
       category: foliage
       speed_modifier: 0.5
@@ -21,7 +21,7 @@ block_config:
     - name: Wood
       category: wood
       texture:
-        Uniform: {Texture: {resource: "tex/block/wood", periodicity: 1}}
+        Uniform: {Texture: {resource: "tex/block/wood", periodicity: 2}}
     - name: Dirt
       category: dirt
       speed_modifier: 0.8
