@@ -131,8 +131,12 @@ impl WorldRenderState {
 impl ViewParams {
     /// Calculates the box containing blocks that will be rendered according to current view.
     pub fn calculate_view_box(&self) -> Option<Bounds<i32>> {
-        // center x and y 60 blocks in front of the camera
-        let mut center = self.camera_pos + 60. * self.look_at_dir.normalize();
+        let visible_distance = Vector2 {
+            x: self.visible_size.x as f32,
+            y: self.visible_size.y as f32
+        }.magnitude() / 3.;
+
+        let mut center = self.camera_pos + visible_distance * self.look_at_dir.normalize();
 
         // z_level is the topmost visible level
         center.z = self.z_level as f32 + 1.0 - self.visible_size.z as f32 / 2.0;
