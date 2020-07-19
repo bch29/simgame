@@ -1,17 +1,11 @@
 use anyhow::{anyhow, Result};
-use cgmath::{EuclideanSpace, Point3, Vector3, ElementWise};
+use cgmath::{ElementWise, EuclideanSpace, Point3, Vector3};
 use log::info;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 
-use simgame_core::block::{Block, BlockConfigHelper, BlockUpdater, WorldBlockData};
-use simgame_core::util::Bounds;
-use simgame_core::world::UpdatedWorldState;
-
-pub mod lsystem;
-pub mod primitive;
-pub mod tree;
-pub mod turtle;
+use simgame_blocks::{util::Bounds, Block, BlockConfigHelper, BlockUpdater, WorldBlockData};
+use simgame_world::{tree, UpdatedWorldState};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GenerateWorldConfig {
@@ -102,11 +96,13 @@ impl<'a, R> WorldGenerator<'a, R> {
         let rock_block = self
             .block_helper
             .block_by_name("Rock")
-            .ok_or_else(|| anyhow!("Missing block config for Rock"))?.0;
+            .ok_or_else(|| anyhow!("Missing block config for Rock"))?
+            .0;
         let dirt_block = self
             .block_helper
             .block_by_name("Dirt")
-            .ok_or_else(|| anyhow!("Missing block config for Dirt"))?.0;
+            .ok_or_else(|| anyhow!("Missing block config for Dirt"))?
+            .0;
 
         info!("Bounds are {:?}", self.bounds);
         self.blocks

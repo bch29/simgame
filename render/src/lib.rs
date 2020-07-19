@@ -1,18 +1,17 @@
+mod buffer_util;
+mod gui;
+mod mesh;
+pub mod resource;
+pub mod shaders;
+mod stable_map;
+mod world;
+
 use anyhow::{anyhow, bail, Result};
 use cgmath::Vector2;
 use raw_window_handle::HasRawWindowHandle;
 
-use simgame_core::block::BlockConfigHelper;
-use simgame_core::world::{UpdatedWorldState, World};
-
-pub mod resource;
-pub mod shaders;
-
-mod buffer_util;
-mod gui;
-mod mesh;
-mod stable_map;
-mod world;
+use simgame_blocks::BlockConfigHelper;
+use simgame_world::{UpdatedWorldState, World};
 
 pub use world::{visible_size_to_chunks, ViewParams};
 
@@ -188,9 +187,7 @@ impl RenderState {
     }
 
     pub fn render_frame(&mut self) -> Result<()> {
-        let frame = self
-            .swapchain
-            .get_next_frame()?;
+        let frame = self.swapchain.get_next_frame()?;
         let encoder = self
             .ctx
             .device

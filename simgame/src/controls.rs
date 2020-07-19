@@ -2,7 +2,7 @@ use cgmath::{
     Angle, Basis3, Deg, InnerSpace, Point3, Rad, Rotation, Rotation3, Vector2, Vector3, Zero,
 };
 
-use simgame_core::{convert_point, convert_vec};
+use simgame_blocks::{convert_point, convert_vec};
 use simgame_render::visible_size_to_chunks;
 
 use crate::settings::RenderTestParams;
@@ -349,7 +349,7 @@ impl AccelControlState {
 pub fn restrict_visible_size(max_chunks: usize, mut visible_size: Vector3<i32>) -> Vector3<i32> {
     let chunk_size = visible_size_to_chunks(visible_size);
     let max_z_chunks = max_chunks as i32 / (chunk_size.x * chunk_size.y) - 1;
-    let max_z_blocks = simgame_core::block::index_utils::chunk_size().z as i32 * max_z_chunks;
+    let max_z_blocks = simgame_blocks::index_utils::chunk_size().z as i32 * max_z_chunks;
 
     if visible_size.z > max_z_blocks {
         visible_size.z = max_z_blocks;

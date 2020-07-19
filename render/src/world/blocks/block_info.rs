@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use anyhow::{anyhow, bail, Result};
 use zerocopy::AsBytes;
 
-use simgame_core::block::{self, BlockConfigHelper};
+use simgame_blocks::{self as block, BlockConfigHelper};
 
 use crate::buffer_util::{InstancedBuffer, InstancedBufferDesc};
 use crate::mesh::cube::Cube;
@@ -52,7 +52,8 @@ impl BlockInfoHandler {
             res.into_iter().map(|(_, tex)| tex).collect()
         };
 
-        let texture_arr_views = texture_arr.iter()
+        let texture_arr_views = texture_arr
+            .iter()
             .map(|data| {
                 data.texture.create_view(&wgpu::TextureViewDescriptor {
                     label: Some("block textures"),
@@ -137,8 +138,9 @@ impl BlockInfoHandler {
             );
         }
 
-        let mip_level_count =
-            log2_exact(width.min(height)).expect("expected dimensions to be powers of 2").max(1);
+        let mip_level_count = log2_exact(width.min(height))
+            .expect("expected dimensions to be powers of 2")
+            .max(1);
 
         let texture = ctx.device.create_texture(&wgpu::TextureDescriptor {
             label: Some("block texture array"),
@@ -184,7 +186,7 @@ impl BlockInfoHandler {
 
         Ok(TextureData {
             texture,
-            mip_level_count
+            mip_level_count,
         })
     }
 
@@ -237,7 +239,7 @@ impl BlockInfoHandler {
 
 struct TextureData {
     texture: wgpu::Texture,
-    mip_level_count: u32
+    mip_level_count: u32,
 }
 
 trait SampleGenerator {

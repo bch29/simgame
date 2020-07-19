@@ -1,9 +1,9 @@
 use cgmath::{Point3, Vector2, Vector3};
 use serde::{Deserialize, Serialize};
 
-use simgame_core::block::BlockConfig;
-use simgame_worldgen::tree::TreeConfig;
+use simgame_blocks::BlockConfig;
 use simgame_render::resource::ResourceConfig;
+use simgame_world::tree::TreeConfig;
 
 /// Settings specific to this particular game.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -63,7 +63,7 @@ impl Default for RenderTestParams {
                 win_dimensions: Vector2::new(1920., 1080.),
                 video_mode: VideoMode::Windowed,
             },
-            tree: None
+            tree: None,
         }
     }
 }

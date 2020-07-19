@@ -339,7 +339,10 @@ impl<T: BaseNum> Bounds<T> {
     /// Moves the origin and limit by a vector while keeping the size the same.
     #[inline]
     pub fn translate(self, offset: Vector3<T>) -> Self {
-        Bounds { origin: self.origin() + offset, size: self.size }
+        Bounds {
+            origin: self.origin() + offset,
+            size: self.size,
+        }
     }
 
     /// Changes the size while keeping the origin the same. Note this also changes the limit.

@@ -5,9 +5,9 @@ use anyhow::{anyhow, Result};
 use structopt::StructOpt;
 
 use simgame::files::FileContext;
-use simgame_core::block::BlockConfigHelper;
-use simgame_core::world::World;
+use simgame_blocks::BlockConfigHelper;
 use simgame_render::resource::{self, ResourceLoader};
+use simgame_world::World;
 use simgame_worldgen as worldgen;
 
 #[derive(Debug, StructOpt)]

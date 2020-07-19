@@ -1,9 +1,7 @@
 use anyhow::{anyhow, Result};
 use cgmath::{Angle, EuclideanSpace, InnerSpace, Matrix4, Point3, Rad, SquareMatrix, Vector3};
 
-use simgame_core::block::Block;
-
-use crate::primitive;
+use simgame_blocks::{primitive, Block};
 
 pub struct Turtle {
     state: TurtleState,

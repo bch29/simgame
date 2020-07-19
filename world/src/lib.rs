@@ -1,4 +1,12 @@
-use crate::block::{WorldBlockData, UpdatedBlocksState};
+mod background_object;
+pub mod lsystem;
+pub mod tree;
+pub mod turtle;
+mod world_state;
+
+use simgame_blocks::{UpdatedBlocksState, WorldBlockData};
+
+pub use world_state::{WorldState, WorldStateBuilder};
 
 #[derive(Debug)]
 pub struct World {
@@ -7,7 +15,7 @@ pub struct World {
 
 #[derive(Debug)]
 pub struct UpdatedWorldState {
-    pub blocks: UpdatedBlocksState
+    pub blocks: UpdatedBlocksState,
 }
 
 impl World {
@@ -19,7 +27,7 @@ impl World {
 impl UpdatedWorldState {
     pub fn empty() -> Self {
         Self {
-            blocks: UpdatedBlocksState::empty()
+            blocks: UpdatedBlocksState::empty(),
         }
     }
 

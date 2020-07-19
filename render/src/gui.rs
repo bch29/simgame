@@ -28,17 +28,21 @@ struct RenderUniforms {
 
 impl<'a> GuiRenderStateBuilder<'a> {
     pub fn build(self, ctx: &crate::GraphicsContext) -> Result<GuiRenderState> {
-        let vert_shader = ctx.device.create_shader_module(wgpu::ShaderModuleSource::SpirV(
-            ctx.resource_loader
-                .load_shader("shader/gui/vertex")?
-                .as_slice(),
-        ));
+        let vert_shader = ctx
+            .device
+            .create_shader_module(wgpu::ShaderModuleSource::SpirV(
+                ctx.resource_loader
+                    .load_shader("shader/gui/vertex")?
+                    .as_slice(),
+            ));
 
-        let frag_shader = ctx.device.create_shader_module(wgpu::ShaderModuleSource::SpirV(
-            ctx.resource_loader
-                .load_shader("shader/gui/fragment")?
-                .as_slice(),
-        ));
+        let frag_shader = ctx
+            .device
+            .create_shader_module(wgpu::ShaderModuleSource::SpirV(
+                ctx.resource_loader
+                    .load_shader("shader/gui/fragment")?
+                    .as_slice(),
+            ));
 
         let crosshair_texture: wgpu::TextureView = {
             let image = ctx
@@ -87,35 +91,36 @@ impl<'a> GuiRenderStateBuilder<'a> {
         };
 
         let bind_group_layout =
-            ctx.device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("blocks vertex layout"),
-                entries: &[
-                    // Uniforms
-                    wgpu::BindGroupLayoutEntry::new(
-                        0,
-                        wgpu::ShaderStage::VERTEX,
-                        wgpu::BindingType::UniformBuffer {
-                            dynamic: false,
-                            min_binding_size: None,
-                        },
-                    ),
-                    // Texture
-                    wgpu::BindGroupLayoutEntry::new(
-                        1,
-                        wgpu::ShaderStage::FRAGMENT,
-                        wgpu::BindingType::SampledTexture {
-                            dimension: wgpu::TextureViewDimension::D2,
-                            component_type: wgpu::TextureComponentType::Float,
-                            multisampled: false,
-                        },
-                    ),
-                    wgpu::BindGroupLayoutEntry::new(
-                        2,
-                        wgpu::ShaderStage::FRAGMENT,
-                        wgpu::BindingType::Sampler { comparison: false },
-                    ),
-                ],
-            });
+            ctx.device
+                .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                    label: Some("blocks vertex layout"),
+                    entries: &[
+                        // Uniforms
+                        wgpu::BindGroupLayoutEntry::new(
+                            0,
+                            wgpu::ShaderStage::VERTEX,
+                            wgpu::BindingType::UniformBuffer {
+                                dynamic: false,
+                                min_binding_size: None,
+                            },
+                        ),
+                        // Texture
+                        wgpu::BindGroupLayoutEntry::new(
+                            1,
+                            wgpu::ShaderStage::FRAGMENT,
+                            wgpu::BindingType::SampledTexture {
+                                dimension: wgpu::TextureViewDimension::D2,
+                                component_type: wgpu::TextureComponentType::Float,
+                                multisampled: false,
+                            },
+                        ),
+                        wgpu::BindGroupLayoutEntry::new(
+                            2,
+                            wgpu::ShaderStage::FRAGMENT,
+                            wgpu::BindingType::Sampler { comparison: false },
+                        ),
+                    ],
+                });
 
         let sampler = ctx.device.create_sampler(&wgpu::SamplerDescriptor {
             address_mode_u: wgpu::AddressMode::ClampToEdge,
@@ -128,52 +133,56 @@ impl<'a> GuiRenderStateBuilder<'a> {
             ..Default::default()
         });
 
-        let pipeline_layout = ctx.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            bind_group_layouts: &[&bind_group_layout],
-            push_constant_ranges: &[]
-        });
+        let pipeline_layout = ctx
+            .device
+            .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                bind_group_layouts: &[&bind_group_layout],
+                push_constant_ranges: &[],
+            });
 
-        let pipeline = ctx.device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            layout: &pipeline_layout,
-            vertex_stage: wgpu::ProgrammableStageDescriptor {
-                module: &vert_shader,
-                entry_point: "main",
-            },
-            fragment_stage: Some(wgpu::ProgrammableStageDescriptor {
-                module: &frag_shader,
-                entry_point: "main",
-            }),
-            rasterization_state: Some(wgpu::RasterizationStateDescriptor {
-                front_face: wgpu::FrontFace::Cw,
-                cull_mode: wgpu::CullMode::None,
-                depth_bias: 0,
-                depth_bias_slope_scale: 0.0,
-                depth_bias_clamp: 0.0,
-            }),
-            primitive_topology: wgpu::PrimitiveTopology::TriangleStrip,
-            color_states: &[wgpu::ColorStateDescriptor {
-                format: self.swapchain.format,
-                color_blend: wgpu::BlendDescriptor {
-                    src_factor: wgpu::BlendFactor::SrcAlpha,
-                    dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
-                    operation: wgpu::BlendOperation::Add,
+        let pipeline = ctx
+            .device
+            .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                layout: &pipeline_layout,
+                vertex_stage: wgpu::ProgrammableStageDescriptor {
+                    module: &vert_shader,
+                    entry_point: "main",
                 },
-                alpha_blend: wgpu::BlendDescriptor {
-                    src_factor: wgpu::BlendFactor::One,
-                    dst_factor: wgpu::BlendFactor::One,
-                    operation: wgpu::BlendOperation::Max,
+                fragment_stage: Some(wgpu::ProgrammableStageDescriptor {
+                    module: &frag_shader,
+                    entry_point: "main",
+                }),
+                rasterization_state: Some(wgpu::RasterizationStateDescriptor {
+                    front_face: wgpu::FrontFace::Cw,
+                    cull_mode: wgpu::CullMode::None,
+                    depth_bias: 0,
+                    depth_bias_slope_scale: 0.0,
+                    depth_bias_clamp: 0.0,
+                }),
+                primitive_topology: wgpu::PrimitiveTopology::TriangleStrip,
+                color_states: &[wgpu::ColorStateDescriptor {
+                    format: self.swapchain.format,
+                    color_blend: wgpu::BlendDescriptor {
+                        src_factor: wgpu::BlendFactor::SrcAlpha,
+                        dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+                        operation: wgpu::BlendOperation::Add,
+                    },
+                    alpha_blend: wgpu::BlendDescriptor {
+                        src_factor: wgpu::BlendFactor::One,
+                        dst_factor: wgpu::BlendFactor::One,
+                        operation: wgpu::BlendOperation::Max,
+                    },
+                    write_mask: wgpu::ColorWrite::ALL,
+                }],
+                depth_stencil_state: None,
+                vertex_state: wgpu::VertexStateDescriptor {
+                    index_format: wgpu::IndexFormat::Uint16,
+                    vertex_buffers: &[],
                 },
-                write_mask: wgpu::ColorWrite::ALL,
-            }],
-            depth_stencil_state: None,
-            vertex_state: wgpu::VertexStateDescriptor {
-                index_format: wgpu::IndexFormat::Uint16,
-                vertex_buffers: &[],
-            },
-            sample_count: 1,
-            sample_mask: !0,
-            alpha_to_coverage_enabled: false,
-        });
+                sample_count: 1,
+                sample_mask: !0,
+                alpha_to_coverage_enabled: false,
+            });
 
         let aspect_ratio = self.swapchain.width as f32 / self.swapchain.height as f32;
 
@@ -219,38 +228,38 @@ impl GuiRenderState {
     ) {
         self.uniforms.sync(&ctx.queue);
 
-        let bind_group = ctx
-            .device
-            .create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("gui render"),
-                layout: &self.bind_group_layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: wgpu::BindingResource::Buffer(self.uniforms.buffer().slice(..)),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: wgpu::BindingResource::TextureView(&self.crosshair_texture),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: wgpu::BindingResource::Sampler(&self.sampler),
-                    },
-                ],
-            });
-
-        let mut rpass = frame_render.encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            color_attachments: &[wgpu::RenderPassColorAttachmentDescriptor {
-                attachment: &frame_render.frame.output.view,
-                resolve_target: None,
-                ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Load,
-                    store: true,
+        let bind_group = ctx.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("gui render"),
+            layout: &self.bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::Buffer(self.uniforms.buffer().slice(..)),
                 },
-            }],
-            depth_stencil_attachment: None,
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&self.crosshair_texture),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::Sampler(&self.sampler),
+                },
+            ],
         });
+
+        let mut rpass = frame_render
+            .encoder
+            .begin_render_pass(&wgpu::RenderPassDescriptor {
+                color_attachments: &[wgpu::RenderPassColorAttachmentDescriptor {
+                    attachment: &frame_render.frame.output.view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: true,
+                    },
+                }],
+                depth_stencil_attachment: None,
+            });
 
         rpass.set_pipeline(&self.pipeline);
         rpass.set_bind_group(0, &bind_group, &[]);

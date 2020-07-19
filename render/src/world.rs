@@ -1,14 +1,10 @@
+mod blocks;
+
 use anyhow::Result;
 use cgmath::{Deg, InnerSpace, Matrix4, Point3, SquareMatrix, Vector2, Vector3};
 
-use simgame_core::{
-    convert_point, convert_vec,
-    util::Bounds,
-    world::{UpdatedWorldState, World},
-    block::BlockConfigHelper
-};
-
-mod blocks;
+use simgame_blocks::{convert_point, convert_vec, util::Bounds, BlockConfigHelper};
+use simgame_world::{UpdatedWorldState, World};
 
 pub use blocks::visible_size_to_chunks;
 
@@ -125,7 +121,8 @@ impl WorldRenderState {
     }
 
     pub fn update(&mut self, world: &World, diff: &UpdatedWorldState) {
-        self.render_blocks.update(&world.blocks, &diff.blocks, &self.view_state);
+        self.render_blocks
+            .update(&world.blocks, &diff.blocks, &self.view_state);
     }
 }
 
@@ -134,8 +131,10 @@ impl ViewParams {
     pub fn calculate_view_box(&self) -> Option<Bounds<i32>> {
         let visible_distance = Vector2 {
             x: self.visible_size.x as f32,
-            y: self.visible_size.y as f32
-        }.magnitude() / 3.;
+            y: self.visible_size.y as f32,
+        }
+        .magnitude()
+            / 3.;
 
         let mut center = self.camera_pos + visible_distance * self.look_at_dir.normalize();
 

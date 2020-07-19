@@ -1,11 +1,14 @@
+mod block_info;
+mod chunk_state;
+
 use anyhow::Result;
 use cgmath::{Point3, Vector3};
 use zerocopy::{AsBytes, FromBytes};
 
-use simgame_core::{
-    block::{index_utils, BlockConfigHelper, UpdatedBlocksState, WorldBlockData},
-    convert_point, convert_vec,
+use simgame_blocks::{
+    convert_point, convert_vec, index_utils,
     util::{Bounds, DivUp},
+    BlockConfigHelper, UpdatedBlocksState, WorldBlockData,
 };
 
 use crate::buffer_util::{
@@ -14,9 +17,6 @@ use crate::buffer_util::{
 };
 use crate::mesh::cube::Cube;
 use crate::world::{self, ViewParams};
-
-mod block_info;
-mod chunk_state;
 
 use block_info::BlockInfoHandler;
 use chunk_state::ChunkState;
@@ -539,7 +539,7 @@ impl BlocksRenderState {
 
             self.chunk_state.update_view_box(active_view_box, blocks);
         } else {
-            self.chunk_state.clear_view_box() ;
+            self.chunk_state.clear_view_box();
         }
 
         self.chunk_state.apply_chunk_diff(blocks, diff);

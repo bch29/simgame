@@ -3,10 +3,9 @@ use cgmath::{Deg, Matrix3, Point3, Transform, Vector3};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 
-use simgame_core::block::{Block, BlockConfigHelper};
+use simgame_blocks::{primitive, Block, BlockConfigHelper};
 
 use crate::lsystem;
-use crate::primitive;
 use crate::turtle::{Turtle, TurtleBrush, TurtleInterpreter, TurtleState};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

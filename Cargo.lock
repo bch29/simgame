@@ -1859,7 +1859,6 @@ dependencies = [
  "anyhow",
  "byteorder",
  "cgmath",
- "crossbeam",
  "directories",
  "env_logger",
  "log",
@@ -1867,8 +1866,9 @@ dependencies = [
  "rand 0.7.3",
  "serde",
  "serde_yaml",
- "simgame_core",
+ "simgame_blocks",
  "simgame_render",
+ "simgame_world",
  "simgame_worldgen",
  "smol",
  "structopt",
@@ -1876,7 +1876,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "simgame_core"
+name = "simgame_blocks"
 version = "0.1.0"
 dependencies = [
  "anyhow",
@@ -1902,9 +1902,24 @@ dependencies = [
  "raw-window-handle",
  "serde",
  "shaderc",
- "simgame_core",
+ "simgame_blocks",
+ "simgame_world",
  "wgpu",
  "zerocopy",
+]
+
+[[package]]
+name = "simgame_world"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "byteorder",
+ "cgmath",
+ "crossbeam",
+ "log",
+ "rand 0.7.3",
+ "serde",
+ "simgame_blocks",
 ]
 
 [[package]]
@@ -1916,7 +1931,8 @@ dependencies = [
  "log",
  "rand 0.7.3",
  "serde",
- "simgame_core",
+ "simgame_blocks",
+ "simgame_world",
 ]
 
 [[package]]

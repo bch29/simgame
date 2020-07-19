@@ -2,14 +2,15 @@ use std::collections::{HashMap, HashSet};
 
 use cgmath::{ElementWise, EuclideanSpace, Point3, Vector3};
 
-use simgame_core::block::{self, index_utils, UpdatedBlocksState, WorldBlockData};
-use simgame_core::util::Bounds;
-use simgame_core::{convert_point, convert_vec};
+use simgame_blocks::{
+    convert_point, convert_vec, index_utils, util::Bounds, Chunk, UpdatedBlocksState,
+    WorldBlockData,
+};
 
 use crate::buffer_util::{BufferSyncHelper, BufferSyncHelperDesc};
 use crate::stable_map::StableMap;
 
-type ActiveChunks = StableMap<Point3<i32>, block::Chunk>;
+type ActiveChunks = StableMap<Point3<i32>, Chunk>;
 
 use super::ChunkMeta;
 
@@ -227,7 +228,7 @@ impl ChunkState {
             if let Some((&point, chunk)) = opt_point {
                 self.meta_tracker.modify(point, index, active_chunks);
 
-                let chunk_data = block::blocks_to_u16(&chunk.blocks);
+                let chunk_data = simgame_blocks::blocks_to_u16(&chunk.blocks);
                 fill_block_types.seek(index * index_utils::chunk_size_total() as usize);
                 fill_block_types.advance(chunk_data);
             } else {

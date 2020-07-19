@@ -1,6 +1,7 @@
 [workspace]
 members = [
-  "core",
+  "blocks",
+  "world",
   "render",
   "worldgen",
   "simgame",

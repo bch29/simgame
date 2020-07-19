@@ -1,5 +1,9 @@
+mod controls;
+pub mod files;
+pub mod settings;
+
 use std::collections::VecDeque;
-use std::sync::{Mutex, Arc};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Result};
@@ -10,22 +14,14 @@ use winit::{
     window::{Window, WindowBuilder},
 };
 
-use simgame_core::block::BlockConfigHelper;
-use simgame_core::world::World;
-use simgame_core::{convert_point, convert_vec};
-
+use simgame_blocks::{convert_point, convert_vec, BlockConfigHelper};
 use simgame_render::resource::ResourceLoader;
 pub use simgame_render::RenderParams;
 use simgame_render::{visible_size_to_chunks, RenderState, RenderStateBuilder, ViewParams};
-
-pub mod files;
-pub mod settings;
-mod controls;
-mod world_state;
-mod background_object;
+use simgame_world::World;
 
 use settings::RenderTestParams;
-use world_state::WorldState;
+use simgame_world::{WorldState, WorldStateBuilder};
 
 pub async fn test_render<'a>(
     world: World,
@@ -137,9 +133,7 @@ fn build_window(event_loop: &EventLoop<()>, settings: &settings::VideoSettings) 
 }
 
 impl<'a> TestRenderBuilder<'a> {
-    pub async fn build(
-        self,
-    ) -> Result<TestRender> {
+    pub async fn build(self) -> Result<TestRender> {
         let window = build_window(self.event_loop, &self.test_params.video_settings)?;
 
         let physical_win_size = window.inner_size();
@@ -204,7 +198,7 @@ impl<'a> TestRenderBuilder<'a> {
 
         let world = Arc::new(Mutex::new(self.world));
 
-        let world_state = world_state::WorldStateBuilder {
+        let world_state = WorldStateBuilder {
             world: world.clone(),
             block_helper: self.block_helper.clone(),
             tree_config: self.test_params.tree.as_ref(),
@@ -270,12 +264,8 @@ impl TestRender {
                         } => match key {
                             VirtualKeyCode::Escape => *control_flow = ControlFlow::Exit,
                             VirtualKeyCode::Space => self.world_state.toggle_updates()?,
-                            VirtualKeyCode::E => {
-                                self.world_state.modify_filled_blocks(1)?
-                            }
-                            VirtualKeyCode::Q => {
-                                self.world_state.modify_filled_blocks(-1)?
-                            }
+                            VirtualKeyCode::E => self.world_state.modify_filled_blocks(1)?,
+                            VirtualKeyCode::Q => self.world_state.modify_filled_blocks(-1)?,
                             _ => {}
                         },
                         _ => {}
@@ -354,8 +344,7 @@ impl TestRender {
 
         {
             let world = self.world.lock().unwrap();
-            self.render_state
-                .update(&*world, world_diff);
+            self.render_state.update(&*world, world_diff);
         }
 
         self.render_state.render_frame()?;

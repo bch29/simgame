@@ -4,14 +4,19 @@ use anyhow::{anyhow, Result};
 use cgmath::{EuclideanSpace, Matrix4, Point3, Vector3};
 use rand::SeedableRng;
 
-use simgame_core::block::{self, index_utils, Block, BlockConfigHelper, BlockUpdater};
-use simgame_core::ray::Ray;
-use simgame_core::world::{UpdatedWorldState, World};
-use simgame_core::{convert_point, util::Bounds};
-use simgame_worldgen::primitive::{self, Primitive};
-use simgame_worldgen::tree::{TreeConfig, TreeSystem};
+use simgame_blocks::{
+    self, convert_point, index_utils,
+    primitive::{self, Primitive},
+    ray::Ray,
+    util::Bounds,
+    Block, BlockConfigHelper, BlockRaycastHit, BlockUpdater,
+};
 
-use crate::background_object::{self, BackgroundObject};
+use crate::{
+    background_object::{self, BackgroundObject},
+    tree::{TreeConfig, TreeSystem},
+    UpdatedWorldState, World,
+};
 
 pub struct WorldStateBuilder<'a> {
     pub world: Arc<Mutex<World>>,
@@ -47,7 +52,7 @@ struct Tick {
 
 #[derive(Debug, Clone)]
 enum WorldUpdateAction {
-    SpawnTree { raycast_hit: block::RaycastHit },
+    SpawnTree { raycast_hit: BlockRaycastHit },
     ModifyFilledBlocks { delta: i32 },
     ToggleUpdates,
 }
@@ -188,7 +193,7 @@ impl BackgroundState {
         Ok(())
     }
 
-    fn spawn_tree(&mut self, raycast_hit: block::RaycastHit) -> Result<()> {
+    fn spawn_tree(&mut self, raycast_hit: BlockRaycastHit) -> Result<()> {
         log::debug!(
             "Clicked on block {:?} at pos {:?} with intersection {:?}",
             raycast_hit.block,

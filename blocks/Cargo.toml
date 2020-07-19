@@ -1,5 +1,5 @@
 [package]
-name = "simgame_core"
+name = "simgame_blocks"
 version = "0.1.0"
 authors = ["Bradley Hardy"]
 edition = "2018"

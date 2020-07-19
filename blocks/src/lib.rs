@@ -1,4 +1,10 @@
 //! Types used to represent the voxel-based world.
+//!
+pub mod index_utils;
+pub mod octree;
+pub mod primitive;
+pub mod ray;
+pub mod util;
 
 use std::collections::{hash_map, HashMap, HashSet};
 use std::io::{self, Read, Write};
@@ -12,9 +18,6 @@ use serde::{Deserialize, Serialize};
 use crate::octree::Octree;
 use crate::ray::{Intersection, Ray};
 use crate::util::Bounds;
-use crate::{convert_bounds, convert_vec};
-
-pub mod index_utils;
 
 /// Represents the value of a single block in the world. The wrapped value is an index into the
 /// BlockConfig's list of BlockInfo.
@@ -50,7 +53,7 @@ pub enum FaceTexture {
     Texture {
         resource: String,
         /// The texture repeats after this many blocks
-        periodicity: u32
+        periodicity: u32,
     },
 }
 
@@ -98,7 +101,7 @@ pub struct BlockUpdater<'a> {
 }
 
 #[derive(Debug, Clone)]
-pub struct RaycastHit {
+pub struct BlockRaycastHit {
     pub block: Block,
     pub block_pos: Point3<i64>,
     pub intersection: Intersection<f64>,
@@ -164,11 +167,11 @@ impl Chunk {
         ray: &Ray<f64>,
         origin: Point3<i64>,
         _block_helper: &BlockConfigHelper,
-    ) -> Option<RaycastHit> {
+    ) -> Option<BlockRaycastHit> {
         // TODO: use space subdivision to avoid looping through every single block
         // TODO: use collision info in block config to handle blocks that are not full cubes
 
-        let mut nearest_hit: Option<RaycastHit> = None;
+        let mut nearest_hit: Option<BlockRaycastHit> = None;
 
         for z in 0..index_utils::chunk_size().z {
             for y in 0..index_utils::chunk_size().y {
@@ -184,7 +187,7 @@ impl Chunk {
                     let bounds =
                         convert_bounds!(Bounds::new(block_pos, Vector3::new(1, 1, 1)), f64);
                     let hit = match bounds.cast_ray(ray).entry() {
-                        Some(intersection) => RaycastHit {
+                        Some(intersection) => BlockRaycastHit {
                             block,
                             block_pos,
                             intersection,
@@ -358,7 +361,7 @@ impl WorldBlockData {
         &self,
         ray: &Ray<f64>,
         block_helper: &BlockConfigHelper,
-    ) -> Option<RaycastHit> {
+    ) -> Option<BlockRaycastHit> {
         let chunk_size = convert_vec!(index_utils::chunk_size(), f64);
 
         let chunk_ray = Ray {
@@ -366,7 +369,7 @@ impl WorldBlockData {
             dir: ray.dir.div_element_wise(chunk_size),
         };
 
-        let chunk_hit: RaycastHit = self
+        let chunk_hit: BlockRaycastHit = self
             .chunks
             .cast_ray(&chunk_ray, |chunk_pos, chunk| {
                 let chunk_origin =

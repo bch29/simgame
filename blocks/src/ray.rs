@@ -51,7 +51,7 @@ where
     pub fn offset(&self, offset: Vector3<T>) -> Self {
         Self {
             origin: self.origin + offset,
-            dir: self.dir
+            dir: self.dir,
         }
     }
 }
