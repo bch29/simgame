@@ -4,13 +4,11 @@ use anyhow::{anyhow, Result};
 use cgmath::{EuclideanSpace, Matrix4, Point3, Vector3};
 use rand::SeedableRng;
 
-use simgame_blocks::{
-    self, convert_point, index_utils,
-    primitive::{self, Primitive},
-    ray::Ray,
-    util::Bounds,
-    Block, BlockConfigHelper, BlockRaycastHit, BlockUpdater,
-};
+use simgame_blocks::primitive::{self, Primitive};
+use simgame_blocks::ray::{BlockRaycastHit, Ray};
+use simgame_blocks::util::Bounds;
+use simgame_blocks::{self, convert_point, index_utils};
+use simgame_blocks::{Block, BlockConfigHelper, BlockUpdater};
 
 use crate::{
     background_object::{self, BackgroundObject},

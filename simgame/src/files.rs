@@ -4,7 +4,7 @@ use anyhow::{anyhow, bail, Context, Result};
 use directories::UserDirs;
 use serde::{Deserialize, Serialize};
 
-use simgame_blocks::{util::Bounds, WorldBlockData};
+use simgame_blocks::{util::Bounds, BlockData};
 
 use crate::settings::{CoreSettings, Settings};
 
@@ -110,7 +110,7 @@ impl FileContext {
         res
     }
 
-    pub fn save_world_blocks(&self, save_name: &str, blocks: &WorldBlockData) -> Result<()> {
+    pub fn save_world_blocks(&self, save_name: &str, blocks: &BlockData) -> Result<()> {
         let save_dir = self.get_save_dir(save_name);
         if !save_dir.is_dir() {
             println!("Creating save directory at {}", save_dir.to_string_lossy());
@@ -158,7 +158,7 @@ impl FileContext {
         Ok(())
     }
 
-    pub fn load_debug_world_blocks() -> Result<WorldBlockData> {
+    pub fn load_debug_world_blocks() -> Result<BlockData> {
         let meta_bytes = include_bytes!("data/debug_saves/small/world_meta.yaml");
         let block_data_bytes = include_bytes!("data/debug_saves/small/world_block_data.dat");
 
@@ -167,7 +167,7 @@ impl FileContext {
         Ok(result)
     }
 
-    pub fn load_world_blocks(&self, save_name: &str) -> Result<WorldBlockData> {
+    pub fn load_world_blocks(&self, save_name: &str) -> Result<BlockData> {
         let save_dir = self.get_save_dir(save_name);
         if !save_dir.is_dir() {
             return Err(anyhow!(
@@ -220,14 +220,14 @@ impl FileContext {
         Ok(serde_yaml::from_reader(file).context("Parsing world meta file for saved game")?)
     }
 
-    pub fn load_world_blocks_data<R>(meta: &WorldMeta, file: R) -> Result<WorldBlockData>
+    pub fn load_world_blocks_data<R>(meta: &WorldMeta, file: R) -> Result<BlockData>
     where
         R: std::io::Read,
     {
         let mut decompressed =
             lz4::Decoder::new(file).context("Initializing decoder for block data file")?;
 
-        let mut world_blocks = WorldBlockData::empty(meta.world_bounds);
+        let mut world_blocks = BlockData::empty(meta.world_bounds);
         world_blocks
             .deserialize_blocks(&mut decompressed)
             .context("Deserializing block data")?;

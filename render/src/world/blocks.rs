@@ -8,7 +8,7 @@ use zerocopy::{AsBytes, FromBytes};
 use simgame_blocks::{
     convert_point, convert_vec, index_utils,
     util::{Bounds, DivUp},
-    BlockConfigHelper, UpdatedBlocksState, WorldBlockData,
+    BlockConfigHelper, UpdatedBlocksState, BlockData,
 };
 
 use crate::buffer_util::{
@@ -24,7 +24,7 @@ use chunk_state::ChunkState;
 pub(crate) struct BlocksRenderStateBuilder<'a> {
     pub depth_texture: &'a wgpu::Texture,
     pub view_state: &'a world::ViewState,
-    pub blocks: &'a WorldBlockData,
+    pub blocks: &'a BlockData,
     pub max_visible_chunks: usize,
     pub block_config: &'a BlockConfigHelper,
 }
@@ -530,7 +530,7 @@ impl BlocksRenderState {
 
     pub fn update(
         &mut self,
-        blocks: &WorldBlockData,
+        blocks: &BlockData,
         diff: &UpdatedBlocksState,
         view_state: &world::ViewState,
     ) {

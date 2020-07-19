@@ -4,7 +4,7 @@ use log::info;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 
-use simgame_blocks::{util::Bounds, Block, BlockConfigHelper, BlockUpdater, WorldBlockData};
+use simgame_blocks::{util::Bounds, Block, BlockConfigHelper, BlockUpdater, BlockData};
 use simgame_world::{tree, UpdatedWorldState};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -17,14 +17,14 @@ pub struct WorldGenerator<'a, R> {
     config: &'a GenerateWorldConfig,
     block_helper: &'a BlockConfigHelper,
     bounds: Bounds<i64>,
-    blocks: WorldBlockData,
+    blocks: BlockData,
     rng: &'a mut R,
 }
 
 pub fn generate_world(
     config: &GenerateWorldConfig,
     block_helper: &BlockConfigHelper,
-) -> Result<WorldBlockData> {
+) -> Result<BlockData> {
     info!("Creating empty world: {:?}", config);
 
     let mut rng = rand::thread_rng();
@@ -46,7 +46,7 @@ impl<'a, R> WorldGenerator<'a, R> {
             Bounds::new(origin, config.size)
         };
 
-        let blocks = WorldBlockData::empty(bounds);
+        let blocks = BlockData::empty(bounds);
 
         Self {
             config,
@@ -66,7 +66,7 @@ impl<'a, R> WorldGenerator<'a, R> {
         Ok(())
     }
 
-    pub fn finish(self) -> WorldBlockData {
+    pub fn finish(self) -> BlockData {
         self.blocks
     }
 

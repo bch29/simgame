@@ -4,7 +4,7 @@ use cgmath::{ElementWise, EuclideanSpace, Point3, Vector3};
 
 use simgame_blocks::{
     convert_point, convert_vec, index_utils, util::Bounds, Chunk, UpdatedBlocksState,
-    WorldBlockData,
+    BlockData,
 };
 
 use crate::buffer_util::{BufferSyncHelper, BufferSyncHelperDesc};
@@ -101,7 +101,7 @@ impl ChunkState {
         }
     }
 
-    fn update_box_chunks(&mut self, view_box: Bounds<i32>, blocks: &WorldBlockData) {
+    fn update_box_chunks(&mut self, view_box: Bounds<i32>, blocks: &BlockData) {
         assert!(self.active_chunks.len() == 0);
         let bounds = Bounds::new(
             convert_point!(view_box.origin(), i64),
@@ -130,7 +130,7 @@ impl ChunkState {
     pub fn update_view_box(
         &mut self,
         active_view_box: Bounds<i32>,
-        blocks: &WorldBlockData,
+        blocks: &BlockData,
     ) -> bool {
         let old_view_box = self.active_view_box;
         self.active_view_box = Some(active_view_box);
@@ -184,7 +184,7 @@ impl ChunkState {
         true
     }
 
-    pub fn apply_chunk_diff(&mut self, blocks: &WorldBlockData, diff: &UpdatedBlocksState) {
+    pub fn apply_chunk_diff(&mut self, blocks: &BlockData, diff: &UpdatedBlocksState) {
         let active_chunk_box = match self.active_view_box {
             Some(active_view_box) => super::view_box_to_chunks(active_view_box),
             None => return,

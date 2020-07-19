@@ -4,13 +4,13 @@ pub mod tree;
 pub mod turtle;
 mod world_state;
 
-use simgame_blocks::{UpdatedBlocksState, WorldBlockData};
+use simgame_blocks::{UpdatedBlocksState, BlockData};
 
 pub use world_state::{WorldState, WorldStateBuilder};
 
 #[derive(Debug)]
 pub struct World {
-    pub blocks: WorldBlockData,
+    pub blocks: BlockData,
 }
 
 #[derive(Debug)]
@@ -19,7 +19,7 @@ pub struct UpdatedWorldState {
 }
 
 impl World {
-    pub fn new(blocks: WorldBlockData) -> World {
+    pub fn new(blocks: BlockData) -> World {
         World { blocks }
     }
 }
