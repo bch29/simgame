@@ -2,8 +2,8 @@ use cgmath::{
     Angle, Basis3, Deg, InnerSpace, Point3, Rad, Rotation, Rotation3, Vector2, Vector3, Zero,
 };
 
-use simgame_blocks::{convert_point, convert_vec};
 use simgame_render::visible_size_to_chunks;
+use simgame_util::{convert_point, convert_vec};
 
 use crate::settings::RenderTestParams;
 

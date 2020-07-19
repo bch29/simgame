@@ -4,8 +4,10 @@ use log::info;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 
-use simgame_blocks::{util::Bounds, Block, BlockConfigHelper, BlockUpdater, BlockData};
-use simgame_world::{tree, UpdatedWorldState};
+use simgame_blocks::{Block, BlockConfigHelper, BlockData, BlockUpdater};
+use simgame_util::Bounds;
+
+use crate::{tree, UpdatedWorldState};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GenerateWorldConfig {

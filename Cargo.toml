@@ -1,9 +1,10 @@
 [workspace]
 members = [
+  "util",
   "blocks",
+  "types",
   "world",
   "render",
-  "worldgen",
   "simgame",
 ]
 

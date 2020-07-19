@@ -2,10 +2,8 @@ use std::collections::{HashMap, HashSet};
 
 use cgmath::{ElementWise, EuclideanSpace, Point3, Vector3};
 
-use simgame_blocks::{
-    convert_point, convert_vec, index_utils, util::Bounds, Chunk, UpdatedBlocksState,
-    BlockData,
-};
+use simgame_blocks::{index_utils, BlockData, Chunk, UpdatedBlocksState};
+use simgame_util::{convert_point, convert_vec, Bounds};
 
 use crate::buffer_util::{BufferSyncHelper, BufferSyncHelperDesc};
 use crate::stable_map::StableMap;
@@ -127,11 +125,7 @@ impl ChunkState {
         true
     }
 
-    pub fn update_view_box(
-        &mut self,
-        active_view_box: Bounds<i32>,
-        blocks: &BlockData,
-    ) -> bool {
+    pub fn update_view_box(&mut self, active_view_box: Bounds<i32>, blocks: &BlockData) -> bool {
         let old_view_box = self.active_view_box;
         self.active_view_box = Some(active_view_box);
 

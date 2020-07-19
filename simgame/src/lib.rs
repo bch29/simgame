@@ -14,10 +14,11 @@ use winit::{
     window::{Window, WindowBuilder},
 };
 
-use simgame_blocks::{convert_point, convert_vec, BlockConfigHelper};
+use simgame_blocks::BlockConfigHelper;
 use simgame_render::resource::ResourceLoader;
 pub use simgame_render::RenderParams;
 use simgame_render::{visible_size_to_chunks, RenderState, RenderStateBuilder, ViewParams};
+use simgame_util::{convert_point, convert_vec};
 use simgame_world::World;
 
 use settings::RenderTestParams;

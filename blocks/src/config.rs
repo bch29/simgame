@@ -5,7 +5,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::Block;
 
-
 /// A block category.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[repr(transparent)]

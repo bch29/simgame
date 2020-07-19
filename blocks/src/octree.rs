@@ -4,9 +4,8 @@ use cgmath::{EuclideanSpace, InnerSpace, Point3, Vector3};
 use serde::{Deserialize, Serialize};
 use std::io::{self, Read, Write};
 
-use crate::ray::{ConvexRaycastResult, Ray};
-use crate::util::{Bounds, OrdFloat};
-use crate::{convert_bounds, convert_vec};
+use simgame_util::ray::{ConvexRaycastResult, Ray};
+use simgame_util::{convert_bounds, convert_vec, Bounds, OrdFloat};
 
 /// A tree structure providing a sparse representation of values in a 3D grid.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]

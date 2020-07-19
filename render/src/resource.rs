@@ -94,8 +94,6 @@ impl ResourceLoader {
             _ => {}
         }
 
-        std::fs::create_dir_all(&config.artifact_root)?;
-
         let mut root = data_root.to_path_buf();
         root.push(config.root.clone());
 

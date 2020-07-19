@@ -3,8 +3,9 @@ mod blocks;
 use anyhow::Result;
 use cgmath::{Deg, InnerSpace, Matrix4, Point3, SquareMatrix, Vector2, Vector3};
 
-use simgame_blocks::{convert_point, convert_vec, util::Bounds, BlockConfigHelper};
-use simgame_world::{UpdatedWorldState, World};
+use simgame_blocks::BlockConfigHelper;
+use simgame_types::{UpdatedWorldState, World};
+use simgame_util::{convert_point, convert_vec, Bounds};
 
 pub use blocks::visible_size_to_chunks;
 

@@ -1,6 +1,8 @@
 use cgmath::{InnerSpace, Matrix4, Point3, Transform, Vector3};
 
-use crate::{convert_point, index_utils, util::Bounds, Block, BlockUpdater};
+use simgame_util::{convert_point, Bounds};
+
+use crate::{index_utils, Block, BlockUpdater};
 
 pub trait Primitive {
     /// Returns true if the given point is within the shape.

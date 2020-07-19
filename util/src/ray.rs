@@ -1,7 +1,5 @@
 use cgmath::{BaseFloat, BaseNum, InnerSpace, Point3, Vector3};
 
-use crate::core::Block;
-
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Ray<T> {
     pub origin: Point3<T>,
@@ -38,13 +36,6 @@ pub enum ConvexRaycastResult<T> {
     },
     /// The ray clip a corner or edge of the object, intersecting in one place.
     Clip { clip: Intersection<T> },
-}
-
-#[derive(Debug, Clone)]
-pub struct BlockRaycastHit {
-    pub block: Block,
-    pub block_pos: Point3<i64>,
-    pub intersection: Intersection<f64>,
 }
 
 impl<T> Ray<T>

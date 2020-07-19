@@ -5,10 +5,9 @@ use cgmath::{EuclideanSpace, Matrix4, Point3, Vector3};
 use rand::SeedableRng;
 
 use simgame_blocks::primitive::{self, Primitive};
-use simgame_blocks::ray::{BlockRaycastHit, Ray};
-use simgame_blocks::util::Bounds;
-use simgame_blocks::{self, convert_point, index_utils};
-use simgame_blocks::{Block, BlockConfigHelper, BlockUpdater};
+use simgame_blocks::{index_utils, Block, BlockConfigHelper, BlockRaycastHit, BlockUpdater};
+use simgame_util::ray::Ray;
+use simgame_util::{convert_point, Bounds};
 
 use crate::{
     background_object::{self, BackgroundObject},
@@ -122,20 +121,20 @@ impl WorldState {
         self.send_action(WorldUpdateAction::ToggleUpdates)
     }
 
-    fn send_action(&mut self, action: WorldUpdateAction) -> Result<()> {
-        let connection = self
-            .connection
-            .as_mut()
-            .ok_or_else(|| anyhow!("sending action on a closed connection: {:?}", action))?;
-        connection.send_user(action)
-    }
-
     pub fn world_diff(&mut self) -> Result<&mut UpdatedWorldState> {
         let connection = self
             .connection
             .as_mut()
             .ok_or_else(|| anyhow!("collecting diffs on a closed connection"))?;
         connection.current_response()
+    }
+
+    fn send_action(&mut self, action: WorldUpdateAction) -> Result<()> {
+        let connection = self
+            .connection
+            .as_mut()
+            .ok_or_else(|| anyhow!("sending action on a closed connection: {:?}", action))?;
+        connection.send_user(action)
     }
 }
 
@@ -154,7 +153,7 @@ impl BackgroundState {
     }
 
     fn modify_filled_blocks(&mut self, delta: i32) -> Result<()> {
-        self.filled_blocks += delta * 8;
+        self.filled_blocks += delta * 6;
         if self.filled_blocks < 1 {
             self.filled_blocks = 1
         } else if self.filled_blocks >= index_utils::chunk_size_total() as i32 {

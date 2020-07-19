@@ -7,8 +7,7 @@ use structopt::StructOpt;
 use simgame::files::FileContext;
 use simgame_blocks::BlockConfigHelper;
 use simgame_render::resource::{self, ResourceLoader};
-use simgame_world::World;
-use simgame_worldgen as worldgen;
+use simgame_world::{worldgen, World};
 
 #[derive(Debug, StructOpt)]
 struct Opts {

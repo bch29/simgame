@@ -3,11 +3,12 @@ use std::slice;
 use cgmath::{EuclideanSpace, Point3, Vector3};
 use serde::{Deserialize, Serialize};
 
+use simgame_util::convert_bounds;
+use simgame_util::ray::{Intersection, Ray};
+use simgame_util::Bounds;
+
 use crate::config::BlockConfigHelper;
-use crate::convert_bounds;
 use crate::index_utils;
-use crate::ray::{BlockRaycastHit, Ray};
-use crate::util::Bounds;
 
 /// Represents the value of a single block in the world. The wrapped value is an index into the
 /// BlockConfig's list of BlockInfo.
@@ -37,6 +38,13 @@ pub struct Chunk {
      v 20 21 22 23
      */
     pub blocks: [Block; index_utils::chunk_size_total() as usize],
+}
+
+#[derive(Debug, Clone)]
+pub struct BlockRaycastHit {
+    pub block: Block,
+    pub block_pos: Point3<i64>,
+    pub intersection: Intersection<f64>,
 }
 
 impl Block {

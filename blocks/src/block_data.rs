@@ -4,13 +4,14 @@ use anyhow::Result;
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use cgmath::{ElementWise, EuclideanSpace, Point3};
 
+use simgame_util::convert_vec;
+use simgame_util::ray::Ray;
+use simgame_util::Bounds;
+
 use crate::config::BlockConfigHelper;
-use crate::core::{Block, blocks_to_u16_mut};
+use crate::core::{blocks_to_u16_mut, Block, BlockRaycastHit, Chunk};
 use crate::index_utils;
 use crate::octree::Octree;
-use crate::ray::{BlockRaycastHit, Ray};
-use crate::util::Bounds;
-use crate::{convert_vec, Chunk};
 
 /// Stores the world's blocks, but not other things like entities.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -274,7 +275,7 @@ fn bounds_to_octree_height(min_bounds: Bounds<i64>) -> i64 {
 mod tests {
     use cgmath::{ElementWise, EuclideanSpace, Point3, Vector3};
 
-    use crate::util::Bounds;
+    use simgame_util::Bounds;
 
     use super::*;
 

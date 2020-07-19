@@ -4,7 +4,8 @@ use anyhow::{anyhow, bail, Context, Result};
 use directories::UserDirs;
 use serde::{Deserialize, Serialize};
 
-use simgame_blocks::{util::Bounds, BlockData};
+use simgame_blocks::BlockData;
+use simgame_util::Bounds;
 
 use crate::settings::{CoreSettings, Settings};
 

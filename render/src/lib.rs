@@ -11,7 +11,7 @@ use cgmath::Vector2;
 use raw_window_handle::HasRawWindowHandle;
 
 use simgame_blocks::BlockConfigHelper;
-use simgame_world::{UpdatedWorldState, World};
+use simgame_types::{UpdatedWorldState, World};
 
 pub use world::{visible_size_to_chunks, ViewParams};
 

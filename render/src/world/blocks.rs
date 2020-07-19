@@ -5,11 +5,8 @@ use anyhow::Result;
 use cgmath::{Point3, Vector3};
 use zerocopy::{AsBytes, FromBytes};
 
-use simgame_blocks::{
-    convert_point, convert_vec, index_utils,
-    util::{Bounds, DivUp},
-    BlockConfigHelper, UpdatedBlocksState, BlockData,
-};
+use simgame_blocks::{index_utils, BlockConfigHelper, BlockData, UpdatedBlocksState};
+use simgame_util::{convert_point, convert_vec, Bounds, DivUp};
 
 use crate::buffer_util::{
     BufferSyncHelperDesc, BufferSyncable, BufferSyncedData, FillBuffer, InstancedBuffer,

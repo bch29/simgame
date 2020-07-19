@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use anyhow::{anyhow, bail, Result};
 use zerocopy::AsBytes;
 
-use simgame_blocks::{BlockConfigHelper, config as block};
+use simgame_blocks::{config as block, BlockConfigHelper};
 
 use crate::buffer_util::{InstancedBuffer, InstancedBufferDesc};
 use crate::mesh::cube::Cube;

@@ -8,10 +8,10 @@ edition = "2018"
 default = ["simgame_render/shader-compiler"]
 
 [dependencies]
+simgame_util = { path = "../util/" }
 simgame_blocks = { path = "../blocks/" }
 simgame_world = { path = "../world/" }
 simgame_render = { path = "../render/" }
-simgame_worldgen = { path = "../worldgen/" }
 cgmath = "0.17"
 structopt = "*"
 env_logger = "0.7"
