@@ -59,28 +59,28 @@ resources:
       kind: Image
     # World blocks shaders
     - name: shader/blocks/compute
-      relative_path: shader/blocks_compute.glsl
+      relative_path: shader/blocks/compute.glsl
       kind: 
         Shader:
           kind: Compute
     - name: shader/blocks/vertex
-      relative_path: shader/blocks_vertex.glsl
+      relative_path: shader/blocks/vertex.glsl
       kind: 
         Shader:
           kind: Vertex
     - name: shader/blocks/fragment
-      relative_path: shader/blocks_fragment.glsl
+      relative_path: shader/blocks/fragment.glsl
       kind: 
         Shader:
           kind: Fragment
     # GUI shaders
     - name: shader/gui/vertex
-      relative_path: shader/gui_vertex.glsl
+      relative_path: shader/gui/vertex.glsl
       kind: 
         Shader:
           kind: Vertex
     - name: shader/gui/fragment
-      relative_path: shader/gui_fragment.glsl
+      relative_path: shader/gui/fragment.glsl
       kind: 
         Shader:
           kind: Fragment

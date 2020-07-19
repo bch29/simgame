@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::env;
 use std::path::PathBuf;
 
@@ -29,13 +30,10 @@ struct RenderWorldOpts {
     resource_options: ResourceOptions,
 }
 
-#[derive(Debug, StructOpt)]
+#[derive(Debug, Clone, StructOpt)]
 struct ResourceOptions {
     #[structopt(long)]
-    force_recompile_all_shaders: bool,
-
-    #[structopt(long)]
-    force_recompile_shaders: Vec<String>,
+    recompile_shaders: Vec<String>,
 }
 
 #[derive(Debug, StructOpt)]
@@ -84,27 +82,28 @@ fn run(opt: Opts) -> Result<()> {
 async fn run_render_world(ctx: &FileContext, options: &RenderWorldOpts) -> Result<()> {
     let settings = ctx.load_settings()?;
 
-    let force_recompile_shaders = if options.resource_options.force_recompile_all_shaders {
-        resource::ForceRecompileOption::All
-    } else if !options.resource_options.force_recompile_shaders.is_empty() {
-        resource::ForceRecompileOption::Subset(
-            options
-                .resource_options
-                .force_recompile_shaders
-                .iter()
-                .cloned()
-                .collect(),
-        )
-    } else {
-        resource::ForceRecompileOption::None
+    let resource_options = {
+        let recompile_shaders: HashSet<_> = options
+            .resource_options
+            .recompile_shaders
+            .iter()
+            .cloned()
+            .collect();
+
+        let recompile_option = if recompile_shaders.is_empty() {
+            resource::RecompileOption::None
+        } else if recompile_shaders.contains("all") {
+            resource::RecompileOption::All
+        } else {
+            resource::RecompileOption::Subset(recompile_shaders)
+        };
+        resource::ResourceOptions { recompile_option }
     };
 
     let resource_loader = ResourceLoader::new(
         ctx.data_root.as_path(),
         ctx.core_settings.resources.clone(),
-        resource::ResourceOptions {
-            force_recompile_shaders,
-        },
+        resource_options,
     )?;
 
     let blocks = match &options.save_name {

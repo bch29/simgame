@@ -21,11 +21,11 @@ pub struct ResourceLoader {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ResourceOptions {
-    pub force_recompile_shaders: ForceRecompileOption,
+    pub recompile_option: RecompileOption,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum ForceRecompileOption {
+pub enum RecompileOption {
     None,
     All,
     Subset(HashSet<String>),
@@ -70,8 +70,8 @@ impl ResourceLoader {
             })
             .collect::<Result<_>>()?;
 
-        match &options.force_recompile_shaders {
-            ForceRecompileOption::Subset(subset) => {
+        match &options.recompile_option {
+            RecompileOption::Subset(subset) => {
                 let all_shaders: HashSet<String> = config
                     .resources
                     .iter()
@@ -177,10 +177,10 @@ impl ResourceLoader {
             Ok(())
         };
 
-        let force_recompile = match &self.options.force_recompile_shaders {
-            ForceRecompileOption::All => true,
-            ForceRecompileOption::Subset(subset) => subset.contains(name),
-            ForceRecompileOption::None => false,
+        let force_recompile = match &self.options.recompile_option {
+            RecompileOption::All => true,
+            RecompileOption::Subset(subset) => subset.contains(name),
+            RecompileOption::None => false,
         };
 
         if force_recompile {
