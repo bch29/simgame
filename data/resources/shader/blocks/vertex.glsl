@@ -121,6 +121,22 @@ mat4 fullModelMatrix(ivec4 blockAddr, vec3 chunkOffset) {
   return u_Model * translation_matrix(offset.xyz) * rescale;
 }
 
+vec2 signedMod(vec2 v, float divisor) {
+  vec2 result;
+  if (v.x >= 0) {
+    result.x = mod(v.x, divisor);
+  } else {
+    result.x = divisor - mod(-v.x, divisor);
+  }
+  if (v.y >= 0) {
+    result.y = mod(v.y, divisor);
+  } else {
+    result.y = divisor - mod(-v.y, divisor);
+  }
+
+  return result;
+}
+
 /// Calculates which part of the face texture to use.
 vec2 getTexOrigin(float periodicity, vec3 blockPos, vec3 faceNormal) {
   vec3 unitX = vec3(1., 0., 0.);
@@ -130,15 +146,17 @@ vec2 getTexOrigin(float periodicity, vec3 blockPos, vec3 faceNormal) {
   vec3 unitU; // texture U axis, in terms of world coordinates
   vec3 unitV; // texture V axis, in terms of world coordinates
 
+  vec2 uvOffset = vec2(0., 0.);
+
   if (faceNormal.x > 0.1 || faceNormal.x < -0.1) {
     unitU = unitY;
-    unitV = unitZ * faceNormal.x;
+    unitV = unitZ;
   } else if (faceNormal.y > 0.1 || faceNormal.y < -0.1) {
     unitU = -unitX;
-    unitV = unitZ * faceNormal.y;
+    unitV = unitZ;
   } else {
     unitU = unitX;
-    unitV = unitY * faceNormal.z;
+    unitV = unitY;
   }
 
   // project world coordinates onto texture coordinates
@@ -148,9 +166,7 @@ vec2 getTexOrigin(float periodicity, vec3 blockPos, vec3 faceNormal) {
       dot(blockPos - planeOrigin, unitV));
 
   // wrap based on periodicity and scale down to [0, 1]
-  return vec2(
-      mod(planeOffset.x, periodicity),
-      mod(planeOffset.y, periodicity)) / periodicity;
+  return mod(planeOffset + uvOffset, periodicity) / periodicity;
 }
 
 // Based on shader inputs, decode and look up actual attributes for the vertex that we are to

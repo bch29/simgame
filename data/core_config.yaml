@@ -27,14 +27,14 @@ block_config:
       speed_modifier: 0.8
       texture:
         Uniform: {Texture: {resource: "tex/block/dirt", periodicity: 2}}
-    # - name: Grass
-    #   category: dirt
-    #   speed_modifier: 0.8
-    #   texture: "tex/block/dirt"
-    #     NonuniformTex:
-    #       top: "tex/block/grass_top"
-    #       side: "tex/block/grass_side"
-    #       bottom: "tex/block/dirt"
+    - name: Grass
+      category: dirt
+      speed_modifier: 0.8
+      texture:
+        Nonuniform:
+          top: {Texture: {resource: "tex/block/grass_top", periodicity: 2}}
+          bottom: {Texture: {resource: "tex/block/dirt", periodicity: 2}}
+          side: {Texture: {resource: "tex/block/grass_side", periodicity: 2}}
 
 resources:
   root: ./resources
@@ -56,6 +56,12 @@ resources:
       kind: Image
     - name: tex/block/dirt
       relative_path: tex/block/dirt.png
+      kind: Image
+    - name: tex/block/grass_top
+      relative_path: tex/block/grass_top.png
+      kind: Image
+    - name: tex/block/grass_side
+      relative_path: tex/block/grass_side.png
       kind: Image
     # World blocks shaders
     - name: shader/blocks/compute

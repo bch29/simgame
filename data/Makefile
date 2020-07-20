@@ -2,7 +2,7 @@
 
 gimp = gimp
 
-block_tex_names = rock.png leaf.png wood.png dirt.png
+block_tex_names = rock.png leaf.png wood.png dirt.png grass_top.png grass_side.png
 block_textures = $(patsubst %,resources/tex/block/%,$(block_tex_names))
 
 .PHONY: default

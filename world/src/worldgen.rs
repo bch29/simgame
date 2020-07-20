@@ -105,6 +105,11 @@ impl<'a, R> WorldGenerator<'a, R> {
             .block_by_name("Dirt")
             .ok_or_else(|| anyhow!("Missing block config for Dirt"))?
             .0;
+        let grass_block = self
+            .block_helper
+            .block_by_name("Grass")
+            .ok_or_else(|| anyhow!("Missing block config for Grass"))?
+            .0;
 
         info!("Bounds are {:?}", self.bounds);
         self.blocks
@@ -129,7 +134,9 @@ impl<'a, R> WorldGenerator<'a, R> {
 
                 let block = if p.z > height_here {
                     Block::air()
-                } else if p.z > height_here - 2. {
+                } else if p.z > height_here - 1. {
+                    grass_block
+                } else if p.z > height_here - 4. {
                     dirt_block
                 } else {
                     rock_block
