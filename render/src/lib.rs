@@ -6,6 +6,8 @@ pub mod shaders;
 mod stable_map;
 mod world;
 
+use std::time::Instant;
+
 use anyhow::{anyhow, bail, Result};
 use cgmath::Vector2;
 use raw_window_handle::HasRawWindowHandle;
@@ -198,9 +200,13 @@ impl RenderState {
         self.world_render_state.render_frame(&self.ctx, &mut render);
         self.gui_render_state.render_frame(&self.ctx, &mut render);
 
+        let ts_begin = Instant::now();
         self.ctx
             .queue
             .submit(std::iter::once(render.encoder.finish()));
+        let ts_submit = Instant::now();
+
+        metrics::timing!("render.submit", ts_submit.duration_since(ts_begin));
 
         Ok(())
     }

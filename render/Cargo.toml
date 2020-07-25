@@ -21,6 +21,7 @@ rand = "0.7"
 image = "0.23"
 shaderc = { version = "0.6", optional = true }
 byteorder = "*"
+metrics = "0.12"
 
 [dependencies.wgpu]
 package = "wgpu"

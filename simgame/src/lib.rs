@@ -2,7 +2,6 @@ mod controls;
 pub mod files;
 pub mod settings;
 
-use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -30,6 +29,7 @@ pub async fn test_render<'a>(
     render_params: RenderParams<'a>,
     resource_loader: ResourceLoader,
     block_helper: BlockConfigHelper,
+    metrics_controller: metrics_runtime::Controller,
 ) -> Result<()> {
     let event_loop = EventLoop::new();
 
@@ -40,6 +40,7 @@ pub async fn test_render<'a>(
         render_params,
         resource_loader,
         block_helper,
+        metrics_controller,
     }
     .build()
     .await?;
@@ -53,6 +54,7 @@ pub struct TestRenderBuilder<'a> {
     render_params: RenderParams<'a>,
     resource_loader: ResourceLoader,
     block_helper: BlockConfigHelper,
+    metrics_controller: metrics_runtime::Controller,
 }
 
 pub struct TestRender {
@@ -69,18 +71,28 @@ pub struct TestRender {
 }
 
 struct TimingParams {
-    window_len: usize,
+    log_interval: Option<Duration>,
     tick_size: Duration,
     render_interval: Option<Duration>,
 }
 
+type MetricsObserver = <metrics_runtime::observers::YamlBuilder as metrics_core::Builder>::Output;
+
+struct EventTracker {
+    metrics_key: Option<metrics::Key>,
+    prev_event: Option<Instant>,
+}
+
 struct TimeTracker {
     params: TimingParams,
-    samples: VecDeque<Duration>,
+
+    render_event: EventTracker,
+    log_event: EventTracker,
+
     start_time: Instant,
-    prev_sample_time: Instant,
     total_ticks: i64,
-    prev_render_time: Instant,
+    metrics_controller: metrics_runtime::Controller,
+    metrics_observer: MetricsObserver,
 }
 
 fn build_window(event_loop: &EventLoop<()>, settings: &settings::VideoSettings) -> Result<Window> {
@@ -183,15 +195,20 @@ impl<'a> TestRenderBuilder<'a> {
 
         let control_state = controls::ControlState::new(&self.test_params);
 
+        use metrics_core::Builder;
+        let metrics_observer = metrics_runtime::observers::YamlBuilder::new().build();
+
         let time_tracker = TimeTracker::new(
             TimingParams {
-                window_len: 30,
+                log_interval: Some(Duration::from_secs(5)),
                 tick_size: Duration::from_millis(self.test_params.game_step_millis),
                 render_interval: self
                     .test_params
                     .fixed_refresh_rate
                     .map(|rate| Duration::from_millis(1000 / rate)),
             },
+            metrics_observer,
+            self.metrics_controller,
             Instant::now(),
         );
 
@@ -325,6 +342,10 @@ impl TestRender {
             self.tick(now, elapsed)?;
         }
 
+        if *control_flow == ControlFlow::Exit {
+            log::info!("Final metrics: {}", self.time_tracker.drain_metrics());
+        }
+
         Ok(())
     }
 
@@ -350,13 +371,6 @@ impl TestRender {
 
         self.render_state.render_frame()?;
         world_diff.clear();
-        self.time_tracker.sample(Instant::now());
-
-        log::debug!(
-            "Frame rate: {}/{}",
-            self.time_tracker.min_fps(),
-            self.time_tracker.mean_fps()
-        );
 
         Ok(())
     }
@@ -379,21 +393,63 @@ impl TestRender {
     }
 }
 
+impl EventTracker {
+    fn check_ready(&mut self, now: Instant, period: Duration) -> bool {
+        let prev_event = match &mut self.prev_event {
+            None => {
+                self.prev_event = Some(now);
+                return true;
+            }
+            Some(prev_event) => prev_event,
+        };
+
+        let elapsed = now.duration_since(*prev_event);
+        let ready = elapsed >= period;
+        if ready {
+            *prev_event = now;
+            if let Some(metrics_key) = &self.metrics_key {
+                metrics::recorder()
+                    .record_histogram(metrics_key.clone(), elapsed.as_nanos() as u64);
+            }
+        }
+
+        ready
+    }
+}
+
 impl TimeTracker {
-    pub fn new(params: TimingParams, now: Instant) -> Self {
+    pub fn new(
+        params: TimingParams,
+        metrics_observer: MetricsObserver,
+        metrics_controller: metrics_runtime::Controller,
+        now: Instant,
+    ) -> Self {
         Self {
-            samples: VecDeque::with_capacity(params.window_len),
             start_time: now,
-            prev_sample_time: now,
+            render_event: EventTracker {
+                metrics_key: Some(metrics::Key::from_name("simgame.frame_interval")),
+                prev_event: None,
+            },
+            log_event: EventTracker {
+                metrics_key: None,
+                prev_event: None,
+            },
             total_ticks: 0,
-            prev_render_time: now,
             params,
+            metrics_controller,
+            metrics_observer,
         }
     }
 
     /// Advance the TimeTracker forward to a new instant. Returns an iterator over each tick since
     /// the previous call to tick().
     pub fn tick(&mut self, now: Instant) -> impl Iterator<Item = (Instant, Duration)> {
+        if let Some(log_interval) = self.params.log_interval {
+            if self.log_event.check_ready(now, log_interval) {
+                log::info!("{}", self.drain_metrics());
+            }
+        }
+
         let old_total_ticks = self.total_ticks;
         self.total_ticks = (now.duration_since(self.start_time).as_secs_f64()
             / self.params.tick_size.as_secs_f64())
@@ -408,38 +464,18 @@ impl TimeTracker {
         })
     }
 
-    pub fn sample(&mut self, now: Instant) {
-        let elapsed = now.duration_since(self.prev_sample_time);
-        while self.samples.len() >= self.params.window_len {
-            self.samples.pop_front();
-        }
-        self.samples.push_back(elapsed);
-        self.prev_sample_time = now;
-    }
-
     pub fn check_render(&mut self, now: Instant) -> bool {
-        if let Some(render_interval) = self.params.render_interval {
-            if now.duration_since(self.prev_render_time) > render_interval {
-                self.prev_render_time = now;
-                return true;
-            }
-        } else {
-            self.prev_render_time = now;
-            return true;
-        }
-
-        false
+        let render_interval = self
+            .params
+            .render_interval
+            .unwrap_or(Duration::from_secs(0));
+        self.render_event.check_ready(now, render_interval)
     }
 
-    pub fn mean_fps(&self) -> f64 {
-        let elapsed_total: f64 = self.samples.iter().map(|d| d.as_secs_f64()).sum();
-        let elapsed_mean = elapsed_total / self.samples.len() as f64;
-        1. / elapsed_mean
-    }
-
-    pub fn min_fps(&self) -> f64 {
-        let elapsed_max: f64 = self.samples.iter().max().unwrap().as_secs_f64();
-        1. / elapsed_max
+    pub fn drain_metrics(&mut self) -> String {
+        use metrics_core::{Drain, Observe};
+        self.metrics_controller.observe(&mut self.metrics_observer);
+        self.metrics_observer.drain()
     }
 }
 

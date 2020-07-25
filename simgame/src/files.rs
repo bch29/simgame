@@ -24,6 +24,8 @@ pub struct FileContext {
     /// Root directory for game data files, which are not meant to change except in
     /// development or modding.
     pub data_root: PathBuf,
+
+    pub metrics_controller: metrics_runtime::Controller,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -32,19 +34,29 @@ pub struct WorldMeta {
 }
 
 impl FileContext {
-    pub fn new(core_settings: CoreSettings, data_root: PathBuf, user_data_root: PathBuf) -> Self {
+    pub fn new(
+        core_settings: CoreSettings,
+        data_root: PathBuf,
+        user_data_root: PathBuf,
+    ) -> Result<Self> {
         let mut save_root = user_data_root.clone();
         save_root.push(SAVE_DIR_NAME);
 
         let mut settings_root = user_data_root;
         settings_root.push(SETTINGS_DIR_NAME);
 
-        FileContext {
+        let metrics_receiver = metrics_runtime::Receiver::builder().build()?;
+        let metrics_controller = metrics_receiver.controller();
+        metrics_receiver.install();
+
+        Ok(FileContext {
             core_settings,
             data_root,
             save_root,
             settings_root,
-        }
+
+            metrics_controller,
+        })
     }
 
     pub fn load(data_root: PathBuf) -> Result<Self> {
@@ -72,7 +84,7 @@ impl FileContext {
         user_data_root.push(docs_dir);
         user_data_root.push(&core_settings.path_name);
 
-        Ok(FileContext::new(core_settings, data_root, user_data_root))
+        FileContext::new(core_settings, data_root, user_data_root)
     }
 
     pub fn ensure_directories(&self) -> Result<()> {

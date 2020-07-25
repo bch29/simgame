@@ -1,6 +1,8 @@
 mod block_info;
 mod chunk_state;
 
+use std::time::Instant;
+
 use anyhow::Result;
 use cgmath::{Point3, Vector3};
 use zerocopy::{AsBytes, FromBytes};
@@ -520,9 +522,16 @@ impl BlocksRenderState {
         frame_render: &mut crate::FrameRenderContext,
         _view_state: &world::ViewState,
     ) {
+        let ts_begin = Instant::now();
         self.chunk_state.update_buffers(&ctx.queue);
+        let ts_update = Instant::now();
         self.compute_pass(ctx, frame_render);
         self.render_pass(ctx, frame_render);
+
+        metrics::timing!(
+            "render.world.blocks.update_buffers",
+            ts_update.duration_since(ts_begin)
+        );
     }
 
     pub fn update(

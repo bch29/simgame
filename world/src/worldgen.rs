@@ -1,3 +1,5 @@
+use std::time::Instant;
+
 use anyhow::{anyhow, Result};
 use cgmath::{ElementWise, EuclideanSpace, Point3, Vector3};
 use log::info;
@@ -63,8 +65,15 @@ impl<'a, R> WorldGenerator<'a, R> {
     where
         R: Rng,
     {
+        let ts_start = Instant::now();
         self.generate_terrain()?;
+        let ts_terrain = Instant::now();
         self.generate_trees()?;
+        let ts_trees = Instant::now();
+
+        metrics::timing!("world.worldgen.terrain", ts_terrain.duration_since(ts_start));
+        metrics::timing!("world.worldgen.trees", ts_trees.duration_since(ts_terrain));
+
         Ok(())
     }
 

@@ -126,11 +126,19 @@ async fn run_render_world(ctx: &FileContext, options: &RenderWorldOpts) -> Resul
         params,
         resource_loader,
         block_helper,
+        ctx.metrics_controller.clone()
     )
     .await
 }
 
 fn run_generate(ctx: &FileContext, options: &GenerateWorldOpts) -> Result<()> {
+    let mut metrics_exporter = metrics_runtime::exporters::LogExporter::new(
+        ctx.metrics_controller.clone(),
+        metrics_runtime::observers::YamlBuilder::new(),
+        log::Level::Info,
+        std::time::Duration::from_secs(10),
+    );
+
     let block_helper = BlockConfigHelper::new(&ctx.core_settings.block_config)?;
 
     let config_file = std::fs::File::open(&options.config)?;
@@ -139,6 +147,8 @@ fn run_generate(ctx: &FileContext, options: &GenerateWorldOpts) -> Result<()> {
 
     log::info!("Saving");
     ctx.save_world_blocks(options.save_name.as_str(), &blocks)?;
+
+    metrics_exporter.turn();
 
     Ok(())
 }
