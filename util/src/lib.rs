@@ -1,5 +1,6 @@
 pub mod bounds;
 pub mod ray;
+pub mod bsp;
 
 use cgmath::{Point3, Vector3};
 

@@ -4,7 +4,7 @@ mod block_data;
 pub mod config;
 mod core;
 pub mod index_utils;
-mod octree;
+pub mod octree;
 pub mod primitive;
 mod update;
 

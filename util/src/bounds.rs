@@ -437,18 +437,16 @@ impl<T: BaseNum> Bounds<T> {
             intersection: self.intersection(other),
         }
     }
-
-    /// Iterates through all the points in 'self' which are not in 'other'.
-    pub fn iter_diff(self, other: Bounds<T>) -> IterBoundsDiffPoints<T> {
-        self.diff(other).iter_points()
-    }
 }
 
-impl<T> BoundsDiff<T>
+impl<T> IntoIterator for BoundsDiff<T>
 where
     T: BaseNum,
 {
-    pub fn iter_points(self) -> IterBoundsDiffPoints<T> {
+    type Item = Point3<T>;
+    type IntoIter = IterBoundsDiffPoints<T>;
+
+    fn into_iter(self) -> IterBoundsDiffPoints<T> {
         // Algorithm:
         // - compute intersection I
         // - for each z level in self whose plane is not contained in the intersection
@@ -462,7 +460,12 @@ where
             pos: self.origin(),
         }
     }
+}
 
+impl<T> BoundsDiff<T>
+where
+    T: BaseNum,
+{
     fn first_x(&self, y: T, z: T) -> Option<T> {
         self.next_x(y, z, self.lhs.origin().x)
     }
@@ -613,7 +616,7 @@ mod tests {
     fn check_diff(lhs: Bounds<i32>, rhs: Bounds<i32>) {
         use std::collections::HashSet;
 
-        let diff: HashSet<Point3<i32>> = lhs.iter_diff(rhs).collect();
+        let diff: HashSet<Point3<i32>> = lhs.diff(rhs).into_iter().collect();
         let naive_diff: HashSet<Point3<i32>> = lhs
             .z_range()
             .flat_map(|z| {

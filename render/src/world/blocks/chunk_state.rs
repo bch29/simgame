@@ -152,12 +152,12 @@ impl ChunkState {
         // if we get here we need to update the set of active chunks
 
         // 1. delete chunks that have left the view
-        for pos in old_chunk_box.iter_diff(new_chunk_box) {
+        for pos in old_chunk_box.diff(new_chunk_box) {
             self.active_chunks.remove(&pos);
         }
 
         // 2. insert chunks that are newly in the view
-        for pos in new_chunk_box.iter_diff(old_chunk_box) {
+        for pos in new_chunk_box.diff(old_chunk_box) {
             if let Some(chunk) = blocks.chunks().get(convert_point!(pos, i64)) {
                 self.active_chunks.update(pos, chunk.clone());
             }
