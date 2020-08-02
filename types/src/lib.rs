@@ -1,5 +1,7 @@
 pub use simgame_blocks::{BlockData, UpdatedBlocksState};
 
+pub mod entity;
+
 #[derive(Debug)]
 pub struct World {
     pub blocks: BlockData,
