@@ -25,7 +25,8 @@ metrics = "0.12"
 
 [dependencies.wgpu]
 package = "wgpu"
-version = "0.5"
-git = "https://github.com/gfx-rs/wgpu-rs"
-rev = "8e4d0015862507027f3a6bd68056c64568d11366"
+version = "0.7"
 features = ["trace"]
+# git = "https://github.com/gfx-rs/wgpu-rs"
+# rev = "8e4d0015862507027f3a6bd68056c64568d11366"
+# features = ["trace"]

@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::convert::TryInto;
 
 use anyhow::{anyhow, bail, Result};
 use zerocopy::AsBytes;
@@ -57,13 +58,17 @@ impl BlockInfoHandler {
             .map(|data| {
                 data.texture.create_view(&wgpu::TextureViewDescriptor {
                     label: Some("block textures"),
-                    format: wgpu::TextureFormat::Rgba8UnormSrgb,
-                    dimension: wgpu::TextureViewDimension::D2,
+                    format: Some(wgpu::TextureFormat::Rgba8UnormSrgb),
+                    dimension: Some(wgpu::TextureViewDimension::D2),
                     aspect: wgpu::TextureAspect::All,
                     base_mip_level: 0,
-                    level_count: data.mip_level_count,
+                    level_count: Some(
+                        data.mip_level_count
+                            .try_into()
+                            .expect("mip level count cannot be 0"),
+                    ),
                     base_array_layer: 0,
-                    array_layer_count: 1,
+                    array_layer_count: Some(1.try_into().expect("nonzero")),
                 })
             })
             .collect();

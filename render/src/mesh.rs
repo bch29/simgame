@@ -35,54 +35,6 @@ impl Mesh {
         (std::mem::size_of::<u16>() * self.indices.len()) as u64
     }
 
-    // pub fn vertex_buffer(&self, device: &wgpu::Device) -> wgpu::Buffer {
-    //     let mapped_buffer = device
-    //         .create_buffer_mapped(&wgpu::BufferDescriptor {
-    //             label: None,
-    //             size: self.vertex_buffer_size(),
-    //             usage: wgpu::BufferUsage::VERTEX,
-    //         });
-
-    //     mapped_buffer.data.copy_from_slice(self.vertices.as_bytes());
-    //     mapped_buffer.finish()
-    // }
-
-    // pub fn index_buffer(&self, device: &wgpu::Device) -> wgpu::Buffer {
-    //     let mapped_buffer = device
-    //         .create_buffer_mapped(&wgpu::BufferDescriptor {
-    //             label: None,
-    //             size: self.index_buffer_size(),
-    //             usage: wgpu::BufferUsage::INDEX,
-    //         });
-
-    //     mapped_buffer.data.copy_from_slice(self.indices.as_bytes());
-    //     mapped_buffer.finish()
-    // }
-
-    pub fn vertex_buffer_descriptor(&self) -> wgpu::VertexBufferDescriptor {
-        wgpu::VertexBufferDescriptor {
-            stride: std::mem::size_of::<Vertex>() as wgpu::BufferAddress,
-            step_mode: wgpu::InputStepMode::Vertex,
-            attributes: &[
-                wgpu::VertexAttributeDescriptor {
-                    format: wgpu::VertexFormat::Float4,
-                    offset: 0,
-                    shader_location: 0,
-                },
-                wgpu::VertexAttributeDescriptor {
-                    format: wgpu::VertexFormat::Float3,
-                    offset: 4 * 4,
-                    shader_location: 1,
-                },
-                wgpu::VertexAttributeDescriptor {
-                    format: wgpu::VertexFormat::Float2,
-                    offset: (4 + 3) * 4,
-                    shader_location: 2,
-                },
-            ],
-        }
-    }
-
     pub fn index_format(&self) -> wgpu::IndexFormat {
         wgpu::IndexFormat::Uint16
     }

@@ -21,8 +21,6 @@ use gui::{GuiRenderState, GuiRenderStateBuilder};
 use resource::ResourceLoader;
 use world::{WorldRenderState, WorldRenderStateBuilder};
 
-// TODO: UI rendering pipeline
-
 pub struct RenderStateBuilder<'a, W> {
     pub window: &'a W,
     pub physical_win_size: Vector2<u32>,
@@ -147,8 +145,8 @@ impl RenderState {
         let (device, queue) = match adapter
             .request_device(
                 &wgpu::DeviceDescriptor {
+                    label: None,
                     features: wgpu::Features::MULTI_DRAW_INDIRECT | required_features,
-                    shader_validation: false,
                     limits: wgpu::Limits {
                         max_bind_groups: 6,
                         max_storage_buffers_per_shader_stage: 6,
@@ -189,7 +187,7 @@ impl RenderState {
     }
 
     pub fn render_frame(&mut self) -> Result<()> {
-        let frame = self.swapchain.get_next_frame()?;
+        let frame = self.swapchain.get_current_frame()?;
         let encoder = self
             .ctx
             .device
@@ -217,7 +215,7 @@ impl RenderState {
 
     fn swapchain_descriptor(win_size: Vector2<u32>) -> wgpu::SwapChainDescriptor {
         wgpu::SwapChainDescriptor {
-            usage: wgpu::TextureUsage::OUTPUT_ATTACHMENT,
+            usage: wgpu::TextureUsage::RENDER_ATTACHMENT,
             format: wgpu::TextureFormat::Bgra8UnormSrgb,
             width: win_size.x,
             height: win_size.y,

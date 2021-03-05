@@ -1,3 +1,5 @@
+use std::convert::TryInto;
+
 use anyhow::Result;
 use cgmath::Matrix4;
 use zerocopy::{AsBytes, FromBytes};
@@ -30,19 +32,25 @@ impl<'a> GuiRenderStateBuilder<'a> {
     pub fn build(self, ctx: &crate::GraphicsContext) -> Result<GuiRenderState> {
         let vert_shader = ctx
             .device
-            .create_shader_module(wgpu::ShaderModuleSource::SpirV(
-                ctx.resource_loader
-                    .load_shader("shader/gui/vertex")?
-                    .as_slice(),
-            ));
+            .create_shader_module(&wgpu::ShaderModuleDescriptor {
+                label: None,
+                flags: Default::default(),
+                source: wgpu::ShaderSource::SpirV(
+                    ctx.resource_loader.load_shader("shader/gui/vertex")?.into(),
+                ),
+            });
 
         let frag_shader = ctx
             .device
-            .create_shader_module(wgpu::ShaderModuleSource::SpirV(
-                ctx.resource_loader
-                    .load_shader("shader/gui/fragment")?
-                    .as_slice(),
-            ));
+            .create_shader_module(&wgpu::ShaderModuleDescriptor {
+                label: None,
+                flags: Default::default(),
+                source: wgpu::ShaderSource::SpirV(
+                    ctx.resource_loader
+                        .load_shader("shader/gui/fragment")?
+                        .into(),
+                ),
+            });
 
         let crosshair_texture: wgpu::TextureView = {
             let image = ctx
@@ -87,7 +95,7 @@ impl<'a> GuiRenderStateBuilder<'a> {
                 size,
             );
 
-            texture.create_default_view()
+            texture.create_view(&Default::default())
         };
 
         let bind_group_layout =
@@ -96,29 +104,36 @@ impl<'a> GuiRenderStateBuilder<'a> {
                     label: Some("blocks vertex layout"),
                     entries: &[
                         // Uniforms
-                        wgpu::BindGroupLayoutEntry::new(
-                            0,
-                            wgpu::ShaderStage::VERTEX,
-                            wgpu::BindingType::UniformBuffer {
-                                dynamic: false,
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 0,
+                            visibility: wgpu::ShaderStage::VERTEX,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Uniform,
+                                has_dynamic_offset: false,
                                 min_binding_size: None,
                             },
-                        ),
+                            count: None,
+                        },
                         // Texture
-                        wgpu::BindGroupLayoutEntry::new(
-                            1,
-                            wgpu::ShaderStage::FRAGMENT,
-                            wgpu::BindingType::SampledTexture {
-                                dimension: wgpu::TextureViewDimension::D2,
-                                component_type: wgpu::TextureComponentType::Float,
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 1,
+                            visibility: wgpu::ShaderStage::FRAGMENT,
+                            ty: wgpu::BindingType::Texture {
+                                sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                                view_dimension: wgpu::TextureViewDimension::D2,
                                 multisampled: false,
                             },
-                        ),
-                        wgpu::BindGroupLayoutEntry::new(
-                            2,
-                            wgpu::ShaderStage::FRAGMENT,
-                            wgpu::BindingType::Sampler { comparison: false },
-                        ),
+                            count: None,
+                        },
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 2,
+                            visibility: wgpu::ShaderStage::FRAGMENT,
+                            ty: wgpu::BindingType::Sampler {
+                                filtering: true,
+                                comparison: false,
+                            },
+                            count: None,
+                        },
                     ],
                 });
 
@@ -129,13 +144,14 @@ impl<'a> GuiRenderStateBuilder<'a> {
             mag_filter: wgpu::FilterMode::Linear,
             min_filter: wgpu::FilterMode::Linear,
             mipmap_filter: wgpu::FilterMode::Nearest,
-            anisotropy_clamp: Some(16),
+            anisotropy_clamp: Some(16.try_into().expect("nonzero")),
             ..Default::default()
         });
 
         let pipeline_layout = ctx
             .device
             .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: None,
                 bind_group_layouts: &[&bind_group_layout],
                 push_constant_ranges: &[],
             });
@@ -143,45 +159,44 @@ impl<'a> GuiRenderStateBuilder<'a> {
         let pipeline = ctx
             .device
             .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                layout: &pipeline_layout,
-                vertex_stage: wgpu::ProgrammableStageDescriptor {
+                label: None,
+                layout: Some(&pipeline_layout),
+                vertex: wgpu::VertexState {
                     module: &vert_shader,
                     entry_point: "main",
+                    buffers: &[],
                 },
-                fragment_stage: Some(wgpu::ProgrammableStageDescriptor {
+                fragment: Some(wgpu::FragmentState {
                     module: &frag_shader,
                     entry_point: "main",
+                    targets: &[wgpu::ColorTargetState {
+                        format: self.swapchain.format,
+                        color_blend: wgpu::BlendState {
+                            src_factor: wgpu::BlendFactor::SrcAlpha,
+                            dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+                            operation: wgpu::BlendOperation::Add,
+                        },
+                        alpha_blend: wgpu::BlendState {
+                            src_factor: wgpu::BlendFactor::One,
+                            dst_factor: wgpu::BlendFactor::One,
+                            operation: wgpu::BlendOperation::Max,
+                        },
+                        write_mask: wgpu::ColorWrite::ALL,
+                    }],
                 }),
-                rasterization_state: Some(wgpu::RasterizationStateDescriptor {
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleStrip,
                     front_face: wgpu::FrontFace::Cw,
                     cull_mode: wgpu::CullMode::None,
-                    depth_bias: 0,
-                    depth_bias_slope_scale: 0.0,
-                    depth_bias_clamp: 0.0,
-                }),
-                primitive_topology: wgpu::PrimitiveTopology::TriangleStrip,
-                color_states: &[wgpu::ColorStateDescriptor {
-                    format: self.swapchain.format,
-                    color_blend: wgpu::BlendDescriptor {
-                        src_factor: wgpu::BlendFactor::SrcAlpha,
-                        dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
-                        operation: wgpu::BlendOperation::Add,
-                    },
-                    alpha_blend: wgpu::BlendDescriptor {
-                        src_factor: wgpu::BlendFactor::One,
-                        dst_factor: wgpu::BlendFactor::One,
-                        operation: wgpu::BlendOperation::Max,
-                    },
-                    write_mask: wgpu::ColorWrite::ALL,
-                }],
-                depth_stencil_state: None,
-                vertex_state: wgpu::VertexStateDescriptor {
-                    index_format: wgpu::IndexFormat::Uint16,
-                    vertex_buffers: &[],
+                    strip_index_format: Some(wgpu::IndexFormat::Uint16),
+                    polygon_mode: wgpu::PolygonMode::Fill,
                 },
-                sample_count: 1,
-                sample_mask: !0,
-                alpha_to_coverage_enabled: false,
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState {
+                    count: 1,
+                    mask: !0,
+                    alpha_to_coverage_enabled: false,
+                },
             });
 
         let aspect_ratio = self.swapchain.width as f32 / self.swapchain.height as f32;
@@ -196,8 +211,7 @@ impl<'a> GuiRenderStateBuilder<'a> {
             pipeline,
             uniforms,
             bind_group_layout,
-
-            //             multisampled_framebuffer,
+            // multisampled_framebuffer,
             sampler,
             crosshair_texture,
         })
@@ -234,7 +248,11 @@ impl GuiRenderState {
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: wgpu::BindingResource::Buffer(self.uniforms.buffer().slice(..)),
+                    resource: wgpu::BindingResource::Buffer {
+                        buffer: self.uniforms.buffer(),
+                        offset: 0,
+                        size: None,
+                    },
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
@@ -250,6 +268,7 @@ impl GuiRenderState {
         let mut rpass = frame_render
             .encoder
             .begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: None,
                 color_attachments: &[wgpu::RenderPassColorAttachmentDescriptor {
                     attachment: &frame_render.frame.output.view,
                     resolve_target: None,
@@ -284,13 +303,13 @@ impl GuiRenderState {
             sample_count,
             dimension: wgpu::TextureDimension::D2,
             format: sc_desc.format,
-            usage: wgpu::TextureUsage::OUTPUT_ATTACHMENT,
+            usage: wgpu::TextureUsage::RENDER_ATTACHMENT,
             label: None,
         };
 
         device
             .create_texture(multisampled_frame_descriptor)
-            .create_default_view()
+            .create_view(&Default::default())
     }
 }
 

@@ -1,6 +1,7 @@
 mod block_info;
 mod chunk_state;
 
+use std::convert::TryInto;
 use std::time::Instant;
 
 use anyhow::Result;
@@ -113,27 +114,39 @@ impl<'a> BlocksRenderStateBuilder<'a> {
 
         let compute_shader = ctx
             .device
-            .create_shader_module(wgpu::ShaderModuleSource::SpirV(
-                ctx.resource_loader
-                    .load_shader("shader/blocks/compute")?
-                    .as_slice(),
-            ));
+            .create_shader_module(&wgpu::ShaderModuleDescriptor {
+                label: None,
+                flags: wgpu::ShaderFlags::default(),
+                source: wgpu::ShaderSource::SpirV(
+                    ctx.resource_loader
+                        .load_shader("shader/blocks/compute")?
+                        .into(),
+                ),
+            });
 
         let vert_shader = ctx
             .device
-            .create_shader_module(wgpu::ShaderModuleSource::SpirV(
-                ctx.resource_loader
-                    .load_shader("shader/blocks/vertex")?
-                    .as_slice(),
-            ));
+            .create_shader_module(&wgpu::ShaderModuleDescriptor {
+                label: None,
+                flags: wgpu::ShaderFlags::default(),
+                source: wgpu::ShaderSource::SpirV(
+                    ctx.resource_loader
+                        .load_shader("shader/blocks/vertex")?
+                        .into(),
+                ),
+            });
 
         let frag_shader = ctx
             .device
-            .create_shader_module(wgpu::ShaderModuleSource::SpirV(
-                ctx.resource_loader
-                    .load_shader("shader/blocks/fragment")?
-                    .as_slice(),
-            ));
+            .create_shader_module(&wgpu::ShaderModuleDescriptor {
+                label: None,
+                flags: wgpu::ShaderFlags::default(),
+                source: wgpu::ShaderSource::SpirV(
+                    ctx.resource_loader
+                        .load_shader("shader/blocks/fragment")?
+                        .into(),
+                ),
+            });
 
         let geometry_buffers = self.build_geometry_buffers(ctx);
 
@@ -186,71 +199,78 @@ impl<'a> BlocksRenderStateBuilder<'a> {
                     label: Some("blocks compute layout"),
                     entries: &[
                         // Uniforms
-                        wgpu::BindGroupLayoutEntry::new(
-                            0,
-                            wgpu::ShaderStage::COMPUTE,
-                            wgpu::BindingType::StorageBuffer {
-                                dynamic: false,
-                                readonly: true,
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 0,
+                            visibility: wgpu::ShaderStage::COMPUTE,
+                            count: None,
+                            ty: wgpu::BindingType::Buffer {
+                                has_dynamic_offset: false,
+                                ty: wgpu::BufferBindingType::Storage { read_only: true },
                                 min_binding_size: None,
                             },
-                        ),
+                        },
                         // Block type buffer
-                        wgpu::BindGroupLayoutEntry::new(
-                            1,
-                            wgpu::ShaderStage::COMPUTE,
-                            wgpu::BindingType::StorageBuffer {
-                                dynamic: false,
-                                readonly: true,
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 1,
+                            visibility: wgpu::ShaderStage::COMPUTE,
+                            count: None,
+                            ty: wgpu::BindingType::Buffer {
+                                has_dynamic_offset: false,
+                                ty: wgpu::BufferBindingType::Storage { read_only: true },
                                 min_binding_size: None,
                             },
-                        ),
+                        },
                         // Chunk metadata buffer
-                        wgpu::BindGroupLayoutEntry::new(
-                            2,
-                            wgpu::ShaderStage::COMPUTE,
-                            wgpu::BindingType::StorageBuffer {
-                                dynamic: false,
-                                readonly: true,
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 2,
+                            visibility: wgpu::ShaderStage::COMPUTE,
+                            count: None,
+                            ty: wgpu::BindingType::Buffer {
+                                has_dynamic_offset: false,
+                                ty: wgpu::BufferBindingType::Storage { read_only: true },
                                 min_binding_size: None,
                             },
-                        ),
+                        },
                         // Output vertex buffer
-                        wgpu::BindGroupLayoutEntry::new(
-                            3,
-                            wgpu::ShaderStage::COMPUTE,
-                            wgpu::BindingType::StorageBuffer {
-                                dynamic: false,
-                                readonly: false,
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 3,
+                            visibility: wgpu::ShaderStage::COMPUTE,
+                            count: None,
+                            ty: wgpu::BindingType::Buffer {
+                                has_dynamic_offset: false,
+                                ty: wgpu::BufferBindingType::Storage { read_only: false },
                                 min_binding_size: None,
                             },
-                        ),
+                        },
                         // Output indirect buffer
-                        wgpu::BindGroupLayoutEntry::new(
-                            4,
-                            wgpu::ShaderStage::COMPUTE,
-                            wgpu::BindingType::StorageBuffer {
-                                dynamic: false,
-                                readonly: false,
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 4,
+                            visibility: wgpu::ShaderStage::COMPUTE,
+                            count: None,
+                            ty: wgpu::BindingType::Buffer {
+                                has_dynamic_offset: false,
+                                ty: wgpu::BufferBindingType::Storage { read_only: false },
                                 min_binding_size: None,
                             },
-                        ),
+                        },
                         // Globals within a compute invocation
-                        wgpu::BindGroupLayoutEntry::new(
-                            5,
-                            wgpu::ShaderStage::COMPUTE,
-                            wgpu::BindingType::StorageBuffer {
-                                dynamic: false,
-                                readonly: false,
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 5,
+                            visibility: wgpu::ShaderStage::COMPUTE,
+                            count: None,
+                            ty: wgpu::BindingType::Buffer {
+                                has_dynamic_offset: false,
+                                ty: wgpu::BufferBindingType::Storage { read_only: false },
                                 min_binding_size: None,
                             },
-                        ),
+                        },
                     ],
                 });
 
         let pipeline_layout = ctx
             .device
             .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: None,
                 bind_group_layouts: &[&bind_group_layout],
                 push_constant_ranges: &[],
             });
@@ -258,11 +278,10 @@ impl<'a> BlocksRenderStateBuilder<'a> {
         let pipeline = ctx
             .device
             .create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-                layout: &pipeline_layout,
-                compute_stage: wgpu::ProgrammableStageDescriptor {
-                    module: &compute_shader,
-                    entry_point: "main",
-                },
+                label: None,
+                layout: Some(&pipeline_layout),
+                module: &compute_shader,
+                entry_point: "main",
             });
 
         let bind_group = ctx.device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -302,89 +321,103 @@ impl<'a> BlocksRenderStateBuilder<'a> {
                     label: Some("blocks vertex layout"),
                     entries: &[
                         // Uniforms
-                        wgpu::BindGroupLayoutEntry::new(
-                            0,
-                            wgpu::ShaderStage::VERTEX,
-                            wgpu::BindingType::UniformBuffer {
-                                dynamic: false,
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 0,
+                            visibility: wgpu::ShaderStage::VERTEX,
+                            count: None,
+                            ty: wgpu::BindingType::Buffer {
+                                has_dynamic_offset: false,
                                 min_binding_size: None,
+                                ty: wgpu::BufferBindingType::Uniform,
                             },
-                        ),
+                        },
                         // Block info
-                        wgpu::BindGroupLayoutEntry::new(
-                            1,
-                            wgpu::ShaderStage::VERTEX,
-                            wgpu::BindingType::StorageBuffer {
-                                dynamic: false,
-                                readonly: true,
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 1,
+                            visibility: wgpu::ShaderStage::VERTEX,
+                            count: None,
+                            ty: wgpu::BindingType::Buffer {
+                                has_dynamic_offset: false,
+                                ty: wgpu::BufferBindingType::Storage { read_only: true },
                                 min_binding_size: None,
                             },
-                        ),
+                        },
                         // Block types
-                        wgpu::BindGroupLayoutEntry::new(
-                            2,
-                            wgpu::ShaderStage::VERTEX,
-                            wgpu::BindingType::StorageBuffer {
-                                dynamic: false,
-                                readonly: true,
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 2,
+                            visibility: wgpu::ShaderStage::VERTEX,
+                            count: None,
+                            ty: wgpu::BindingType::Buffer {
+                                has_dynamic_offset: false,
+                                ty: wgpu::BufferBindingType::Storage { read_only: true },
                                 min_binding_size: None,
                             },
-                        ),
+                        },
                         // Chunk metadata
-                        wgpu::BindGroupLayoutEntry::new(
-                            3,
-                            wgpu::ShaderStage::VERTEX,
-                            wgpu::BindingType::StorageBuffer {
-                                dynamic: false,
-                                readonly: true,
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 3,
+                            visibility: wgpu::ShaderStage::VERTEX,
+                            count: None,
+                            ty: wgpu::BindingType::Buffer {
+                                has_dynamic_offset: false,
+                                ty: wgpu::BufferBindingType::Storage { read_only: true },
                                 min_binding_size: None,
                             },
-                        ),
+                        },
                         // Faces
-                        wgpu::BindGroupLayoutEntry::new(
-                            4,
-                            wgpu::ShaderStage::VERTEX,
-                            wgpu::BindingType::StorageBuffer {
-                                dynamic: false,
-                                readonly: true,
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 4,
+                            visibility: wgpu::ShaderStage::VERTEX,
+                            count: None,
+                            ty: wgpu::BindingType::Buffer {
+                                has_dynamic_offset: false,
+                                ty: wgpu::BufferBindingType::Storage { read_only: true },
                                 min_binding_size: None,
                             },
-                        ),
+                        },
                         // Texture metadata
-                        wgpu::BindGroupLayoutEntry::new(
-                            5,
-                            wgpu::ShaderStage::VERTEX,
-                            wgpu::BindingType::StorageBuffer {
-                                dynamic: false,
-                                readonly: true,
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 5,
+                            visibility: wgpu::ShaderStage::VERTEX,
+                            count: None,
+                            ty: wgpu::BindingType::Buffer {
+                                has_dynamic_offset: false,
+                                ty: wgpu::BufferBindingType::Storage { read_only: true },
                                 min_binding_size: None,
                             },
-                        ),
+                        },
                         // Textures
                         wgpu::BindGroupLayoutEntry {
-                            count: Some(block_info_handler.index_map.len() as u32),
-                            ..wgpu::BindGroupLayoutEntry::new(
-                                6,
-                                wgpu::ShaderStage::FRAGMENT,
-                                wgpu::BindingType::SampledTexture {
-                                    dimension: wgpu::TextureViewDimension::D2Array,
-                                    component_type: wgpu::TextureComponentType::Float,
-                                    multisampled: false,
-                                },
-                            )
+                            binding: 6,
+                            visibility: wgpu::ShaderStage::FRAGMENT,
+                            count: Some(
+                                (block_info_handler.index_map.len() as u32)
+                                    .try_into()
+                                    .expect("index map len must be nonzero"),
+                            ),
+                            ty: wgpu::BindingType::Texture {
+                                view_dimension: wgpu::TextureViewDimension::D2Array,
+                                multisampled: false,
+                                sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            },
                         },
                         // Sampler
-                        wgpu::BindGroupLayoutEntry::new(
-                            7,
-                            wgpu::ShaderStage::FRAGMENT,
-                            wgpu::BindingType::Sampler { comparison: false },
-                        ),
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 7,
+                            visibility: wgpu::ShaderStage::FRAGMENT,
+                            count: None,
+                            ty: wgpu::BindingType::Sampler {
+                                filtering: true,
+                                comparison: false,
+                            },
+                        },
                     ],
                 });
 
         let pipeline_layout = ctx
             .device
             .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: None,
                 bind_group_layouts: &[&bind_group_layout],
                 push_constant_ranges: &[],
             });
@@ -392,45 +425,52 @@ impl<'a> BlocksRenderStateBuilder<'a> {
         let pipeline = ctx
             .device
             .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                layout: &pipeline_layout,
-                vertex_stage: wgpu::ProgrammableStageDescriptor {
+                label: None,
+                layout: Some(&pipeline_layout),
+                vertex: wgpu::VertexState {
                     module: &vert_shader,
                     entry_point: "main",
+                    buffers: &[], // index_format: wgpu::IndexFormat::Uint16,
                 },
-                fragment_stage: Some(wgpu::ProgrammableStageDescriptor {
+                fragment: Some(wgpu::FragmentState {
                     module: &frag_shader,
                     entry_point: "main",
+                    targets: &[wgpu::ColorTargetState {
+                        format: wgpu::TextureFormat::Bgra8UnormSrgb,
+                        color_blend: wgpu::BlendState::REPLACE,
+                        alpha_blend: wgpu::BlendState::REPLACE,
+                        write_mask: wgpu::ColorWrite::ALL,
+                    }],
                 }),
-                rasterization_state: Some(wgpu::RasterizationStateDescriptor {
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleList,
                     front_face: wgpu::FrontFace::Ccw,
                     cull_mode: wgpu::CullMode::Back,
-                    depth_bias: 0,
-                    depth_bias_slope_scale: 0.0,
-                    depth_bias_clamp: 0.0,
-                }),
-                primitive_topology: wgpu::PrimitiveTopology::TriangleList,
-                color_states: &[wgpu::ColorStateDescriptor {
-                    format: wgpu::TextureFormat::Bgra8UnormSrgb,
-                    color_blend: wgpu::BlendDescriptor::REPLACE,
-                    alpha_blend: wgpu::BlendDescriptor::REPLACE,
-                    write_mask: wgpu::ColorWrite::ALL,
-                }],
-                depth_stencil_state: Some(wgpu::DepthStencilStateDescriptor {
+                    strip_index_format: None,
+                    polygon_mode: wgpu::PolygonMode::Fill,
+                },
+                depth_stencil: Some(wgpu::DepthStencilState {
                     format: wgpu::TextureFormat::Depth32Float,
                     depth_write_enabled: true,
                     depth_compare: wgpu::CompareFunction::Less,
-                    stencil_front: wgpu::StencilStateFaceDescriptor::IGNORE,
-                    stencil_back: wgpu::StencilStateFaceDescriptor::IGNORE,
-                    stencil_read_mask: 0u32,
-                    stencil_write_mask: 0u32,
+                    stencil: wgpu::StencilState {
+                        front: wgpu::StencilFaceState::IGNORE,
+                        back: wgpu::StencilFaceState::IGNORE,
+                        read_mask: 0u32,
+                        write_mask: 0u32,
+                    },
+                    bias: wgpu::DepthBiasState {
+                        constant: 0,
+                        slope_scale: 0.0,
+                        clamp: 0.0,
+                    },
+                    clamp_depth: false,
                 }),
-                vertex_state: wgpu::VertexStateDescriptor {
-                    index_format: wgpu::IndexFormat::Uint16,
-                    vertex_buffers: &[],
+                multisample: wgpu::MultisampleState {
+                    count: 1,
+                    mask: !0,
+                    alpha_to_coverage_enabled: false,
                 },
-                sample_count: 1,
-                sample_mask: !0,
-                alpha_to_coverage_enabled: false,
             });
 
         let uniforms = RenderUniforms::new(&self.view_state).into_buffer_synced(&ctx.device);
@@ -448,7 +488,11 @@ impl<'a> BlocksRenderStateBuilder<'a> {
                 wgpu::BindGroupEntry {
                     binding: 6,
                     resource: wgpu::BindingResource::TextureViewArray(
-                        &block_info_handler.texture_arr_views[..],
+                        block_info_handler
+                            .texture_arr_views
+                            .iter()
+                            .collect::<Vec<_>>()
+                            .as_slice(),
                     ),
                 },
                 wgpu::BindGroupEntry {
@@ -461,7 +505,7 @@ impl<'a> BlocksRenderStateBuilder<'a> {
         RenderStage {
             pipeline,
             uniforms,
-            depth_texture: self.depth_texture.create_default_view(),
+            depth_texture: self.depth_texture.create_view(&Default::default()),
 
             bind_group_layout,
             bind_group,
@@ -513,7 +557,7 @@ impl BlocksRenderState {
     }
 
     pub fn set_depth_texture(&mut self, depth_texture: &wgpu::Texture) {
-        self.render_stage.depth_texture = depth_texture.create_default_view();
+        self.render_stage.depth_texture = depth_texture.create_view(&Default::default());
     }
 
     pub fn render_frame(
@@ -563,7 +607,9 @@ impl BlocksRenderState {
         // reset compute shader globals to 0
         bufs.globals.clear(&ctx.queue);
 
-        let mut cpass = frame_render.encoder.begin_compute_pass();
+        let mut cpass = frame_render
+            .encoder
+            .begin_compute_pass(&wgpu::ComputePassDescriptor { label: None });
 
         cpass.set_pipeline(&self.compute_stage.pipeline);
         cpass.set_bind_group(0, &self.compute_stage.bind_group, &[]);
@@ -582,6 +628,7 @@ impl BlocksRenderState {
         let mut rpass = frame_render
             .encoder
             .begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: None,
                 color_attachments: &[wgpu::RenderPassColorAttachmentDescriptor {
                     attachment: &frame_render.frame.output.view,
                     resolve_target: None,

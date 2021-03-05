@@ -1,3 +1,4 @@
+use std::convert::TryInto;
 use std::ops::{Deref, DerefMut};
 
 use wgpu::{Buffer, BufferDescriptor, BufferUsage, Device, Queue};
@@ -210,9 +211,15 @@ impl<Item> BufferSyncHelper<Item> {
     ) -> wgpu::BindGroupEntry<'a> {
         wgpu::BindGroupEntry {
             binding: index,
-            resource: wgpu::BindingResource::Buffer(
-                buffer.slice(start_offset..start_offset + self.buffer_byte_len()),
-            ),
+            resource: wgpu::BindingResource::Buffer {
+                buffer: buffer,
+                offset: start_offset,
+                size: Some(
+                    self.buffer_byte_len()
+                        .try_into()
+                        .expect("buffer byte len expected to be nonzero"),
+                ),
+            },
         }
     }
 }
