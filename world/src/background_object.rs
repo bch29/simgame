@@ -1,3 +1,6 @@
+//! Implement `BackgroundObject` to allow an object to live on a background thread, where it can
+//! receive actions from the main thread and send responses back.
+
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -27,6 +30,8 @@ impl Default for ConnectionSettings {
     }
 }
 
+/// A connection to an object living on a background thread. Used to send actions to the object and
+/// receive its responses.
 pub struct Connection<T: BackgroundObject>
 where
     T::Response: Cumulative,
@@ -217,6 +222,7 @@ where
         }
     }
 
+    /// Returns the accumulated responses sent by the background object.
     pub fn current_response(&mut self) -> Result<&mut T::Response> {
         self.try_collect_responses()?;
         Ok(&mut self.response)
