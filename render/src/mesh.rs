@@ -38,4 +38,18 @@ impl Mesh {
     pub fn index_format(&self) -> wgpu::IndexFormat {
         wgpu::IndexFormat::Uint16
     }
+
+    /// Combine another mesh into this one, resulting in a mesh that is the union of the two.
+    pub fn union_from(&mut self, other: &Mesh) {
+        let start_index = self.vertices.len() as u16;
+        self.vertices.extend(other.vertices.iter().cloned());
+        self.indices.extend(other.indices.iter().cloned().map(|ix| start_index + ix));
+    }
+
+    /// Combine two meshes, creating a mesh that is the union of the two.
+    pub fn union(lhs: &Mesh, rhs: &Mesh) -> Mesh {
+        let mut result = lhs.clone();
+        result.union_from(rhs);
+        result
+    }
 }
