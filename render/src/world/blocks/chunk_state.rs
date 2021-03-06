@@ -81,17 +81,17 @@ impl ChunkState {
         self.active_chunks.capacity()
     }
 
-    pub fn iter_chunk_indices<'a>(&'a self) -> impl Iterator<Item = usize> + 'a {
+    pub fn iter_chunk_indices(&self) -> impl Iterator<Item = usize> + '_ {
         self.active_chunks.iter().map(|(_, index, _)| index)
     }
 
     #[allow(dead_code)]
-    pub fn iter_chunk_positions<'a>(&'a self) -> impl Iterator<Item = Point3<i32>> + 'a {
+    pub fn iter_chunk_positions(&self) -> impl Iterator<Item = Point3<i32>> + '_ {
         self.active_chunks.iter().map(|(&point, _, _)| point)
     }
 
     fn update_box_chunks(&mut self, view_box: Bounds<i32>, blocks: &BlockData) {
-        assert!(self.active_chunks.len() == 0);
+        assert!(self.active_chunks.is_empty());
         let bounds = Bounds::new(
             convert_point!(view_box.origin(), i64),
             convert_vec!(view_box.size(), i64),

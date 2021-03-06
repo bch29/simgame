@@ -85,7 +85,7 @@ impl<Symbol> LSystem<Symbol> {
         let mut runner = LSystemRunner {
             description: self,
             state: self.axiom.clone(),
-            rng: rng,
+            rng,
         };
 
         for i in 0..steps {

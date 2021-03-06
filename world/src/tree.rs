@@ -36,12 +36,12 @@ pub enum Symbol {
     Pop,
     Wood { id: u8 },
     Leaf { id: u8 },
-    YawCW,
-    YawCCW,
-    PitchCW,
-    PitchCCW,
-    RollCW,
-    RollCCW,
+    YawCw,
+    YawCcw,
+    PitchCw,
+    PitchCcw,
+    RollCw,
+    RollCcw,
     Flip,
 }
 
@@ -156,42 +156,42 @@ impl TurtleInterpreter<Symbol> for TreeSystem {
                 turtle.draw(self.config.foliage_length);
                 turtle.pop_state()?;
             }
-            YawCW => {
+            YawCw => {
                 apply_rotate(
                     Vector3::unit_z(),
                     rot_amount,
                     &mut turtle.state_mut().direction,
                 );
             }
-            YawCCW => {
+            YawCcw => {
                 apply_rotate(
                     -Vector3::unit_z(),
                     rot_amount,
                     &mut turtle.state_mut().direction,
                 );
             }
-            PitchCW => {
+            PitchCw => {
                 apply_rotate(
                     Vector3::unit_x(),
                     rot_amount,
                     &mut turtle.state_mut().direction,
                 );
             }
-            PitchCCW => {
+            PitchCcw => {
                 apply_rotate(
                     -Vector3::unit_x(),
                     rot_amount,
                     &mut turtle.state_mut().direction,
                 );
             }
-            RollCW => {
+            RollCw => {
                 apply_rotate(
                     Vector3::unit_y(),
                     rot_amount,
                     &mut turtle.state_mut().direction,
                 );
             }
-            RollCCW => {
+            RollCcw => {
                 apply_rotate(
                     -Vector3::unit_y(),
                     rot_amount,

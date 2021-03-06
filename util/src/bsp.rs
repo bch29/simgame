@@ -123,6 +123,12 @@ impl<T> Bsp<T> {
     }
 }
 
+impl<T> Default for Bsp<T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Axis {
     fn next(self) -> Self {
         match self {
@@ -173,17 +179,11 @@ impl Axis {
 
 impl DivideBoundsResult {
     fn contains_upper(self) -> bool {
-        match self {
-            DivideBoundsResult::Lower => false,
-            _ => true,
-        }
+        !matches!(self, DivideBoundsResult::Lower)
     }
 
     fn contains_lower(self) -> bool {
-        match self {
-            DivideBoundsResult::Upper => false,
-            _ => true,
-        }
+        !matches!(self, DivideBoundsResult::Upper)
     }
 }
 

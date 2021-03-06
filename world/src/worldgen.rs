@@ -71,7 +71,10 @@ impl<'a, R> WorldGenerator<'a, R> {
         self.generate_trees()?;
         let ts_trees = Instant::now();
 
-        metrics::timing!("world.worldgen.terrain", ts_terrain.duration_since(ts_start));
+        metrics::timing!(
+            "world.worldgen.terrain",
+            ts_terrain.duration_since(ts_start)
+        );
         metrics::timing!("world.worldgen.trees", ts_trees.duration_since(ts_terrain));
 
         Ok(())
@@ -135,7 +138,7 @@ impl<'a, R> WorldGenerator<'a, R> {
                 // val in range [0, 1]
                 let val =
                     0.5 * (1.0 + (p.x * PI * sin_factor).sin() * (p.y * PI * cos_factor).cos());
-                assert!(0. <= val && val <= 1.);
+                assert!((0. ..=1.).contains(&val));
 
                 // this is the height of the terrain at current x, y coordinate
                 let height_here = base_z + val * terrain_height;

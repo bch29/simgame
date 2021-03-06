@@ -195,19 +195,17 @@ where
     }
 
     #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.index_map.is_empty()
+    }
+
+    #[inline]
     pub fn iter(&self) -> impl Iterator<Item = (&K, usize, &V)> {
         self.entries.iter().flat_map(|entry| {
             entry
                 .as_ref()
                 .map(|entry| (&entry.key, entry.index, &entry.value))
         })
-    }
-
-    #[inline]
-    pub fn into_iter(self) -> impl Iterator<Item = (K, usize, V)> {
-        self.entries
-            .into_iter()
-            .flat_map(|entry| entry.map(|entry| (entry.key, entry.index, entry.value)))
     }
 
     #[inline]
@@ -317,6 +315,34 @@ where
         {
             *changed = false;
         }
+    }
+}
+
+pub struct StableMapIter<K, V> {
+    entries: <Vec<Option<EntryInfo<K, V>>> as IntoIterator>::IntoIter
+}
+
+impl<K, V> Iterator for StableMapIter<K, V> {
+    type Item = (K, usize, V);
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            match self.entries.next() {
+                None => break None,
+                Some(None) => continue,
+                Some(Some(entry)) => break Some((entry.key, entry.index, entry.value))
+            }
+        }
+    }
+}
+
+impl<K, V> IntoIterator for StableMap<K, V> where K: Eq + Hash {
+    type Item = (K, usize, V);
+    type IntoIter = StableMapIter<K, V>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        StableMapIter { entries: self.entries.into_iter() }
     }
 }
 

@@ -558,6 +558,7 @@ where
         }
     }
 
+    #[allow(clippy::unnecessary_wraps)]
     fn advance_x(&mut self, mut pos: Point3<T>, new_x: T) -> Option<Point3<T>> {
         pos.x = new_x;
         Some(pos)

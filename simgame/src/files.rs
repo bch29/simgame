@@ -230,7 +230,7 @@ impl FileContext {
     }
 
     pub fn load_world_meta<R: std::io::Read>(file: R) -> Result<WorldMeta> {
-        Ok(serde_yaml::from_reader(file).context("Parsing world meta file for saved game")?)
+        serde_yaml::from_reader(file).context("Parsing world meta file for saved game")
     }
 
     pub fn load_world_blocks_data<R>(meta: &WorldMeta, file: R) -> Result<BlockData>

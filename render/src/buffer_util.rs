@@ -65,7 +65,7 @@ impl<Data, Item> BufferSyncedData<Data, Item> {
     }
 
     #[inline]
-    pub fn sync<'a>(&'a self, queue: &Queue)
+    pub fn sync(&self, queue: &Queue)
     where
         Data: BufferSyncable<Item = Item>,
         Item: Copy + AsBytes + FromBytes + 'static,
@@ -212,7 +212,7 @@ impl<Item> BufferSyncHelper<Item> {
         wgpu::BindGroupEntry {
             binding: index,
             resource: wgpu::BindingResource::Buffer {
-                buffer: buffer,
+                buffer,
                 offset: start_offset,
                 size: Some(
                     self.buffer_byte_len()

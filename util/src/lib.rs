@@ -1,6 +1,6 @@
 pub mod bounds;
-pub mod ray;
 pub mod bsp;
+pub mod ray;
 // pub mod octree;
 
 use cgmath::{Point3, Vector3};
@@ -17,10 +17,24 @@ pub trait DivUp {
     fn div_up(self, divisor: Self) -> Self;
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct OrdFloat<T>(pub T);
 
 impl<T> Eq for OrdFloat<T> where T: PartialEq {}
+
+impl<T> PartialOrd for OrdFloat<T>
+where
+    T: PartialOrd,
+{
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(
+            self.0
+                .partial_cmp(&other.0)
+                .unwrap_or(std::cmp::Ordering::Less),
+        )
+    }
+}
+
 impl<T> Ord for OrdFloat<T>
 where
     T: PartialOrd,

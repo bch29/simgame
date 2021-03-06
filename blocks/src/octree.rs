@@ -301,10 +301,9 @@ impl<T> Octree<T> {
     {
         let test_bounds = self.bounds().translate(offset);
 
-        match convert_bounds!(test_bounds, f64).cast_ray(ray) {
-            ConvexRaycastResult::Miss => return None,
-            _ => {}
-        };
+        if convert_bounds!(test_bounds, f64).cast_ray(ray) == ConvexRaycastResult::Miss {
+            return None;
+        }
 
         match &self.node {
             None => None,
@@ -876,8 +875,8 @@ impl Octant {
     #[inline]
     pub fn enumerate() -> [Self; 8] {
         let mut octants = [Self::from_index(0); 8];
-        for i in 0..8 {
-            octants[i] = Self::from_index(i);
+        for (i, octant) in octants.iter_mut().enumerate() {
+            *octant = Self::from_index(i);
         }
         octants
     }

@@ -346,7 +346,7 @@ fn log2_exact(value: u32) -> Option<u32> {
     let mut log2 = 0;
     let mut shifted = value;
     while shifted > 1 {
-        shifted = shifted >> 1;
+        shifted >>= 1;
         log2 += 1;
     }
 

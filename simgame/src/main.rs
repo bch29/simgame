@@ -115,7 +115,7 @@ async fn run_render_world(ctx: &FileContext, options: &RenderWorldOpts) -> Resul
     let world = World::new(blocks);
 
     let params = simgame::RenderParams {
-        trace_path: options.graphics_trace_path.as_ref().map(|p| p.as_path()),
+        trace_path: options.graphics_trace_path.as_deref(),
     };
 
     let block_helper = BlockConfigHelper::new(&ctx.core_settings.block_config)?;

@@ -260,17 +260,15 @@ where
 
             self.send_response()?;
 
-            match self.user_receiver.try_recv() {
-                Ok(action) => self.object.receive_user(action)?,
-                Err(_) => {}
+            if let Ok(action) = self.user_receiver.try_recv() {
+                self.object.receive_user(action)?;
             }
 
-            match self
+            if let Ok(action) = self
                 .tick_receiver
                 .recv_timeout(self.settings.tick_receive_timeout)
             {
-                Ok(action) => self.object.receive_tick(action)?,
-                Err(_) => {}
+                self.object.receive_tick(action)?;
             }
         }
 

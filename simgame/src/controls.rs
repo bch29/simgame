@@ -101,35 +101,33 @@ impl ControlState {
 
     pub fn handle_keyboad_input(&mut self, event: winit::event::KeyboardInput) {
         use winit::event::VirtualKeyCode;
-        match event {
-            winit::event::KeyboardInput {
-                virtual_keycode: Some(key),
-                state,
-                ..
-            } => {
-                let mag = self.state_to_mag(state);
-                let mag_z = if mag == 0 {
-                    None
-                } else {
-                    Some(Vector3::new(0.0, 0.0, mag as f64))
-                };
-                let neg_mag_z = mag_z.map(|v| Vector3::zero() - v);
+        if let winit::event::KeyboardInput {
+            virtual_keycode: Some(key),
+            state,
+            ..
+        } = event
+        {
+            let mag = self.state_to_mag(state);
+            let mag_z = if mag == 0 {
+                None
+            } else {
+                Some(Vector3::new(0.0, 0.0, mag as f64))
+            };
+            let neg_mag_z = mag_z.map(|v| Vector3::zero() - v);
 
-                match key {
-                    VirtualKeyCode::D => self.camera_dir.x = mag,
-                    VirtualKeyCode::A => self.camera_dir.x = -mag,
-                    VirtualKeyCode::W => self.camera_dir.y = mag,
-                    VirtualKeyCode::S => self.camera_dir.y = -mag,
-                    VirtualKeyCode::K => self.camera_dir.z = mag,
-                    VirtualKeyCode::J => self.camera_dir.z = -mag,
-                    VirtualKeyCode::I => self.z_level.set_direction(mag_z),
-                    VirtualKeyCode::U => self.z_level.set_direction(neg_mag_z),
-                    VirtualKeyCode::M => self.visible_height.set_direction(mag_z),
-                    VirtualKeyCode::N => self.visible_height.set_direction(neg_mag_z),
-                    _ => {}
-                }
+            match key {
+                VirtualKeyCode::D => self.camera_dir.x = mag,
+                VirtualKeyCode::A => self.camera_dir.x = -mag,
+                VirtualKeyCode::W => self.camera_dir.y = mag,
+                VirtualKeyCode::S => self.camera_dir.y = -mag,
+                VirtualKeyCode::K => self.camera_dir.z = mag,
+                VirtualKeyCode::J => self.camera_dir.z = -mag,
+                VirtualKeyCode::I => self.z_level.set_direction(mag_z),
+                VirtualKeyCode::U => self.z_level.set_direction(neg_mag_z),
+                VirtualKeyCode::M => self.visible_height.set_direction(mag_z),
+                VirtualKeyCode::N => self.visible_height.set_direction(neg_mag_z),
+                _ => {}
             }
-            _ => {}
         }
 
         let normalize_camera_axis = |value: &mut i32| {

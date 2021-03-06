@@ -115,10 +115,10 @@ impl Shape {
         }])
     }
 
-    pub fn iter_transformed_primitives<'a>(
-        &'a self,
+    pub fn iter_transformed_primitives(
+        &self,
         transform: Matrix4<f64>,
-    ) -> impl Iterator<Item = (Block, impl Primitive + 'a)> + 'a {
+    ) -> impl Iterator<Item = (Block, impl Primitive + '_)> + '_ {
         let inv_transform = transform
             .inverse_transform()
             .expect("draw_transformed expects an invertible transform matrix");
@@ -220,7 +220,7 @@ impl Primitive for FilledLine {
             (proj - point).magnitude()
         };
 
-        return distance <= self.radius;
+        distance <= self.radius
     }
 
     fn bounds(&self) -> Bounds<f64> {
@@ -245,7 +245,7 @@ impl Primitive for Sphere {
     }
 
     fn test(&self, point: Point3<f64>) -> bool {
-        return (point - self.center).magnitude2() < self.radius * self.radius;
+        (point - self.center).magnitude2() < self.radius * self.radius
     }
 }
 

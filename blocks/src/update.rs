@@ -93,7 +93,7 @@ impl<'a> BlockUpdater<'a> {
 
             done = true;
 
-            while let Some((point, block)) = iter.next() {
+            for (point, block) in &mut iter {
                 let (new_chunk_pos, local_point) = index_utils::to_chunk_pos(point);
                 if new_chunk_pos != chunk_pos {
                     chunk_pos = new_chunk_pos;

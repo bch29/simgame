@@ -23,10 +23,10 @@ use simgame_world::World;
 use settings::RenderTestParams;
 use simgame_world::{WorldState, WorldStateBuilder};
 
-pub async fn test_render<'a>(
+pub async fn test_render(
     world: World,
     test_params: RenderTestParams,
-    render_params: RenderParams<'a>,
+    render_params: RenderParams<'_>,
     resource_loader: ResourceLoader,
     block_helper: BlockConfigHelper,
     metrics_controller: metrics_runtime::Controller,
@@ -44,7 +44,8 @@ pub async fn test_render<'a>(
     }
     .build()
     .await?;
-    Ok(game.run(event_loop))
+    game.run(event_loop);
+    Ok(())
 }
 
 pub struct TestRenderBuilder<'a> {
@@ -66,7 +67,7 @@ pub struct TestRender {
     cursor_reset_position: Point2<f64>,
     time_tracker: TimeTracker,
     render_state: RenderState,
-    view_state: ViewParams,
+    view_params: ViewParams,
     has_cursor_control: bool,
 }
 
@@ -123,15 +124,19 @@ fn build_window(event_loop: &EventLoop<()>, settings: &settings::VideoSettings) 
                 .filter(|video_mode| {
                     let mode_dimensions =
                         video_mode.size().to_logical::<f64>(monitor.scale_factor());
-                    mode_dimensions.width == settings.win_dimensions.x
-                        && mode_dimensions.height == settings.win_dimensions.y
+                    let matches_width =
+                        (mode_dimensions.width - settings.win_dimensions.x).abs() < f64::EPSILON;
+                    let matches_height =
+                        (mode_dimensions.height - settings.win_dimensions.y).abs() < f64::EPSILON;
+
+                    matches_width && matches_height
                 })
                 .collect::<Vec<_>>();
             video_modes.sort_by_key(|mode| mode.refresh_rate());
 
-            let video_mode = video_modes.pop().ok_or(anyhow!(
-                "No fullscreen video mode matches requested dimensions"
-            ))?;
+            let video_mode = video_modes
+                .pop()
+                .ok_or_else(|| anyhow!("No fullscreen video mode matches requested dimensions"))?;
 
             builder
                 .with_inner_size(winit::dpi::LogicalSize {
@@ -173,7 +178,7 @@ impl<'a> TestRenderBuilder<'a> {
                 );
         }
 
-        let view_state = ViewParams {
+        let view_params = ViewParams {
             camera_pos: self.test_params.initial_camera_pos,
             z_level: self.test_params.initial_z_level,
             visible_size,
@@ -187,7 +192,7 @@ impl<'a> TestRenderBuilder<'a> {
             display_size: physical_win_size,
             world: &self.world,
             block_helper: &self.block_helper,
-            view_params: view_state.clone(),
+            view_params,
             max_visible_chunks: self.test_params.max_visible_chunks,
         }
         .build(self.render_params.clone())
@@ -232,7 +237,7 @@ impl<'a> TestRenderBuilder<'a> {
             cursor_reset_position,
             time_tracker,
             render_state,
-            view_state,
+            view_params,
             has_cursor_control: false,
         })
     }
@@ -274,19 +279,19 @@ impl TestRender {
                 WindowEvent::CloseRequested => *control_flow = ControlFlow::Exit,
                 WindowEvent::KeyboardInput { input, .. } => {
                     self.control_state.handle_keyboad_input(input);
-                    match input {
-                        KeyboardInput {
-                            virtual_keycode: Some(key),
-                            state: ElementState::Pressed,
-                            ..
-                        } => match key {
+                    if let KeyboardInput {
+                        virtual_keycode: Some(key),
+                        state: ElementState::Pressed,
+                        ..
+                    } = input
+                    {
+                        match key {
                             VirtualKeyCode::Escape => *control_flow = ControlFlow::Exit,
                             VirtualKeyCode::Space => self.world_state.toggle_updates()?,
                             VirtualKeyCode::E => self.world_state.modify_filled_blocks(1)?,
                             VirtualKeyCode::Q => self.world_state.modify_filled_blocks(-1)?,
                             _ => {}
-                        },
-                        _ => {}
+                        }
                     }
                 }
                 WindowEvent::MouseInput {
@@ -296,8 +301,8 @@ impl TestRender {
                 } => {
                     self.world_state.on_click(
                         &self.world,
-                        convert_point!(self.view_state.effective_camera_pos(), f64),
-                        convert_vec!(self.view_state.look_at_dir, f64),
+                        convert_point!(self.view_params.effective_camera_pos(), f64),
+                        convert_vec!(self.view_params.look_at_dir, f64),
                     )?;
                 }
                 WindowEvent::CursorMoved { position, .. } => {
@@ -360,7 +365,7 @@ impl TestRender {
     }
 
     fn redraw(&mut self) -> Result<()> {
-        self.render_state.set_world_view(self.view_state.clone());
+        self.render_state.set_world_view(self.view_params);
 
         let world_diff = self.world_state.world_diff()?;
 
@@ -388,7 +393,7 @@ impl TestRender {
         let elapsed = elapsed.as_secs_f64();
 
         self.world_state.tick(elapsed)?;
-        self.control_state.tick(elapsed, &mut self.view_state);
+        self.control_state.tick(elapsed, &mut self.view_params);
         Ok(())
     }
 }
@@ -468,7 +473,7 @@ impl TimeTracker {
         let render_interval = self
             .params
             .render_interval
-            .unwrap_or(Duration::from_secs(0));
+            .unwrap_or_else(|| Duration::from_secs(0));
         self.render_event.check_ready(now, render_interval)
     }
 

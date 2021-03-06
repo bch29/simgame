@@ -70,28 +70,25 @@ impl ResourceLoader {
             })
             .collect::<Result<_>>()?;
 
-        match &options.recompile_option {
-            RecompileOption::Subset(subset) => {
-                let all_shaders: HashSet<String> = config
-                    .resources
-                    .iter()
-                    .filter(|resource| match &resource.kind {
-                        ResourceKind::Shader { .. } => true,
-                        _ => false,
-                    })
-                    .map(|resource| resource.name.clone())
-                    .collect();
-                let missing: Vec<&String> = subset
-                    .iter()
-                    .filter(|name| !all_shaders.contains(name.as_str()))
-                    .collect();
+        if let RecompileOption::Subset(subset) = &options.recompile_option {
+            let all_shaders: HashSet<String> = config
+                .resources
+                .iter()
+                .filter(|resource| matches!(&resource.kind, ResourceKind::Shader { .. }))
+                .map(|resource| resource.name.clone())
+                .collect();
+            let missing: Vec<&String> = subset
+                .iter()
+                .filter(|name| !all_shaders.contains(name.as_str()))
+                .collect();
 
-                if !missing.is_empty() {
-                    bail!("Invalid --force-recompile-shaders arguments {:?}. Valid arguments are {:?}.",
-                          missing, all_shaders);
-                }
+            if !missing.is_empty() {
+                bail!(
+                    "Invalid --force-recompile-shaders arguments {:?}. Valid arguments are {:?}.",
+                    missing,
+                    all_shaders
+                );
             }
-            _ => {}
         }
 
         let mut root = data_root.to_path_buf();
@@ -134,10 +131,9 @@ impl ResourceLoader {
     }
 
     pub fn get_resource(&self, name: &str) -> Result<&Resource> {
-        Ok(self
-            .resources
+        self.resources
             .get(name)
-            .ok_or_else(|| anyhow!("Unknown resource {:?}", name))?)
+            .ok_or_else(|| anyhow!("Unknown resource {:?}", name))
     }
 
     pub fn load_shader(&self, name: &str) -> Result<Vec<u32>> {
@@ -235,7 +231,7 @@ impl ResourceLoader {
         };
 
         let mut path = self.artifact_root.clone();
-        let mut path_components = resource.name.split_terminator("/").peekable();
+        let mut path_components = resource.name.split_terminator('/').peekable();
 
         let fname = loop {
             let component = path_components

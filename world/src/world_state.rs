@@ -140,6 +140,7 @@ impl WorldState {
 
 impl BackgroundState {
     /// Moves the world forward by one tick.
+    #[allow(clippy::unnecessary_wraps)]
     fn tick(&mut self, _elapsed: f64) -> Result<()> {
         if !self.updating {
             return Ok(());
@@ -228,6 +229,7 @@ impl BackgroundState {
         Ok(())
     }
 
+    #[allow(clippy::unnecessary_wraps)]
     fn toggle_updates(&mut self) -> Result<()> {
         self.updating = !self.updating;
         Ok(())

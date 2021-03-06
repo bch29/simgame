@@ -134,8 +134,8 @@ impl RenderState {
         Ok(())
     }
 
-    async fn request_device<'a>(
-        params: &RenderParams<'a>,
+    async fn request_device(
+        params: &RenderParams<'_>,
         adapter: &wgpu::Adapter,
     ) -> Result<DeviceResult> {
         let required_features = wgpu::Features::SAMPLED_TEXTURE_BINDING_ARRAY
