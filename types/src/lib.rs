@@ -1,10 +1,14 @@
 pub use simgame_blocks::{BlockData, UpdatedBlocksState};
+pub use simgame_util::bsp::Bsp;
 
 pub mod entity;
+
+pub use entity::{Entity, EntityConfig, EntityModel, EntityModelInfo};
 
 #[derive(Debug)]
 pub struct World {
     pub blocks: BlockData,
+    pub entities: Bsp<Entity>,
 }
 
 #[derive(Debug)]
@@ -14,7 +18,10 @@ pub struct UpdatedWorldState {
 
 impl World {
     pub fn new(blocks: BlockData) -> World {
-        World { blocks }
+        World {
+            blocks,
+            entities: Bsp::new(),
+        }
     }
 }
 
