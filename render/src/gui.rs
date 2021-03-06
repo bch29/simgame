@@ -56,7 +56,7 @@ impl<'a> GuiRenderStateBuilder<'a> {
             let image = ctx
                 .resource_loader
                 .load_image("tex/gui/crosshair")?
-                .into_rgba();
+                .into_rgba8();
 
             let (width, height) = image.dimensions();
 

@@ -274,7 +274,7 @@ fn to_sample_generator(
         }
         block::FaceTexture::Texture { resource, .. } => {
             log::info!("Loading block texture {:?}", resource);
-            let image = resource_loader.load_image(&resource[..])?.into_rgba();
+            let image = resource_loader.load_image(&resource[..])?.into_rgba8();
 
             Ok(Box::new(ImageSampleGenerator { image }))
         }

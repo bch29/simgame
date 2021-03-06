@@ -205,7 +205,7 @@ impl<T> Octree<T> {
                     Node::Branch(mut children) => {
                         let (octant, next_pos) = Self::subdivide(self.height, pos);
                         let res = children[octant].remove(next_pos);
-                        std::mem::replace(&mut *boxed_node, Node::Branch(children));
+                        *boxed_node = Node::Branch(children);
                         self.node = Some(boxed_node);
                         res
                     }
