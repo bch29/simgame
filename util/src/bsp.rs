@@ -78,7 +78,7 @@ impl<T> Bsp<T> {
         }
     }
 
-    pub fn find<'a>(&'a self, bounds: Bounds<f64>, result: &mut Vec<(Point3<f64>, &'a T)>) {
+    pub fn find<F: FnMut(Point3<f64>, &T)>(&self, bounds: Bounds<f64>, func: &mut F) {
         let Branch {
             point,
             lower,
@@ -90,36 +90,64 @@ impl<T> Bsp<T> {
         };
 
         if bounds.contains_point(*point) {
-            result.push((*point, value));
+            func(*point, value);
         }
 
         let div_result = self.axis.divide_bounds(*point, bounds);
 
         if div_result.contains_upper() {
-            upper.find(bounds, result);
+            upper.find(bounds, func);
         }
 
         if div_result.contains_lower() {
-            lower.find(bounds, result);
+            lower.find(bounds, func);
+        }
+    }
+
+    pub fn find_mut<F: FnMut(Point3<f64>, &mut T)>(&mut self, bounds: Bounds<f64>, func: &mut F) {
+        let Branch {
+            point,
+            lower,
+            upper,
+            value,
+        } = match &mut self.branch {
+            None => return,
+            Some(branch) => &mut **branch,
+        };
+
+        if bounds.contains_point(*point) {
+            func(*point, value);
+        }
+
+        let div_result = self.axis.divide_bounds(*point, bounds);
+
+        if div_result.contains_upper() {
+            upper.find_mut(bounds, func);
+        }
+
+        if div_result.contains_lower() {
+            lower.find_mut(bounds, func);
         }
     }
 
     pub fn count(&self) -> usize {
-        let Branch { lower, upper, .. } = match &self.branch {
-            None => return 0,
-            Some(branch) => &**branch,
-        };
-
-        1 + lower.count() + upper.count()
+        match &self.branch {
+            None => 0,
+            Some(branch) => {
+                let Branch { lower, upper, .. } = &**branch;
+                1 + lower.count() + upper.count()
+            }
+        }
     }
 
     pub fn depth(&self) -> usize {
-        let Branch { lower, upper, .. } = match &self.branch {
-            None => return 0,
-            Some(branch) => &**branch,
-        };
-
-        1 + lower.depth().max(upper.depth())
+        match &self.branch {
+            None => 0,
+            Some(branch) => {
+                let Branch { lower, upper, .. } = &**branch;
+                1 + lower.depth().max(upper.depth())
+            }
+        }
     }
 }
 
@@ -209,11 +237,11 @@ mod tests {
         let mut found = Vec::new();
         tree.find(
             Bounds::new(Point3::new(-0.1, -0.1, -0.1), Vector3::new(2., 2., 2.)),
-            &mut found,
+            &mut |p, x| found.push((p, *x)),
         );
 
         assert_eq!(
-            found.into_iter().map(|(_, x)| *x).collect::<Vec<_>>(),
+            found.into_iter().map(|(_, x)| x).collect::<Vec<_>>(),
             vec![0, 4, 5]
         );
     }
