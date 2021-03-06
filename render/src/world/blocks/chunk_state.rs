@@ -21,6 +21,8 @@ pub(super) struct ChunkState {
     block_type_helper: BufferSyncHelper<u16>,
     block_type_buf: wgpu::Buffer,
     active_view_box: Option<Bounds<i32>>,
+
+    #[allow(unused)]
     max_visible_chunks: usize,
 }
 
@@ -86,17 +88,6 @@ impl ChunkState {
     #[allow(dead_code)]
     pub fn iter_chunk_positions<'a>(&'a self) -> impl Iterator<Item = Point3<i32>> + 'a {
         self.active_chunks.iter().map(|(&point, _, _)| point)
-    }
-
-    pub fn set_visible_size(&mut self, visible_size: Vector3<i32>) {
-        let visible_chunk_size = super::visible_size_to_chunks(visible_size);
-        let max_visible_chunks =
-            visible_chunk_size.x * visible_chunk_size.y * visible_chunk_size.z;
-
-        assert!(max_visible_chunks <= self.max_visible_chunks as i32);
-        if max_visible_chunks != self.active_chunks.capacity() as i32 {
-            self.active_chunks.set_capacity(max_visible_chunks as usize);
-        }
     }
 
     fn update_box_chunks(&mut self, view_box: Bounds<i32>, blocks: &BlockData) {

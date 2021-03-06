@@ -3,7 +3,7 @@ mod gui;
 mod mesh;
 pub mod resource;
 pub mod shaders;
-mod stable_map;
+pub mod stable_map;
 mod world;
 
 use std::time::Instant;

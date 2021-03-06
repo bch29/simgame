@@ -36,9 +36,6 @@ pub(crate) struct WorldRenderState {
     render_blocks: blocks::BlocksRenderState,
 
     view_state: ViewState,
-    // /// Contains textures for each block type.
-    // /// Dimensions are 16x16xN, where N is number of block types.
-    // block_master_texture: wgpu::TextureView
 }
 
 impl<'a> WorldRenderStateBuilder<'a> {
@@ -73,7 +70,6 @@ impl<'a> WorldRenderStateBuilder<'a> {
 impl WorldRenderState {
     pub fn set_view(&mut self, params: ViewParams) {
         self.view_state.params = params;
-        self.render_blocks.set_view(&params);
     }
 
     fn make_depth_texture(device: &wgpu::Device, size: Vector2<u32>) -> wgpu::Texture {

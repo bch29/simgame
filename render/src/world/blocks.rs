@@ -16,7 +16,7 @@ use crate::buffer_util::{
     InstancedBufferDesc, IntoBufferSynced,
 };
 use crate::mesh::cube::Cube;
-use crate::world::{self, ViewParams};
+use crate::world;
 
 use block_info::BlockInfoHandler;
 use chunk_state::ChunkState;
@@ -552,10 +552,6 @@ impl<'a> BlocksRenderStateBuilder<'a> {
 }
 
 impl BlocksRenderState {
-    pub fn set_view(&mut self, params: &ViewParams) {
-        self.chunk_state.set_visible_size(params.visible_size);
-    }
-
     pub fn set_depth_texture(&mut self, depth_texture: &wgpu::Texture) {
         self.render_stage.depth_texture = depth_texture.create_view(&Default::default());
     }
