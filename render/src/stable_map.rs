@@ -319,7 +319,7 @@ where
 }
 
 pub struct StableMapIter<K, V> {
-    entries: <Vec<Option<EntryInfo<K, V>>> as IntoIterator>::IntoIter
+    entries: <Vec<Option<EntryInfo<K, V>>> as IntoIterator>::IntoIter,
 }
 
 impl<K, V> Iterator for StableMapIter<K, V> {
@@ -331,18 +331,23 @@ impl<K, V> Iterator for StableMapIter<K, V> {
             match self.entries.next() {
                 None => break None,
                 Some(None) => continue,
-                Some(Some(entry)) => break Some((entry.key, entry.index, entry.value))
+                Some(Some(entry)) => break Some((entry.key, entry.index, entry.value)),
             }
         }
     }
 }
 
-impl<K, V> IntoIterator for StableMap<K, V> where K: Eq + Hash {
+impl<K, V> IntoIterator for StableMap<K, V>
+where
+    K: Eq + Hash,
+{
     type Item = (K, usize, V);
     type IntoIter = StableMapIter<K, V>;
 
     fn into_iter(self) -> Self::IntoIter {
-        StableMapIter { entries: self.entries.into_iter() }
+        StableMapIter {
+            entries: self.entries.into_iter(),
+        }
     }
 }
 

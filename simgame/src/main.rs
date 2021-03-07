@@ -126,7 +126,7 @@ async fn run_render_world(ctx: &FileContext, options: &RenderWorldOpts) -> Resul
         params,
         resource_loader,
         block_helper,
-        ctx.metrics_controller.clone()
+        ctx.metrics_controller.clone(),
     )
     .await
 }

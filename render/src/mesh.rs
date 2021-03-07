@@ -43,7 +43,8 @@ impl Mesh {
     pub fn union_from(&mut self, other: &Mesh) {
         let start_index = self.vertices.len() as u16;
         self.vertices.extend(other.vertices.iter().cloned());
-        self.indices.extend(other.indices.iter().cloned().map(|ix| start_index + ix));
+        self.indices
+            .extend(other.indices.iter().cloned().map(|ix| start_index + ix));
     }
 
     /// Combine two meshes, creating a mesh that is the union of the two.
