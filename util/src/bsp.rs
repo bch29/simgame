@@ -6,16 +6,110 @@ use crate::bounds::Bounds;
 
 #[derive(Clone, Debug)]
 pub struct Bsp<T> {
+    root_node: BspNode,
+    pool: BranchPool<T>,
+}
+
+impl<T> Bsp<T> {
+    pub fn new() -> Self {
+        Self {
+            root_node: BspNode::new(),
+            pool: Pool::new(),
+        }
+    }
+
+    pub fn clear(&mut self) {
+        self.root_node = BspNode::new();
+        self.pool.clear();
+    }
+
+    #[inline]
+    pub fn insert(&mut self, point: Point3<f64>, value: T) -> usize {
+        self.root_node.insert(&mut self.pool, point, value)
+    }
+
+    #[inline]
+    pub fn iter<F>(&self, bounds: Option<Bounds<f64>>, mut func: F)
+    where
+        F: FnMut(usize, Point3<f64>, &T),
+    {
+        self.root_node.iter(&self.pool, bounds, &mut func)
+    }
+
+    #[inline]
+    pub fn iter_mut<F>(&mut self, bounds: Option<Bounds<f64>>, mut func: F)
+    where
+        F: FnMut(usize, Point3<f64>, &mut T),
+    {
+        self.root_node.iter_mut(&mut self.pool, bounds, &mut func)
+    }
+
+    #[inline]
+    pub fn count(&self) -> usize {
+        self.root_node.count(&self.pool)
+    }
+
+    #[inline]
+    pub fn depth(&self) -> usize {
+        self.root_node.depth(&self.pool)
+    }
+}
+
+impl<T> Default for Bsp<T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+type BranchPool<T> = Pool<Branch<T>>;
+
+#[derive(Clone, Copy, Debug)]
+struct BspNode {
     axis: Axis,
-    branch: Option<Box<Branch<T>>>,
+    branch_ix: Option<usize>,
 }
 
 #[derive(Clone, Debug)]
 struct Branch<T> {
     point: Point3<f64>,
     value: T,
-    lower: Bsp<T>,
-    upper: Bsp<T>,
+    lower: BspNode,
+    upper: BspNode,
+}
+
+#[derive(Clone, Debug)]
+struct Pool<T> {
+    pool: Vec<T>,
+}
+
+impl<T> Pool<T> {
+    fn new() -> Self {
+        Self { pool: Vec::new() }
+    }
+
+    fn push(&mut self, item: T) -> usize {
+        let ix = self.pool.len();
+        self.pool.push(item);
+        ix
+    }
+
+    fn clear(&mut self) {
+        self.pool.clear()
+    }
+}
+
+impl<T> std::ops::Index<usize> for Pool<T> {
+    type Output = T;
+
+    fn index(&self, index: usize) -> &Self::Output {
+        &self.pool[index]
+    }
+}
+
+impl<T> std::ops::IndexMut<usize> for Pool<T> {
+    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
+        &mut self.pool[index]
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -38,122 +132,152 @@ enum DivideBoundsResult {
     Both,
 }
 
-impl<T> Bsp<T> {
-    pub fn new() -> Self {
+impl BspNode {
+    fn new() -> Self {
         Self {
             axis: Axis::X,
-            branch: None,
+            branch_ix: None,
         }
     }
 
-    pub fn insert(&mut self, point: Point3<f64>, value: T) {
-        match &mut self.branch {
+    fn insert<T>(&mut self, pool: &mut BranchPool<T>, point: Point3<f64>, value: T) -> usize {
+        match self.branch_ix {
             None => {
-                self.branch = Some(Box::new(Branch {
+                let res = pool.push(Branch {
                     point,
                     value,
-                    lower: Bsp {
+                    lower: BspNode {
                         axis: self.axis.next(),
-                        branch: None,
+                        branch_ix: None,
                     },
-                    upper: Bsp {
+                    upper: BspNode {
                         axis: self.axis.next(),
-                        branch: None,
+                        branch_ix: None,
                     },
-                }))
+                });
+                self.branch_ix = Some(res);
+                res
             }
-            Some(branch) => {
+            Some(branch_ix) => {
+                // look up branch and take temporary copies of nodes to avoid holding on to pool
+                // reference, which we later need as mutable
                 let Branch {
                     point: branch_point,
                     lower,
                     upper,
                     ..
-                } = &mut **branch;
+                } = &pool[branch_ix];
+                let mut tmp_lower = *lower;
+                let mut tmp_upper = *upper;
 
-                match self.axis.divide_point(*branch_point, point) {
-                    DividePointResult::Lower => lower.insert(point, value),
-                    DividePointResult::Upper => upper.insert(point, value),
+                // update temporary copies
+                let res = match self.axis.divide_point(*branch_point, point) {
+                    DividePointResult::Lower => tmp_lower.insert(pool, point, value),
+                    DividePointResult::Upper => tmp_upper.insert(pool, point, value),
+                };
+
+                // insert updated nodes back into tree
+                let Branch { lower, upper, .. } = &mut pool[branch_ix];
+                *lower = tmp_lower;
+                *upper = tmp_upper;
+
+                res
+            }
+        }
+    }
+
+    fn iter<T, F>(&self, pool: &BranchPool<T>, bounds: Option<Bounds<f64>>, func: &mut F)
+    where
+        F: FnMut(usize, Point3<f64>, &T),
+    {
+        let branch_ix = match self.branch_ix {
+            None => return,
+            Some(branch_ix) => branch_ix,
+        };
+        let Branch {
+            point,
+            lower,
+            upper,
+            value,
+        } = &pool[branch_ix];
+
+        let div_result = match bounds {
+            None => DivideBoundsResult::Both,
+            Some(bounds) => {
+                if bounds.contains_point(*point) {
+                    func(branch_ix, *point, value);
                 }
+
+                self.axis.divide_bounds(*point, bounds)
             }
+        };
+
+        if div_result.contains_upper() {
+            upper.iter(pool, bounds, func);
+        }
+
+        if div_result.contains_lower() {
+            lower.iter(pool, bounds, func);
         }
     }
 
-    pub fn find<F: FnMut(Point3<f64>, &T)>(&self, bounds: Bounds<f64>, func: &mut F) {
+    fn iter_mut<T, F>(&self, pool: &mut BranchPool<T>, bounds: Option<Bounds<f64>>, func: &mut F)
+    where
+        F: FnMut(usize, Point3<f64>, &mut T),
+    {
+        let branch_ix = match self.branch_ix {
+            None => return,
+            Some(branch_ix) => branch_ix,
+        };
         let Branch {
             point,
             lower,
             upper,
             value,
-        } = match &self.branch {
-            None => return,
-            Some(branch) => &**branch,
+        } = &mut pool[branch_ix];
+
+        // take copies of nodes in order to drop mutable reference to pool
+        let lower = *lower;
+        let upper = *upper;
+
+        let div_result = match bounds {
+            None => DivideBoundsResult::Both,
+            Some(bounds) => {
+                if bounds.contains_point(*point) {
+                    func(branch_ix, *point, value);
+                }
+
+                self.axis.divide_bounds(*point, bounds)
+            }
         };
 
-        if bounds.contains_point(*point) {
-            func(*point, value);
-        }
-
-        let div_result = self.axis.divide_bounds(*point, bounds);
-
         if div_result.contains_upper() {
-            upper.find(bounds, func);
+            upper.iter_mut(pool, bounds, func);
         }
 
         if div_result.contains_lower() {
-            lower.find(bounds, func);
+            lower.iter_mut(pool, bounds, func);
         }
     }
 
-    pub fn find_mut<F: FnMut(Point3<f64>, &mut T)>(&mut self, bounds: Bounds<f64>, func: &mut F) {
-        let Branch {
-            point,
-            lower,
-            upper,
-            value,
-        } = match &mut self.branch {
-            None => return,
-            Some(branch) => &mut **branch,
-        };
-
-        if bounds.contains_point(*point) {
-            func(*point, value);
-        }
-
-        let div_result = self.axis.divide_bounds(*point, bounds);
-
-        if div_result.contains_upper() {
-            upper.find_mut(bounds, func);
-        }
-
-        if div_result.contains_lower() {
-            lower.find_mut(bounds, func);
-        }
-    }
-
-    pub fn count(&self) -> usize {
-        match &self.branch {
+    fn count<T>(&self, pool: &BranchPool<T>) -> usize {
+        match self.branch_ix {
             None => 0,
-            Some(branch) => {
-                let Branch { lower, upper, .. } = &**branch;
-                1 + lower.count() + upper.count()
+            Some(branch_ix) => {
+                let Branch { lower, upper, .. } = &pool[branch_ix];
+                1 + lower.count(pool) + upper.count(pool)
             }
         }
     }
 
-    pub fn depth(&self) -> usize {
-        match &self.branch {
+    fn depth<T>(&self, pool: &BranchPool<T>) -> usize {
+        match self.branch_ix {
             None => 0,
-            Some(branch) => {
-                let Branch { lower, upper, .. } = &**branch;
-                1 + lower.depth().max(upper.depth())
+            Some(branch_ix) => {
+                let Branch { lower, upper, .. } = &pool[branch_ix];
+                1 + lower.depth(pool).max(upper.depth(pool))
             }
         }
-    }
-}
-
-impl<T> Default for Bsp<T> {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
@@ -235,13 +359,13 @@ mod tests {
         tree.insert(Point3::new(0.2, 0.2, 0.2), 5);
 
         let mut found = Vec::new();
-        tree.find(
-            Bounds::new(Point3::new(-0.1, -0.1, -0.1), Vector3::new(2., 2., 2.)),
-            &mut |p, x| found.push((p, *x)),
+        tree.iter(
+            Some(Bounds::new(Point3::new(-0.1, -0.1, -0.1), Vector3::new(2., 2., 2.))),
+            |ix, p, x| found.push((ix, p, *x)),
         );
 
         assert_eq!(
-            found.into_iter().map(|(_, x)| x).collect::<Vec<_>>(),
+            found.into_iter().map(|(_, _, x)| x).collect::<Vec<_>>(),
             vec![0, 4, 5]
         );
     }
