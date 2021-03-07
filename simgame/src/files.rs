@@ -4,8 +4,8 @@ use anyhow::{anyhow, bail, Context, Result};
 use directories::UserDirs;
 use serde::{Deserialize, Serialize};
 
-use simgame_voxels::VoxelData;
 use simgame_util::Bounds;
+use simgame_voxels::VoxelData;
 
 use crate::settings::{CoreSettings, Settings};
 

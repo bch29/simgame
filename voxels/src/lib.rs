@@ -1,13 +1,13 @@
 //! Types used to represent the voxel-based world.
 //!
-mod voxel_data;
 pub mod config;
 mod core;
 pub mod index_utils;
 pub mod primitive;
 mod update;
+mod voxel_data;
 
-pub use crate::voxel_data::VoxelData;
 pub use crate::config::{VoxelConfig, VoxelConfigHelper};
-pub use crate::core::{voxels_to_u16, Voxel, VoxelRaycastHit, Chunk};
-pub use crate::update::{VoxelUpdater, UpdatedVoxelsState};
+pub use crate::core::{voxels_to_u16, Chunk, Voxel, VoxelRaycastHit};
+pub use crate::update::{UpdatedVoxelsState, VoxelUpdater};
+pub use crate::voxel_data::VoxelData;

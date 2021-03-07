@@ -2,8 +2,8 @@ use std::collections::{HashMap, HashSet};
 
 use cgmath::{ElementWise, EuclideanSpace, Point3, Vector3};
 
-use simgame_voxels::{index_utils, VoxelData, Chunk, UpdatedVoxelsState};
-use simgame_util::{convert_point, convert_vec, Bounds, stable_map::StableMap};
+use simgame_util::{convert_point, convert_vec, stable_map::StableMap, Bounds};
+use simgame_voxels::{index_utils, Chunk, UpdatedVoxelsState, VoxelData};
 
 use crate::buffer_util::{BufferSyncHelper, BufferSyncHelperDesc};
 
@@ -41,7 +41,7 @@ impl ChunkState {
         max_visible_chunks: usize,
         visible_size: Vector3<i32>,
     ) -> Self {
-        let visible_chunk_size = super::visible_size_to_chunks(visible_size);
+        let visible_chunk_size = crate::visible_size_to_chunks(visible_size);
 
         let active_visible_chunks =
             visible_chunk_size.x * visible_chunk_size.y * visible_chunk_size.z;
@@ -132,8 +132,8 @@ impl ChunkState {
             return false; // nothing changed at all
         }
 
-        let new_chunk_box = super::view_box_to_chunks(active_view_box);
-        let old_chunk_box = super::view_box_to_chunks(old_view_box);
+        let new_chunk_box = view_box_to_chunks(active_view_box);
+        let old_chunk_box = view_box_to_chunks(old_view_box);
 
         if new_chunk_box == old_chunk_box {
             return true; // set of active chunks didn't change but visible voxels at edges did
@@ -170,7 +170,7 @@ impl ChunkState {
 
     pub fn apply_chunk_diff(&mut self, voxels: &VoxelData, diff: &UpdatedVoxelsState) {
         let active_chunk_box = match self.active_view_box {
-            Some(active_view_box) => super::view_box_to_chunks(active_view_box),
+            Some(active_view_box) => view_box_to_chunks(active_view_box),
             None => return,
         };
 
@@ -395,4 +395,8 @@ impl ChunkMetaTracker {
             _padding1: 0,
         }
     }
+}
+
+fn view_box_to_chunks(view_box: Bounds<i32>) -> Bounds<i32> {
+    view_box.quantize_down(convert_vec!(index_utils::chunk_size(), i32))
 }

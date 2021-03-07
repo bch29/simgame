@@ -3,22 +3,37 @@ mod gui;
 mod mesh;
 pub mod resource;
 pub mod shaders;
+mod voxels;
 mod world;
 
 use std::time::Instant;
 
 use anyhow::{anyhow, bail, Result};
-use cgmath::Vector2;
+use cgmath::{Matrix4, Point3, Vector2, Vector3};
 use raw_window_handle::HasRawWindowHandle;
 
-use simgame_voxels::VoxelConfigHelper;
 use simgame_types::{UpdatedWorldState, World};
-
-pub use world::{visible_size_to_chunks, ViewParams};
+use simgame_util::{convert_vec, DivUp};
+use simgame_voxels::{index_utils, VoxelConfigHelper};
 
 use gui::{GuiRenderState, GuiRenderStateBuilder};
 use resource::ResourceLoader;
 use world::{WorldRenderState, WorldRenderStateBuilder};
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ViewParams {
+    pub camera_pos: Point3<f32>,
+    pub z_level: i32,
+    pub visible_size: Vector3<i32>,
+    pub look_at_dir: Vector3<f32>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct ViewState {
+    pub params: ViewParams,
+    pub proj: Matrix4<f32>,
+    pub rotation: Matrix4<f32>,
+}
 
 pub struct RenderStateBuilder<'a, W> {
     pub window: &'a W,
@@ -45,7 +60,7 @@ pub struct RenderState {
     gui_render_state: GuiRenderState,
 }
 
-pub(crate) struct GraphicsContext {
+struct GraphicsContext {
     pub device: wgpu::Device,
     pub queue: wgpu::Queue,
     pub resource_loader: ResourceLoader,
@@ -58,7 +73,7 @@ struct DeviceResult {
     pub multi_draw_enabled: bool,
 }
 
-pub struct FrameRenderContext {
+struct FrameRenderContext {
     pub frame: wgpu::SwapChainFrame,
     pub encoder: wgpu::CommandEncoder,
 }
@@ -221,4 +236,8 @@ impl RenderState {
             present_mode: wgpu::PresentMode::Fifo,
         }
     }
+}
+
+pub fn visible_size_to_chunks(visible_size: Vector3<i32>) -> Vector3<i32> {
+    visible_size.div_up(convert_vec!(index_utils::chunk_size(), i32)) + Vector3::new(1, 1, 1)
 }

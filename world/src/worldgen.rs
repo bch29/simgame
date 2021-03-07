@@ -6,8 +6,8 @@ use log::info;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 
-use simgame_voxels::{Voxel, VoxelConfigHelper, VoxelData, VoxelUpdater};
 use simgame_util::Bounds;
+use simgame_voxels::{Voxel, VoxelConfigHelper, VoxelData, VoxelUpdater};
 
 use crate::{tree, UpdatedWorldState};
 

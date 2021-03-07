@@ -2,9 +2,9 @@ use std::collections::HashSet;
 
 use cgmath::Point3;
 
-use crate::voxel_data::VoxelData;
 use crate::index_utils;
-use crate::{Voxel, Chunk};
+use crate::voxel_data::VoxelData;
+use crate::{Chunk, Voxel};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UpdatedVoxelsState {

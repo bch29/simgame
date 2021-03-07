@@ -1,5 +1,5 @@
-mod voxel_info;
 mod chunk_state;
+mod voxel_info;
 
 use std::convert::TryInto;
 use std::time::Instant;
@@ -8,28 +8,28 @@ use anyhow::Result;
 use cgmath::{Point3, Vector3};
 use zerocopy::{AsBytes, FromBytes};
 
-use simgame_voxels::{index_utils, VoxelConfigHelper, VoxelData, UpdatedVoxelsState};
-use simgame_util::{convert_point, convert_vec, Bounds, DivUp};
+use simgame_util::{convert_point, Bounds};
+use simgame_voxels::{index_utils, UpdatedVoxelsState, VoxelConfigHelper, VoxelData};
 
 use crate::buffer_util::{
     BufferSyncHelperDesc, BufferSyncable, BufferSyncedData, FillBuffer, InstancedBuffer,
     InstancedBufferDesc, IntoBufferSynced,
 };
 use crate::mesh::cube::Cube;
-use crate::world;
+use crate::ViewState;
 
-use voxel_info::VoxelInfoManager;
 use chunk_state::ChunkState;
+use voxel_info::VoxelInfoManager;
 
-pub(crate) struct VoxelsRenderStateBuilder<'a> {
+pub(crate) struct VoxelRenderStateBuilder<'a> {
     pub depth_texture: &'a wgpu::Texture,
-    pub view_state: &'a world::ViewState,
+    pub view_state: &'a ViewState,
     pub voxels: &'a VoxelData,
     pub max_visible_chunks: usize,
     pub voxel_config: &'a VoxelConfigHelper,
 }
 
-pub(crate) struct VoxelsRenderState {
+pub(crate) struct VoxelRenderState {
     chunk_state: ChunkState,
     compute_stage: ComputeStage,
     render_stage: RenderStage,
@@ -104,8 +104,8 @@ struct ChunkMeta {
     _padding1: i32,
 }
 
-impl<'a> VoxelsRenderStateBuilder<'a> {
-    pub fn build(self, ctx: &crate::GraphicsContext) -> Result<VoxelsRenderState> {
+impl<'a> VoxelRenderStateBuilder<'a> {
+    pub fn build(self, ctx: &crate::GraphicsContext) -> Result<VoxelRenderState> {
         let voxel_info_manager =
             VoxelInfoManager::new(self.voxel_config, &ctx.resource_loader, ctx)?;
 
@@ -171,11 +171,11 @@ impl<'a> VoxelsRenderStateBuilder<'a> {
             frag_shader,
         );
 
-        Ok(VoxelsRenderState {
+        Ok(VoxelRenderState {
             chunk_state,
             compute_stage,
             render_stage,
-            geometry_buffers
+            geometry_buffers,
         })
     }
 
@@ -547,7 +547,7 @@ impl<'a> VoxelsRenderStateBuilder<'a> {
     }
 }
 
-impl VoxelsRenderState {
+impl VoxelRenderState {
     pub fn set_depth_texture(&mut self, depth_texture: &wgpu::Texture) {
         self.render_stage.depth_texture = depth_texture.create_view(&Default::default());
     }
@@ -556,7 +556,7 @@ impl VoxelsRenderState {
         &mut self,
         ctx: &crate::GraphicsContext,
         frame_render: &mut crate::FrameRenderContext,
-        _view_state: &world::ViewState,
+        _view_state: &ViewState,
     ) {
         let ts_begin = Instant::now();
         self.chunk_state.update_buffers(&ctx.queue);
@@ -574,7 +574,7 @@ impl VoxelsRenderState {
         &mut self,
         voxels: &VoxelData,
         diff: &UpdatedVoxelsState,
-        view_state: &world::ViewState,
+        view_state: &ViewState,
     ) {
         if let Some(active_view_box) = view_state.params.calculate_view_box() {
             self.compute_stage.uniforms.update_view_box(active_view_box);
@@ -662,7 +662,7 @@ impl VoxelsRenderState {
 }
 
 impl RenderUniforms {
-    fn new(view_state: &world::ViewState) -> Self {
+    fn new(view_state: &ViewState) -> Self {
         Self {
             proj: view_state.proj().into(),
             model: view_state.model().into(),
@@ -729,12 +729,4 @@ impl IntoBufferSynced for ComputeUniforms {
             usage: wgpu::BufferUsage::STORAGE | wgpu::BufferUsage::COPY_DST,
         }
     }
-}
-
-pub fn visible_size_to_chunks(visible_size: Vector3<i32>) -> Vector3<i32> {
-    visible_size.div_up(convert_vec!(index_utils::chunk_size(), i32)) + Vector3::new(1, 1, 1)
-}
-
-fn view_box_to_chunks(view_box: Bounds<i32>) -> Bounds<i32> {
-    view_box.quantize_down(convert_vec!(index_utils::chunk_size(), i32))
 }

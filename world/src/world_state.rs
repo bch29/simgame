@@ -4,10 +4,10 @@ use anyhow::{anyhow, Result};
 use cgmath::{EuclideanSpace, Matrix4, Point3, Vector3};
 use rand::SeedableRng;
 
-use simgame_voxels::primitive::{self, Primitive};
-use simgame_voxels::{index_utils, Voxel, VoxelConfigHelper, VoxelRaycastHit, VoxelUpdater};
 use simgame_util::ray::Ray;
 use simgame_util::{convert_point, Bounds};
+use simgame_voxels::primitive::{self, Primitive};
+use simgame_voxels::{index_utils, Voxel, VoxelConfigHelper, VoxelRaycastHit, VoxelUpdater};
 
 use crate::{
     background_object::{self, BackgroundObject},

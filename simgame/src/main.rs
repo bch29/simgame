@@ -6,8 +6,8 @@ use anyhow::{anyhow, Result};
 use structopt::StructOpt;
 
 use simgame::files::FileContext;
-use simgame_voxels::VoxelConfigHelper;
 use simgame_render::resource::{self, ResourceLoader};
+use simgame_voxels::VoxelConfigHelper;
 use simgame_world::{worldgen, World};
 
 #[derive(Debug, StructOpt)]

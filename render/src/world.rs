@@ -1,28 +1,11 @@
-mod voxels;
-
 use anyhow::Result;
 use cgmath::{Deg, InnerSpace, Matrix4, Point3, SquareMatrix, Vector2, Vector3};
 
-use simgame_voxels::VoxelConfigHelper;
 use simgame_types::{UpdatedWorldState, World};
 use simgame_util::{convert_point, convert_vec, Bounds};
+use simgame_voxels::VoxelConfigHelper;
 
-pub use voxels::visible_size_to_chunks;
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct ViewParams {
-    pub camera_pos: Point3<f32>,
-    pub z_level: i32,
-    pub visible_size: Vector3<i32>,
-    pub look_at_dir: Vector3<f32>,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct ViewState {
-    params: ViewParams,
-    proj: Matrix4<f32>,
-    rotation: Matrix4<f32>,
-}
+use crate::{voxels, ViewParams, ViewState};
 
 pub(crate) struct WorldRenderStateBuilder<'a> {
     pub view_params: ViewParams,
@@ -33,7 +16,7 @@ pub(crate) struct WorldRenderStateBuilder<'a> {
 }
 
 pub(crate) struct WorldRenderState {
-    render_voxels: voxels::VoxelsRenderState,
+    render_voxels: voxels::VoxelRenderState,
 
     view_state: ViewState,
 }
@@ -51,7 +34,7 @@ impl<'a> WorldRenderStateBuilder<'a> {
             rotation: Matrix4::identity(),
         };
 
-        let render_voxels = voxels::VoxelsRenderStateBuilder {
+        let render_voxels = voxels::VoxelRenderStateBuilder {
             view_state: &view_state,
             depth_texture: &depth_texture,
             voxels: &self.world.voxels,

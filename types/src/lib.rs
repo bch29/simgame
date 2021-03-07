@@ -1,5 +1,5 @@
-pub use simgame_voxels::{VoxelData, UpdatedVoxelsState};
 pub use simgame_util::bsp::Bsp;
+pub use simgame_voxels::{UpdatedVoxelsState, VoxelData};
 
 pub mod entity;
 
