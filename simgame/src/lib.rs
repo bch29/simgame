@@ -189,7 +189,6 @@ impl<'a> TestRenderBuilder<'a> {
             window: &window,
             physical_win_size,
             resource_loader: self.resource_loader,
-            display_size: physical_win_size,
             world: &self.world,
             voxel_helper: &self.voxel_helper,
             view_params,

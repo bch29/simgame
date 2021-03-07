@@ -11,7 +11,7 @@ type ActiveChunks = StableMap<Point3<i32>, Chunk>;
 
 use super::ChunkMeta;
 
-pub(super) struct ChunkState {
+pub struct ChunkState {
     active_chunks: ActiveChunks,
     meta_tracker: ChunkMetaTracker,
 
@@ -20,9 +20,6 @@ pub(super) struct ChunkState {
     voxel_type_helper: BufferSyncHelper<u16>,
     voxel_type_buf: wgpu::Buffer,
     active_view_box: Option<Bounds<i32>>,
-
-    #[allow(unused)]
-    max_visible_chunks: usize,
 }
 
 struct ChunkMetaTracker {
@@ -72,7 +69,6 @@ impl ChunkState {
             chunk_metadata_buf: chunk_metadata_helper.make_buffer(device),
             chunk_metadata_helper,
             active_view_box: None,
-            max_visible_chunks,
         }
     }
 

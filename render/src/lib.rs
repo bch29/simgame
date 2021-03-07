@@ -4,21 +4,19 @@ mod mesh;
 pub mod resource;
 pub mod shaders;
 mod voxels;
-mod world;
 
 use std::time::Instant;
 
 use anyhow::{anyhow, bail, Result};
-use cgmath::{Matrix4, Point3, Vector2, Vector3};
+use cgmath::{Deg, InnerSpace, Matrix4, Point3, SquareMatrix, Vector2, Vector3};
 use raw_window_handle::HasRawWindowHandle;
 
 use simgame_types::{UpdatedWorldState, World};
-use simgame_util::{convert_vec, DivUp};
+use simgame_util::{convert_point, convert_vec, Bounds, DivUp};
 use simgame_voxels::{index_utils, VoxelConfigHelper};
 
 use gui::{GuiRenderState, GuiRenderStateBuilder};
 use resource::ResourceLoader;
-use world::{WorldRenderState, WorldRenderStateBuilder};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ViewParams {
@@ -32,15 +30,12 @@ pub struct ViewParams {
 struct ViewState {
     pub params: ViewParams,
     pub proj: Matrix4<f32>,
-    pub rotation: Matrix4<f32>,
 }
 
 pub struct RenderStateBuilder<'a, W> {
     pub window: &'a W,
     pub physical_win_size: Vector2<u32>,
     pub resource_loader: ResourceLoader,
-
-    pub display_size: Vector2<u32>,
     pub view_params: ViewParams,
     pub world: &'a World,
     pub voxel_helper: &'a VoxelConfigHelper,
@@ -56,8 +51,10 @@ pub struct RenderState {
     ctx: GraphicsContext,
     surface: wgpu::Surface,
     swapchain: wgpu::SwapChain,
-    world_render_state: WorldRenderState,
     gui_render_state: GuiRenderState,
+    voxel_state: voxels::VoxelRenderState,
+    view_state: ViewState,
+    voxel_pipeline: voxels::VoxelRenderPipeline,
 }
 
 struct GraphicsContext {
@@ -103,17 +100,26 @@ where
             resource_loader: self.resource_loader,
         };
 
-        let swapchain_descriptor = RenderState::swapchain_descriptor(self.physical_win_size);
+        let swapchain_descriptor = swapchain_descriptor(self.physical_win_size);
         let swapchain = ctx
             .device
             .create_swap_chain(&surface, &swapchain_descriptor);
 
-        let world_render_state = WorldRenderStateBuilder {
-            view_params: self.view_params,
-            world: self.world,
-            voxel_helper: self.voxel_helper,
+        let view_state = ViewState::new(self.view_params, self.physical_win_size);
+
+        let voxel_info_manager =
+            voxels::VoxelInfoManager::new(self.voxel_helper, &ctx.resource_loader, &ctx)?;
+
+        let voxel_pipeline = voxels::VoxelRenderPipeline::new(&ctx, voxel_info_manager)?;
+
+        let depth_texture = make_depth_texture(&ctx.device, self.physical_win_size);
+        let voxel_state = voxels::VoxelRenderStateBuilder {
+            view_state: &view_state,
+            model: SquareMatrix::identity(),
+            depth_texture: &depth_texture,
+            voxels: &self.world.voxels,
             max_visible_chunks: self.max_visible_chunks,
-            swapchain: &swapchain_descriptor,
+            pipeline: &voxel_pipeline,
         }
         .build(&ctx)?;
 
@@ -126,7 +132,9 @@ where
             ctx,
             surface,
             swapchain,
-            world_render_state,
+            view_state,
+            voxel_pipeline,
+            voxel_state,
             gui_render_state,
         })
     }
@@ -134,15 +142,19 @@ where
 
 impl RenderState {
     pub fn update_win_size(&mut self, physical_win_size: Vector2<u32>) -> Result<()> {
-        let swapchain_descriptor = Self::swapchain_descriptor(physical_win_size);
+        let swapchain_descriptor = swapchain_descriptor(physical_win_size);
         let swapchain = self
             .ctx
             .device
             .create_swap_chain(&self.surface, &swapchain_descriptor);
 
         self.swapchain = swapchain;
-        self.world_render_state
-            .update_swapchain(&self.ctx, &swapchain_descriptor)?;
+
+        let depth_texture = make_depth_texture(&self.ctx.device, physical_win_size);
+        self.voxel_state.set_depth_texture(&depth_texture);
+
+        self.view_state.update_display_size(physical_win_size);
+
         self.gui_render_state
             .update_swapchain(&self.ctx, &swapchain_descriptor)?;
         Ok(())
@@ -197,7 +209,7 @@ impl RenderState {
     }
 
     pub fn set_world_view(&mut self, params: ViewParams) {
-        self.world_render_state.set_view(params);
+        self.view_state.params = params;
     }
 
     pub fn render_frame(&mut self) -> Result<()> {
@@ -209,7 +221,12 @@ impl RenderState {
 
         let mut render = FrameRenderContext { encoder, frame };
 
-        self.world_render_state.render_frame(&self.ctx, &mut render);
+        self.voxel_pipeline.render_frame(
+            &self.ctx,
+            &mut render,
+            &mut self.voxel_state,
+            &self.view_state,
+        );
         self.gui_render_state.render_frame(&self.ctx, &mut render);
 
         let ts_begin = Instant::now();
@@ -224,20 +241,129 @@ impl RenderState {
     }
 
     pub fn update(&mut self, world: &World, diff: &UpdatedWorldState) {
-        self.world_render_state.update(world, diff);
-    }
-
-    fn swapchain_descriptor(win_size: Vector2<u32>) -> wgpu::SwapChainDescriptor {
-        wgpu::SwapChainDescriptor {
-            usage: wgpu::TextureUsage::RENDER_ATTACHMENT,
-            format: wgpu::TextureFormat::Bgra8UnormSrgb,
-            width: win_size.x,
-            height: win_size.y,
-            present_mode: wgpu::PresentMode::Fifo,
-        }
+        self.voxel_state.update(
+            &world.voxels,
+            &diff.voxels,
+            &self.view_state,
+            SquareMatrix::identity(),
+        );
     }
 }
 
 pub fn visible_size_to_chunks(visible_size: Vector3<i32>) -> Vector3<i32> {
     visible_size.div_up(convert_vec!(index_utils::chunk_size(), i32)) + Vector3::new(1, 1, 1)
 }
+
+fn create_projection_matrix(aspect_ratio: f32) -> Matrix4<f32> {
+    OPENGL_TO_WGPU_MATRIX * cgmath::perspective(Deg(70f32), aspect_ratio, 1.0, 1000.0)
+}
+
+fn make_depth_texture(device: &wgpu::Device, size: Vector2<u32>) -> wgpu::Texture {
+    device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("world depth texture"),
+        size: wgpu::Extent3d {
+            width: size.x,
+            height: size.y,
+            depth: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Depth32Float,
+        usage: wgpu::TextureUsage::RENDER_ATTACHMENT,
+    })
+}
+
+fn swapchain_descriptor(win_size: Vector2<u32>) -> wgpu::SwapChainDescriptor {
+    wgpu::SwapChainDescriptor {
+        usage: wgpu::TextureUsage::RENDER_ATTACHMENT,
+        format: wgpu::TextureFormat::Bgra8UnormSrgb,
+        width: win_size.x,
+        height: win_size.y,
+        present_mode: wgpu::PresentMode::Fifo,
+    }
+}
+
+impl ViewParams {
+    /// Calculates the box containing voxels that will be rendered according to current view.
+    pub fn calculate_view_box(&self) -> Option<Bounds<i32>> {
+        let visible_distance = Vector2 {
+            x: self.visible_size.x as f32,
+            y: self.visible_size.y as f32,
+        }
+        .magnitude()
+            / 3.;
+
+        let mut center = self.camera_pos + visible_distance * self.look_at_dir.normalize();
+
+        // z_level is the topmost visible level
+        center.z = self.z_level as f32 + 1.0 - self.visible_size.z as f32 / 2.0;
+
+        let size = convert_vec!(self.visible_size, f32);
+        let float_bounds = Bounds::new(center - 0.5 * size, size);
+
+        Some(Bounds::new(
+            convert_point!(float_bounds.origin(), i32),
+            convert_vec!(float_bounds.size(), i32),
+        ))
+    }
+
+    pub fn effective_camera_pos(&self) -> Point3<f32> {
+        self.camera_pos + Vector3::unit_z() * self.z_level as f32
+    }
+}
+
+impl Default for ViewParams {
+    fn default() -> Self {
+        ViewParams {
+            camera_pos: Point3::new(0., 0., 0.),
+            z_level: 0,
+            visible_size: Vector3::new(1, 1, 1),
+            look_at_dir: Vector3::new(1.0, 1.0, -6.0),
+        }
+    }
+}
+
+impl ViewState {
+    fn new(params: ViewParams, display_size: Vector2<u32>) -> Self {
+        let aspect_ratio = display_size.x as f32 / display_size.y as f32;
+
+        ViewState {
+            params,
+            proj: create_projection_matrix(aspect_ratio),
+        }
+    }
+
+    pub fn params(&self) -> ViewParams {
+        self.params
+    }
+
+    pub fn proj(&self) -> Matrix4<f32> {
+        self.proj
+    }
+
+    pub fn view(&self) -> Matrix4<f32> {
+        Matrix4::look_at_dir(
+            Point3::new(0., 0., 0.),
+            self.params().look_at_dir,
+            Vector3::unit_z(),
+        )
+    }
+
+    pub fn camera_pos(&self) -> Point3<f32> {
+        self.params.effective_camera_pos()
+    }
+
+    pub fn update_display_size(&mut self, display_size: Vector2<u32>) {
+        let aspect_ratio = display_size.x as f32 / display_size.y as f32;
+        self.proj = create_projection_matrix(aspect_ratio);
+    }
+}
+
+#[rustfmt::skip]
+pub const OPENGL_TO_WGPU_MATRIX: Matrix4<f32> = Matrix4::new(
+    1.0, 0.0, 0.0, 0.0,
+    0.0, 1.0, 0.0, 0.0,
+    0.0, 0.0, 0.5, 0.0,
+    0.0, 0.0, 0.5, 1.0,
+);

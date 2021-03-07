@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::convert::TryInto;
 
 use anyhow::{anyhow, bail, Result};
-use zerocopy::AsBytes;
+use zerocopy::{AsBytes, FromBytes};
 
 use simgame_voxels::{config as voxel, VoxelConfigHelper};
 
@@ -10,18 +10,37 @@ use crate::buffer_util::{InstancedBuffer, InstancedBufferDesc};
 use crate::mesh::cube::Cube;
 use crate::resource::ResourceLoader;
 
-use super::{VoxelRenderInfo, VoxelTextureMetadata};
-
-#[allow(unused)]
-pub(super) struct VoxelInfoManager {
+/// Manages all GPU buffers that are static for any given set of voxel types.
+pub(crate) struct VoxelInfoManager {
     pub index_map: HashMap<voxel::FaceTexture, usize>,
 
+    #[allow(unused)]
     texture_arr: Vec<TextureData>,
     pub texture_arr_views: Vec<wgpu::TextureView>,
     pub sampler: wgpu::Sampler,
 
     pub voxel_info_buf: InstancedBuffer,
     pub texture_metadata_buf: InstancedBuffer,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, AsBytes, FromBytes, Default)]
+struct VoxelTextureMetadata {
+    periodicity: u32,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, AsBytes, FromBytes, Default)]
+struct VoxelRenderInfo {
+    // index into texture list, by face
+    face_tex_ids: [u32; 6],
+    _padding: [u32; 2],
+    vertex_data: Cube,
+}
+
+struct TextureData {
+    texture: wgpu::Texture,
+    mip_level_count: u32,
 }
 
 impl VoxelInfoManager {
@@ -131,7 +150,7 @@ impl VoxelInfoManager {
         resource_loader: &ResourceLoader,
         face_tex: &voxel::FaceTexture,
     ) -> Result<TextureData> {
-        let sample_generator = to_sample_generator(resource_loader, face_tex)?;
+        let sample_generator = sample_gen::to_sample_generator(resource_loader, face_tex)?;
 
         let (width, height) = sample_generator.source_dimensions();
         if log2_exact(width).is_none() || log2_exact(height).is_none() {
@@ -242,98 +261,99 @@ impl VoxelInfoManager {
     }
 }
 
-struct TextureData {
-    texture: wgpu::Texture,
-    mip_level_count: u32,
-}
+mod sample_gen {
+    use super::voxel;
+    use super::ResourceLoader;
+    use super::Result;
 
-trait SampleGenerator {
-    /// Returns the buffer of samples and the number of bytes per row in the result.
-    fn generate(&self, width: u32, height: u32) -> (Vec<u8>, u32);
+    pub trait SampleGenerator {
+        /// Returns the buffer of samples and the number of bytes per row in the result.
+        fn generate(&self, width: u32, height: u32) -> (Vec<u8>, u32);
 
-    fn source_dimensions(&self) -> (u32, u32);
-}
-
-fn to_sample_generator(
-    resource_loader: &ResourceLoader,
-    face_tex: &voxel::FaceTexture,
-) -> Result<Box<dyn SampleGenerator>> {
-    match face_tex {
-        voxel::FaceTexture::SolidColor { red, green, blue } => {
-            log::info!(
-                "Creating solid color texture with R/G/B {}/{}/{}",
-                red,
-                green,
-                blue
-            );
-            Ok(Box::new(SolidColorSampleGenerator {
-                red: *red,
-                green: *green,
-                blue: *blue,
-            }))
-        }
-        voxel::FaceTexture::Texture { resource, .. } => {
-            log::info!("Loading voxel texture {:?}", resource);
-            let image = resource_loader.load_image(&resource[..])?.into_rgba8();
-
-            Ok(Box::new(ImageSampleGenerator { image }))
-        }
-    }
-}
-
-struct ImageSampleGenerator {
-    image: image::ImageBuffer<image::Rgba<u8>, Vec<u8>>,
-}
-
-struct SolidColorSampleGenerator {
-    red: u8,
-    green: u8,
-    blue: u8,
-}
-
-impl SampleGenerator for ImageSampleGenerator {
-    fn generate(&self, width: u32, height: u32) -> (Vec<u8>, u32) {
-        let (img_width, img_height) = self.image.dimensions();
-
-        let resized;
-        let image = if img_width != width || img_height != height {
-            resized = image::imageops::resize(
-                &self.image,
-                width,
-                height,
-                image::imageops::FilterType::CatmullRom,
-            );
-            &resized
-        } else {
-            &self.image
-        };
-
-        let samples = image.as_flat_samples();
-        let bytes_per_row = samples.layout.height_stride as u32;
-        (samples.as_slice().to_vec(), bytes_per_row)
+        fn source_dimensions(&self) -> (u32, u32);
     }
 
-    fn source_dimensions(&self) -> (u32, u32) {
-        self.image.dimensions()
-    }
-}
+    pub fn to_sample_generator(
+        resource_loader: &ResourceLoader,
+        face_tex: &voxel::FaceTexture,
+    ) -> Result<Box<dyn SampleGenerator>> {
+        match face_tex {
+            voxel::FaceTexture::SolidColor { red, green, blue } => {
+                log::info!(
+                    "Creating solid color texture with R/G/B {}/{}/{}",
+                    red,
+                    green,
+                    blue
+                );
+                Ok(Box::new(SolidColorSampleGenerator {
+                    red: *red,
+                    green: *green,
+                    blue: *blue,
+                }))
+            }
+            voxel::FaceTexture::Texture { resource, .. } => {
+                log::info!("Loading voxel texture {:?}", resource);
+                let image = resource_loader.load_image(&resource[..])?.into_rgba8();
 
-impl SampleGenerator for SolidColorSampleGenerator {
-    fn generate(&self, width: u32, height: u32) -> (Vec<u8>, u32) {
-        let mut buf = Vec::with_capacity(width as usize * height as usize * 4);
-        for _row_ix in 0..height {
-            for _col_ix in 0..width {
-                buf.push(self.red);
-                buf.push(self.green);
-                buf.push(self.blue);
-                buf.push(255); // alpha
+                Ok(Box::new(ImageSampleGenerator { image }))
             }
         }
-        (buf, 4 * width)
     }
 
-    fn source_dimensions(&self) -> (u32, u32) {
-        (1, 1)
+    struct ImageSampleGenerator {
+        image: image::ImageBuffer<image::Rgba<u8>, Vec<u8>>,
+    }
+
+    struct SolidColorSampleGenerator {
+        red: u8,
+        green: u8,
+        blue: u8,
+    }
+
+    impl SampleGenerator for ImageSampleGenerator {
+        fn generate(&self, width: u32, height: u32) -> (Vec<u8>, u32) {
+            let (img_width, img_height) = self.image.dimensions();
+
+            let resized;
+            let image = if img_width != width || img_height != height {
+                resized = image::imageops::resize(
+                    &self.image,
+                    width,
+                    height,
+                    image::imageops::FilterType::CatmullRom,
+                );
+                &resized
+            } else {
+                &self.image
+            };
+
+            let samples = image.as_flat_samples();
+            let bytes_per_row = samples.layout.height_stride as u32;
+            (samples.as_slice().to_vec(), bytes_per_row)
+        }
+
+        fn source_dimensions(&self) -> (u32, u32) {
+            self.image.dimensions()
+        }
+    }
+
+    impl SampleGenerator for SolidColorSampleGenerator {
+        fn generate(&self, width: u32, height: u32) -> (Vec<u8>, u32) {
+            let mut buf = Vec::with_capacity(width as usize * height as usize * 4);
+            for _row_ix in 0..height {
+                for _col_ix in 0..width {
+                    buf.push(self.red);
+                    buf.push(self.green);
+                    buf.push(self.blue);
+                    buf.push(255); // alpha
+                }
+            }
+            (buf, 4 * width)
+        }
+
+        fn source_dimensions(&self) -> (u32, u32) {
+            (1, 1)
+        }
     }
 }
 
