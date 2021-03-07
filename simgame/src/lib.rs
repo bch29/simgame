@@ -13,7 +13,7 @@ use winit::{
     window::{Window, WindowBuilder},
 };
 
-use simgame_blocks::BlockConfigHelper;
+use simgame_voxels::VoxelConfigHelper;
 use simgame_render::resource::ResourceLoader;
 pub use simgame_render::RenderParams;
 use simgame_render::{visible_size_to_chunks, RenderState, RenderStateBuilder, ViewParams};
@@ -28,7 +28,7 @@ pub async fn test_render(
     test_params: RenderTestParams,
     render_params: RenderParams<'_>,
     resource_loader: ResourceLoader,
-    block_helper: BlockConfigHelper,
+    voxel_helper: VoxelConfigHelper,
     metrics_controller: metrics_runtime::Controller,
 ) -> Result<()> {
     let event_loop = EventLoop::new();
@@ -39,7 +39,7 @@ pub async fn test_render(
         test_params,
         render_params,
         resource_loader,
-        block_helper,
+        voxel_helper,
         metrics_controller,
     }
     .build()
@@ -54,7 +54,7 @@ pub struct TestRenderBuilder<'a> {
     test_params: RenderTestParams,
     render_params: RenderParams<'a>,
     resource_loader: ResourceLoader,
-    block_helper: BlockConfigHelper,
+    voxel_helper: VoxelConfigHelper,
     metrics_controller: metrics_runtime::Controller,
 }
 
@@ -191,7 +191,7 @@ impl<'a> TestRenderBuilder<'a> {
             resource_loader: self.resource_loader,
             display_size: physical_win_size,
             world: &self.world,
-            block_helper: &self.block_helper,
+            voxel_helper: &self.voxel_helper,
             view_params,
             max_visible_chunks: self.test_params.max_visible_chunks,
         }
@@ -223,7 +223,7 @@ impl<'a> TestRenderBuilder<'a> {
 
         let world_state = WorldStateBuilder {
             world: world.clone(),
-            block_helper: self.block_helper.clone(),
+            voxel_helper: self.voxel_helper.clone(),
             tree_config: self.test_params.tree.as_ref(),
         }
         .build()?;
@@ -288,8 +288,8 @@ impl TestRender {
                         match key {
                             VirtualKeyCode::Escape => *control_flow = ControlFlow::Exit,
                             VirtualKeyCode::Space => self.world_state.toggle_updates()?,
-                            VirtualKeyCode::E => self.world_state.modify_filled_blocks(1)?,
-                            VirtualKeyCode::Q => self.world_state.modify_filled_blocks(-1)?,
+                            VirtualKeyCode::E => self.world_state.modify_filled_voxels(1)?,
+                            VirtualKeyCode::Q => self.world_state.modify_filled_voxels(-1)?,
                             _ => {}
                         }
                     }

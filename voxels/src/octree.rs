@@ -480,7 +480,7 @@ impl<T> Octree<T> {
     /// # Example
     /// ```
     /// use cgmath::{Point3, Vector3};
-    /// use simgame_blocks::octree::{self, Octree};
+    /// use simgame_voxels::octree::{self, Octree};
     /// let height = 7;
     /// let octant = octree::Octant::from_index(3);
     /// let offset = Octree::<()>::octant_offset(height, octant);

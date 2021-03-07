@@ -2,7 +2,7 @@ use cgmath::{InnerSpace, Matrix4, Point3, Transform, Vector3};
 
 use simgame_util::{convert_point, Bounds};
 
-use crate::{index_utils, Block, BlockUpdater};
+use crate::{index_utils, Voxel, VoxelUpdater};
 
 pub trait Primitive {
     /// Returns true if the given point is within the shape.
@@ -11,18 +11,18 @@ pub trait Primitive {
     /// Returns the smallest cuboid containing the shape.
     fn bounds(&self) -> Bounds<f64>;
 
-    fn draw(&self, blocks: &mut BlockUpdater, fill_block: Block) {
-        blocks.set_blocks(
+    fn draw(&self, voxels: &mut VoxelUpdater, fill_voxel: Voxel) {
+        voxels.set_voxels(
             round_bounds(self.bounds())
                 .iter_points_aligned(index_utils::chunk_size())
                 .filter(|p| self.test(convert_point!(p, f64)))
-                .zip(std::iter::repeat(fill_block)),
+                .zip(std::iter::repeat(fill_voxel)),
         );
     }
 }
 
 pub struct ShapeComponent {
-    pub fill_block: Block,
+    pub fill_voxel: Voxel,
     pub primitive: Box<dyn Primitive>,
 }
 
@@ -67,7 +67,7 @@ impl Shape {
         radius: f64,
         round_start: bool,
         round_end: bool,
-        fill_block: Block,
+        fill_voxel: Voxel,
     ) -> Self
     where
         Points: IntoIterator<Item = Point3<f64>>,
@@ -84,7 +84,7 @@ impl Shape {
                     round_start: !is_start || round_start,
                     round_end: !is_end || round_end,
                 }),
-                fill_block,
+                fill_voxel,
             });
         }
 
@@ -95,22 +95,22 @@ impl Shape {
         self.components.as_slice()
     }
 
-    pub fn push_primitive<T>(&mut self, fill_block: Block, primitive: T)
+    pub fn push_primitive<T>(&mut self, fill_voxel: Voxel, primitive: T)
     where
         T: Primitive + 'static,
     {
         self.components.push(ShapeComponent {
-            fill_block,
+            fill_voxel,
             primitive: Box::new(primitive),
         })
     }
 
-    pub fn from_primitive<T>(fill_block: Block, primitive: T) -> Self
+    pub fn from_primitive<T>(fill_voxel: Voxel, primitive: T) -> Self
     where
         T: Primitive + 'static,
     {
         Self::new(vec![ShapeComponent {
-            fill_block,
+            fill_voxel,
             primitive: Box::new(primitive),
         }])
     }
@@ -118,13 +118,13 @@ impl Shape {
     pub fn iter_transformed_primitives(
         &self,
         transform: Matrix4<f64>,
-    ) -> impl Iterator<Item = (Block, impl Primitive + '_)> + '_ {
+    ) -> impl Iterator<Item = (Voxel, impl Primitive + '_)> + '_ {
         let inv_transform = transform
             .inverse_transform()
             .expect("draw_transformed expects an invertible transform matrix");
         self.components.iter().map(move |component| {
             (
-                component.fill_block,
+                component.fill_voxel,
                 AffineTransform {
                     primitive: &*component.primitive,
                     transform,
@@ -134,15 +134,15 @@ impl Shape {
         })
     }
 
-    pub fn draw_transformed(&self, blocks: &mut BlockUpdater, transform: Matrix4<f64>) {
-        for (fill_block, primitive) in self.iter_transformed_primitives(transform) {
-            primitive.draw(blocks, fill_block);
+    pub fn draw_transformed(&self, voxels: &mut VoxelUpdater, transform: Matrix4<f64>) {
+        for (fill_voxel, primitive) in self.iter_transformed_primitives(transform) {
+            primitive.draw(voxels, fill_voxel);
         }
     }
 
-    pub fn draw(&self, blocks: &mut BlockUpdater) {
+    pub fn draw(&self, voxels: &mut VoxelUpdater) {
         for component in &self.components {
-            component.primitive.draw(blocks, component.fill_block);
+            component.primitive.draw(voxels, component.fill_voxel);
         }
     }
 }

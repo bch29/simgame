@@ -1,4 +1,4 @@
-pub use simgame_blocks::{BlockData, UpdatedBlocksState};
+pub use simgame_voxels::{VoxelData, UpdatedVoxelsState};
 pub use simgame_util::bsp::Bsp;
 
 pub mod entity;
@@ -7,19 +7,19 @@ pub use entity::{Entity, EntityConfig, EntityModel, EntityModelInfo};
 
 #[derive(Debug)]
 pub struct World {
-    pub blocks: BlockData,
+    pub voxels: VoxelData,
     pub entities: Bsp<Entity>,
 }
 
 #[derive(Debug)]
 pub struct UpdatedWorldState {
-    pub blocks: UpdatedBlocksState,
+    pub voxels: UpdatedVoxelsState,
 }
 
 impl World {
-    pub fn new(blocks: BlockData) -> World {
+    pub fn new(voxels: VoxelData) -> World {
         World {
-            blocks,
+            voxels,
             entities: Bsp::new(),
         }
     }
@@ -28,19 +28,19 @@ impl World {
 impl UpdatedWorldState {
     pub fn empty() -> Self {
         Self {
-            blocks: UpdatedBlocksState::empty(),
+            voxels: UpdatedVoxelsState::empty(),
         }
     }
 
     pub fn clear(&mut self) {
-        self.blocks.clear()
+        self.voxels.clear()
     }
 
     pub fn update_from(&mut self, other: UpdatedWorldState) {
-        self.blocks.update_from(other.blocks)
+        self.voxels.update_from(other.voxels)
     }
 
     pub fn is_empty(&self) -> bool {
-        self.blocks.is_empty()
+        self.voxels.is_empty()
     }
 }

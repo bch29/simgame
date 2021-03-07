@@ -3,15 +3,15 @@ use cgmath::{Deg, Matrix3, Point3, Transform, Vector3};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 
-use simgame_blocks::{primitive, Block, BlockConfigHelper};
+use simgame_voxels::{primitive, Voxel, VoxelConfigHelper};
 
 use crate::lsystem;
 use crate::turtle::{Turtle, TurtleBrush, TurtleInterpreter, TurtleState};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TreeSystemConfig {
-    trunk_block: String,
-    foliage_block: String,
+    trunk_voxel: String,
+    foliage_voxel: String,
     trunk_radius: f64,
     branch_radius_step: f64,
     trunk_length: f64,
@@ -47,50 +47,50 @@ pub enum Symbol {
 
 pub fn generate<R: Rng>(
     config: &TreeConfig,
-    blocks: &BlockConfigHelper,
+    voxels: &VoxelConfigHelper,
     rng: &mut R,
 ) -> Result<primitive::Shape> {
-    let mut system = TreeSystem::new(config, blocks)?;
+    let mut system = TreeSystem::new(config, voxels)?;
     system.generate(rng)
 }
 
 #[derive(Debug, Clone)]
 pub struct TreeSystem {
     root_pos: Point3<f64>,
-    trunk_block: Block,
-    foliage_block: Block,
+    trunk_voxel: Voxel,
+    foliage_voxel: Voxel,
     config: TreeSystemConfig,
     l_system: lsystem::LSystem<Symbol>,
 }
 
 impl TreeSystem {
-    pub fn new(config: &TreeConfig, blocks: &BlockConfigHelper) -> Result<Self> {
+    pub fn new(config: &TreeConfig, voxels: &VoxelConfigHelper) -> Result<Self> {
         let l_system = config.l_system.as_l_system()?;
 
-        let trunk_block = blocks
-            .block_by_name(&config.tree.trunk_block[..])
+        let trunk_voxel = voxels
+            .voxel_by_name(&config.tree.trunk_voxel[..])
             .ok_or_else(|| {
                 anyhow!(
-                    "Unknown block configured for trunk: {}",
-                    config.tree.trunk_block
+                    "Unknown voxel configured for trunk: {}",
+                    config.tree.trunk_voxel
                 )
             })?
             .0;
 
-        let foliage_block = blocks
-            .block_by_name(&config.tree.foliage_block[..])
+        let foliage_voxel = voxels
+            .voxel_by_name(&config.tree.foliage_voxel[..])
             .ok_or_else(|| {
                 anyhow!(
-                    "Unknown block configured for foliage: {}",
-                    config.tree.foliage_block
+                    "Unknown voxel configured for foliage: {}",
+                    config.tree.foliage_voxel
                 )
             })?
             .0;
 
         Ok(Self {
             root_pos: Point3::new(0., 0., 0.),
-            trunk_block,
-            foliage_block,
+            trunk_voxel,
+            foliage_voxel,
             l_system,
             config: config.tree.clone(),
         })
@@ -114,7 +114,7 @@ impl TurtleInterpreter<Symbol> for TreeSystem {
             direction: Vector3::unit_z(),
             thickness: self.config.trunk_radius,
             brush: TurtleBrush::FilledLine {
-                fill_block: self.trunk_block,
+                fill_voxel: self.trunk_voxel,
                 round_start: false,
                 round_end: true,
             },
@@ -139,7 +139,7 @@ impl TurtleInterpreter<Symbol> for TreeSystem {
             Contract => turtle.state_mut().thickness -= self.config.branch_radius_step,
             Wood { .. } => {
                 turtle.state_mut().brush = TurtleBrush::FilledLine {
-                    fill_block: self.trunk_block,
+                    fill_voxel: self.trunk_voxel,
                     round_end: true,
                     round_start: true,
                 };
@@ -151,7 +151,7 @@ impl TurtleInterpreter<Symbol> for TreeSystem {
 
                 turtle.state_mut().brush = TurtleBrush::Spheroid {
                     stretch: true,
-                    fill_block: self.foliage_block,
+                    fill_voxel: self.foliage_voxel,
                 };
                 turtle.draw(self.config.foliage_length);
                 turtle.pop_state()?;

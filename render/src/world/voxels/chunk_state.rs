@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use cgmath::{ElementWise, EuclideanSpace, Point3, Vector3};
 
-use simgame_blocks::{index_utils, BlockData, Chunk, UpdatedBlocksState};
+use simgame_voxels::{index_utils, VoxelData, Chunk, UpdatedVoxelsState};
 use simgame_util::{convert_point, convert_vec, Bounds};
 
 use crate::buffer_util::{BufferSyncHelper, BufferSyncHelperDesc};
@@ -18,8 +18,8 @@ pub(super) struct ChunkState {
 
     chunk_metadata_helper: BufferSyncHelper<ChunkMeta>,
     chunk_metadata_buf: wgpu::Buffer,
-    block_type_helper: BufferSyncHelper<u16>,
-    block_type_buf: wgpu::Buffer,
+    voxel_type_helper: BufferSyncHelper<u16>,
+    voxel_type_buf: wgpu::Buffer,
     active_view_box: Option<Bounds<i32>>,
 
     #[allow(unused)]
@@ -48,12 +48,12 @@ impl ChunkState {
             visible_chunk_size.x * visible_chunk_size.y * visible_chunk_size.z;
         assert!(active_visible_chunks <= max_visible_chunks as i32);
 
-        let max_visible_blocks = max_visible_chunks * index_utils::chunk_size_total() as usize;
+        let max_visible_voxels = max_visible_chunks * index_utils::chunk_size_total() as usize;
         let active_chunks = ActiveChunks::new(max_visible_chunks as usize);
 
-        let block_type_helper = BufferSyncHelper::new(BufferSyncHelperDesc {
-            label: "block types",
-            buffer_len: max_visible_blocks,
+        let voxel_type_helper = BufferSyncHelper::new(BufferSyncHelperDesc {
+            label: "voxel types",
+            buffer_len: max_visible_voxels,
             max_chunk_len: index_utils::chunk_size_total() as usize,
             usage: wgpu::BufferUsage::STORAGE | wgpu::BufferUsage::COPY_DST,
         });
@@ -68,8 +68,8 @@ impl ChunkState {
         ChunkState {
             meta_tracker: ChunkMetaTracker::with_capacity(active_chunks.capacity()),
             active_chunks,
-            block_type_buf: block_type_helper.make_buffer(device),
-            block_type_helper,
+            voxel_type_buf: voxel_type_helper.make_buffer(device),
+            voxel_type_helper,
             chunk_metadata_buf: chunk_metadata_helper.make_buffer(device),
             chunk_metadata_helper,
             active_view_box: None,
@@ -90,13 +90,13 @@ impl ChunkState {
         self.active_chunks.iter().map(|(&point, _, _)| point)
     }
 
-    fn update_box_chunks(&mut self, view_box: Bounds<i32>, blocks: &BlockData) {
+    fn update_box_chunks(&mut self, view_box: Bounds<i32>, voxels: &VoxelData) {
         assert!(self.active_chunks.is_empty());
         let bounds = Bounds::new(
             convert_point!(view_box.origin(), i64),
             convert_vec!(view_box.size(), i64),
         );
-        for (p, chunk) in blocks
+        for (p, chunk) in voxels
             .iter_chunks_in_bounds(bounds)
             .map(|(p, chunk)| (convert_point!(p, i32), chunk))
         {
@@ -116,7 +116,7 @@ impl ChunkState {
         true
     }
 
-    pub fn update_view_box(&mut self, active_view_box: Bounds<i32>, blocks: &BlockData) -> bool {
+    pub fn update_view_box(&mut self, active_view_box: Bounds<i32>, voxels: &VoxelData) -> bool {
         let old_view_box = self.active_view_box;
         self.active_view_box = Some(active_view_box);
 
@@ -124,7 +124,7 @@ impl ChunkState {
             Some(x) => x,
             None => {
                 // no chunks in previous view; insert all
-                self.update_box_chunks(active_view_box, blocks);
+                self.update_box_chunks(active_view_box, voxels);
                 return true;
             }
         };
@@ -137,7 +137,7 @@ impl ChunkState {
         let old_chunk_box = super::view_box_to_chunks(old_view_box);
 
         if new_chunk_box == old_chunk_box {
-            return true; // set of active chunks didn't change but visible blocks at edges did
+            return true; // set of active chunks didn't change but visible voxels at edges did
         }
 
         // if we get here we need to update the set of active chunks
@@ -149,7 +149,7 @@ impl ChunkState {
 
         // 2. insert chunks that are newly in the view
         for pos in new_chunk_box.diff(old_chunk_box) {
-            if let Some(chunk) = blocks.chunks().get(convert_point!(pos, i64)) {
+            if let Some(chunk) = voxels.chunks().get(convert_point!(pos, i64)) {
                 self.active_chunks.update(pos, chunk.clone());
             }
         }
@@ -169,7 +169,7 @@ impl ChunkState {
         true
     }
 
-    pub fn apply_chunk_diff(&mut self, blocks: &BlockData, diff: &UpdatedBlocksState) {
+    pub fn apply_chunk_diff(&mut self, voxels: &VoxelData, diff: &UpdatedVoxelsState) {
         let active_chunk_box = match self.active_view_box {
             Some(active_view_box) => super::view_box_to_chunks(active_view_box),
             None => return,
@@ -181,7 +181,7 @@ impl ChunkState {
                 continue;
             }
 
-            if let Some(chunk) = blocks.chunks().get(pos) {
+            if let Some(chunk) = voxels.chunks().get(pos) {
                 self.active_chunks.update(pos_i32, chunk.clone());
             } else {
                 self.active_chunks.remove(&pos_i32);
@@ -192,9 +192,9 @@ impl ChunkState {
     pub fn update_buffers(&mut self, queue: &wgpu::Queue) -> bool {
         let mut any_updates = false;
 
-        let mut fill_block_types =
-            self.block_type_helper
-                .begin_fill_buffer(queue, &self.block_type_buf, 0);
+        let mut fill_voxel_types =
+            self.voxel_type_helper
+                .begin_fill_buffer(queue, &self.voxel_type_buf, 0);
 
         let mut fill_chunk_metadatas =
             self.chunk_metadata_helper
@@ -213,9 +213,9 @@ impl ChunkState {
             if let Some((&point, chunk)) = opt_point {
                 self.meta_tracker.modify(point, index, active_chunks);
 
-                let chunk_data = simgame_blocks::blocks_to_u16(&chunk.blocks);
-                fill_block_types.seek(index * index_utils::chunk_size_total() as usize);
-                fill_block_types.advance(chunk_data);
+                let chunk_data = simgame_voxels::voxels_to_u16(&chunk.voxels);
+                fill_voxel_types.seek(index * index_utils::chunk_size_total() as usize);
+                fill_voxel_types.advance(chunk_data);
             } else {
                 self.meta_tracker.remove(index)
             }
@@ -226,15 +226,15 @@ impl ChunkState {
             fill_chunk_metadatas.advance(&[meta]);
         }
 
-        fill_block_types.finish();
+        fill_voxel_types.finish();
         fill_chunk_metadatas.finish();
 
         any_updates
     }
 
-    pub fn block_type_binding(&self, index: u32) -> wgpu::BindGroupEntry {
-        self.block_type_helper
-            .as_binding(index, &self.block_type_buf, 0)
+    pub fn voxel_type_binding(&self, index: u32) -> wgpu::BindGroupEntry {
+        self.voxel_type_helper
+            .as_binding(index, &self.voxel_type_buf, 0)
     }
 
     pub fn chunk_metadata_binding(&self, index: u32) -> wgpu::BindGroupEntry {

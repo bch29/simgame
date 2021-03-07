@@ -1,10 +1,10 @@
 game_name: Simgame
 path_name: simgame
-block_data_file_name: world_block_data.dat
+voxel_data_file_name: world_voxel_data.dat
 world_meta_file_name: world_meta.yaml
 
-block_config:
-  blocks:
+voxel_config:
+  voxels:
     - name: Air
       category: air
       texture:
@@ -12,29 +12,29 @@ block_config:
     - name: Rock
       category: rock
       texture:
-        Uniform: {Texture: {resource: "tex/block/rock", periodicity: 2}}
+        Uniform: {Texture: {resource: "tex/voxel/rock", periodicity: 2}}
     - name: Leaf
       category: foliage
       speed_modifier: 0.5
       texture:
-        Uniform: {Texture: {resource: "tex/block/leaf", periodicity: 1}}
+        Uniform: {Texture: {resource: "tex/voxel/leaf", periodicity: 1}}
     - name: Wood
       category: wood
       texture:
-        Uniform: {Texture: {resource: "tex/block/wood", periodicity: 2}}
+        Uniform: {Texture: {resource: "tex/voxel/wood", periodicity: 2}}
     - name: Dirt
       category: dirt
       speed_modifier: 0.8
       texture:
-        Uniform: {Texture: {resource: "tex/block/dirt", periodicity: 2}}
+        Uniform: {Texture: {resource: "tex/voxel/dirt", periodicity: 2}}
     - name: Grass
       category: dirt
       speed_modifier: 0.8
       texture:
         Nonuniform:
-          top: {Texture: {resource: "tex/block/grass_top", periodicity: 2}}
-          bottom: {Texture: {resource: "tex/block/dirt", periodicity: 2}}
-          side: {Texture: {resource: "tex/block/grass_side", periodicity: 2}}
+          top: {Texture: {resource: "tex/voxel/grass_top", periodicity: 2}}
+          bottom: {Texture: {resource: "tex/voxel/dirt", periodicity: 2}}
+          side: {Texture: {resource: "tex/voxel/grass_side", periodicity: 2}}
 
 resources:
   root: ./resources
@@ -44,38 +44,38 @@ resources:
     - name: tex/gui/crosshair
       relative_path: tex/gui/crosshair.png
       kind: Image
-    # Block textures
-    - name: tex/block/rock
-      relative_path: tex/block/rock.png
+    # Voxel textures
+    - name: tex/voxel/rock
+      relative_path: tex/voxel/rock.png
       kind: Image
-    - name: tex/block/leaf
-      relative_path: tex/block/leaf.png
+    - name: tex/voxel/leaf
+      relative_path: tex/voxel/leaf.png
       kind: Image
-    - name: tex/block/wood
-      relative_path: tex/block/wood.png
+    - name: tex/voxel/wood
+      relative_path: tex/voxel/wood.png
       kind: Image
-    - name: tex/block/dirt
-      relative_path: tex/block/dirt.png
+    - name: tex/voxel/dirt
+      relative_path: tex/voxel/dirt.png
       kind: Image
-    - name: tex/block/grass_top
-      relative_path: tex/block/grass_top.png
+    - name: tex/voxel/grass_top
+      relative_path: tex/voxel/grass_top.png
       kind: Image
-    - name: tex/block/grass_side
-      relative_path: tex/block/grass_side.png
+    - name: tex/voxel/grass_side
+      relative_path: tex/voxel/grass_side.png
       kind: Image
-    # World blocks shaders
-    - name: shader/blocks/compute
-      relative_path: shader/blocks/compute.glsl
+    # World voxels shaders
+    - name: shader/voxels/compute
+      relative_path: shader/voxels/compute.glsl
       kind: 
         Shader:
           kind: Compute
-    - name: shader/blocks/vertex
-      relative_path: shader/blocks/vertex.glsl
+    - name: shader/voxels/vertex
+      relative_path: shader/voxels/vertex.glsl
       kind: 
         Shader:
           kind: Vertex
-    - name: shader/blocks/fragment
-      relative_path: shader/blocks/fragment.glsl
+    - name: shader/voxels/fragment
+      relative_path: shader/voxels/fragment.glsl
       kind: 
         Shader:
           kind: Fragment

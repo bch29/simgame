@@ -4,8 +4,8 @@ use anyhow::{anyhow, Result};
 use cgmath::{EuclideanSpace, Matrix4, Point3, Vector3};
 use rand::SeedableRng;
 
-use simgame_blocks::primitive::{self, Primitive};
-use simgame_blocks::{index_utils, Block, BlockConfigHelper, BlockRaycastHit, BlockUpdater};
+use simgame_voxels::primitive::{self, Primitive};
+use simgame_voxels::{index_utils, Voxel, VoxelConfigHelper, VoxelRaycastHit, VoxelUpdater};
 use simgame_util::ray::Ray;
 use simgame_util::{convert_point, Bounds};
 
@@ -17,7 +17,7 @@ use crate::{
 
 pub struct WorldStateBuilder<'a> {
     pub world: Arc<Mutex<World>>,
-    pub block_helper: BlockConfigHelper,
+    pub voxel_helper: VoxelConfigHelper,
     pub tree_config: Option<&'a TreeConfig>,
 }
 
@@ -25,19 +25,19 @@ pub struct WorldStateBuilder<'a> {
 /// background state.
 pub struct WorldState {
     connection: Option<background_object::Connection<BackgroundState>>,
-    block_helper: BlockConfigHelper,
+    voxel_helper: VoxelConfigHelper,
 }
 
 /// Handles background updates. While locked on the world mutex, the rendering thread will be
-/// blocked, so care should be taken not to lock it for long. Other blocking in this object will
-/// not block the rendering thread.
+/// voxeled, so care should be taken not to lock it for long. Other voxeling in this object will
+/// not voxel the rendering thread.
 struct BackgroundState {
     world: Arc<Mutex<World>>,
     world_diff: UpdatedWorldState,
-    _block_helper: BlockConfigHelper,
+    _voxel_helper: VoxelConfigHelper,
     rng: rand::rngs::StdRng,
     updating: bool,
-    filled_blocks: i32,
+    filled_voxels: i32,
 
     tree_system: Option<TreeSystem>,
 }
@@ -49,24 +49,24 @@ struct Tick {
 
 #[derive(Debug, Clone)]
 enum WorldUpdateAction {
-    SpawnTree { raycast_hit: BlockRaycastHit },
-    ModifyFilledBlocks { delta: i32 },
+    SpawnTree { raycast_hit: VoxelRaycastHit },
+    ModifyFilledVoxels { delta: i32 },
     ToggleUpdates,
 }
 
 impl<'a> WorldStateBuilder<'a> {
     pub fn build(self) -> Result<WorldState> {
         let tree_system = match self.tree_config {
-            Some(tree_config) => Some(TreeSystem::new(tree_config, &self.block_helper)?),
+            Some(tree_config) => Some(TreeSystem::new(tree_config, &self.voxel_helper)?),
             None => None,
         };
 
         let world_state = BackgroundState {
-            _block_helper: self.block_helper.clone(),
+            _voxel_helper: self.voxel_helper.clone(),
             world_diff: UpdatedWorldState::empty(),
             rng: SeedableRng::from_entropy(),
             updating: false,
-            filled_blocks: (16 * 16 * 4) / 8,
+            filled_voxels: (16 * 16 * 4) / 8,
             tree_system,
             world: self.world,
         };
@@ -75,7 +75,7 @@ impl<'a> WorldStateBuilder<'a> {
 
         Ok(WorldState {
             connection: Some(connection),
-            block_helper: self.block_helper,
+            voxel_helper: self.voxel_helper,
         })
     }
 }
@@ -91,8 +91,8 @@ impl WorldState {
         connection.send_tick(Tick { elapsed })
     }
 
-    pub fn modify_filled_blocks(&mut self, delta: i32) -> Result<()> {
-        self.send_action(WorldUpdateAction::ModifyFilledBlocks { delta })
+    pub fn modify_filled_voxels(&mut self, delta: i32) -> Result<()> {
+        self.send_action(WorldUpdateAction::ModifyFilledVoxels { delta })
     }
 
     pub fn on_click(
@@ -108,7 +108,7 @@ impl WorldState {
 
         let raycast_hit = {
             let world = world.lock().map_err(|_| anyhow!("world mutex poisoned"))?;
-            match world.blocks.cast_ray(&ray, &self.block_helper) {
+            match world.voxels.cast_ray(&ray, &self.voxel_helper) {
                 None => return Ok(()),
                 Some(raycast_hit) => raycast_hit,
             }
@@ -146,24 +146,24 @@ impl BackgroundState {
             return Ok(());
         }
 
-        // let mut updater = BlockUpdater::new(&mut self.world.blocks, &mut self.world_diff.blocks);
+        // let mut updater = VoxelUpdater::new(&mut self.world.voxels, &mut self.world_diff.voxels);
         // shape.draw(&mut updater);
 
         self.updating = false;
         Ok(())
     }
 
-    fn modify_filled_blocks(&mut self, delta: i32) -> Result<()> {
-        self.filled_blocks += delta * 6;
-        if self.filled_blocks < 1 {
-            self.filled_blocks = 1
-        } else if self.filled_blocks >= index_utils::chunk_size_total() as i32 {
-            self.filled_blocks = index_utils::chunk_size_total() as i32
+    fn modify_filled_voxels(&mut self, delta: i32) -> Result<()> {
+        self.filled_voxels += delta * 6;
+        if self.filled_voxels < 1 {
+            self.filled_voxels = 1
+        } else if self.filled_voxels >= index_utils::chunk_size_total() as i32 {
+            self.filled_voxels = index_utils::chunk_size_total() as i32
         }
 
         let bounds: Bounds<i64> = Bounds::new(Point3::new(32, 32, 0), Vector3::new(16, 16, 1024));
 
-        let step = index_utils::chunk_size_total() / self.filled_blocks as i64;
+        let step = index_utils::chunk_size_total() / self.filled_voxels as i64;
         let mut count_filled = 0;
 
         {
@@ -173,29 +173,29 @@ impl BackgroundState {
                 .map_err(|_| anyhow!("world mutex poisoned"))?;
             for p in bounds.iter_points() {
                 if (p.x + p.y + p.z) % step == 0 {
-                    world.blocks.set_block(p, Block::from_u16(1));
+                    world.voxels.set_voxel(p, Voxel::from_u16(1));
                     count_filled += 1;
                 } else {
-                    world.blocks.set_block(p, Block::from_u16(0));
+                    world.voxels.set_voxel(p, Voxel::from_u16(0));
                 }
                 let (chunk_pos, _) = index_utils::to_chunk_pos(p);
-                self.world_diff.blocks.record_chunk_update(chunk_pos);
+                self.world_diff.voxels.record_chunk_update(chunk_pos);
             }
         }
 
         log::debug!(
-            "Setting number of filled blocks to {}/{}",
+            "Setting number of filled voxels to {}/{}",
             count_filled as f64 * index_utils::chunk_size_total() as f64 / bounds.volume() as f64,
             index_utils::chunk_size_total()
         );
         Ok(())
     }
 
-    fn spawn_tree(&mut self, raycast_hit: BlockRaycastHit) -> Result<()> {
+    fn spawn_tree(&mut self, raycast_hit: VoxelRaycastHit) -> Result<()> {
         log::debug!(
-            "Clicked on block {:?} at pos {:?} with intersection {:?}",
-            raycast_hit.block,
-            raycast_hit.block_pos,
+            "Clicked on voxel {:?} at pos {:?} with intersection {:?}",
+            raycast_hit.voxel,
+            raycast_hit.voxel_pos,
             raycast_hit.intersection
         );
 
@@ -207,24 +207,24 @@ impl BackgroundState {
         let tree = tree_system.generate(&mut self.rng)?;
 
         let root_pos =
-            convert_point!(raycast_hit.block_pos, f64) + raycast_hit.intersection.normal;
+            convert_point!(raycast_hit.voxel_pos, f64) + raycast_hit.intersection.normal;
 
         let draw_transform = Matrix4::from_translation(root_pos - Point3::origin());
         self.draw_shape(tree, draw_transform)
     }
 
-    /// Draws a complex shape while trying to avoid blocking the rendering thread due to world
+    /// Draws a complex shape while trying to avoid voxeling the rendering thread due to world
     /// updates.
     fn draw_shape(&mut self, shape: primitive::Shape, draw_transform: Matrix4<f64>) -> Result<()> {
-        for (fill_block, primitive) in shape.iter_transformed_primitives(draw_transform) {
-            // lock the mutex inside the loop so that the rendering thread isn't blocked while we
+        for (fill_voxel, primitive) in shape.iter_transformed_primitives(draw_transform) {
+            // lock the mutex inside the loop so that the rendering thread isn't voxeled while we
             // update
             let mut world = self
                 .world
                 .lock()
                 .map_err(|_| anyhow!("world mutex poisoned"))?;
-            let mut updater = BlockUpdater::new(&mut world.blocks, &mut self.world_diff.blocks);
-            primitive.draw(&mut updater, fill_block);
+            let mut updater = VoxelUpdater::new(&mut world.voxels, &mut self.world_diff.voxels);
+            primitive.draw(&mut updater, fill_voxel);
         }
         Ok(())
     }
@@ -245,7 +245,7 @@ impl BackgroundObject for BackgroundState {
         match action {
             WorldUpdateAction::SpawnTree { raycast_hit } => self.spawn_tree(raycast_hit),
             WorldUpdateAction::ToggleUpdates => self.toggle_updates(),
-            WorldUpdateAction::ModifyFilledBlocks { delta } => self.modify_filled_blocks(delta),
+            WorldUpdateAction::ModifyFilledVoxels { delta } => self.modify_filled_voxels(delta),
         }
     }
 

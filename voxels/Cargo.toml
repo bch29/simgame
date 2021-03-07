@@ -1,5 +1,5 @@
 [package]
-name = "simgame_blocks"
+name = "simgame_voxels"
 version = "0.1.0"
 authors = ["Bradley Hardy"]
 edition = "2018"

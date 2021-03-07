@@ -9,7 +9,7 @@ shader-compiler = ["shaderc"]
 
 [dependencies]
 simgame_util = { path = "../util" }
-simgame_blocks = { path = "../blocks" }
+simgame_voxels = { path = "../voxels" }
 simgame_types = { path = "../types" }
 serde = { version = "1.0", features = ["derive"] }
 cgmath = "0.17"

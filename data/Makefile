@@ -2,15 +2,15 @@
 
 gimp = gimp
 
-block_tex_names = rock.png leaf.png wood.png dirt.png grass_top.png grass_side.png
-block_textures = $(patsubst %,resources/tex/block/%,$(block_tex_names))
+voxel_tex_names = rock.png leaf.png wood.png dirt.png grass_top.png grass_side.png
+voxel_textures = $(patsubst %,resources/tex/voxel/%,$(voxel_tex_names))
 
 .PHONY: default
 
-default: $(block_textures)
+default: $(voxel_textures)
 
 clean:
-	rm -vf $(block_textures)
+	rm -vf $(voxel_textures)
 
 resources/%.png: resources_src/%.xcf
 	echo '(gimp-to-png "$<" "$@")(gimp-quit 0)' | cat gimp_to_pdf.scm - | $(gimp) -i -b -

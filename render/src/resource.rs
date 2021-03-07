@@ -98,7 +98,7 @@ impl ResourceLoader {
         artifact_root.push(config.artifact_root.clone());
 
         let shader_compiler = ShaderCompiler::new(CompileParams {
-            chunk_size: simgame_blocks::index_utils::chunk_size().into(),
+            chunk_size: simgame_voxels::index_utils::chunk_size().into(),
         })?;
 
         Ok(Self {

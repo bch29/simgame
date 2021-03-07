@@ -2265,28 +2265,13 @@ dependencies = [
  "rand 0.7.3",
  "serde",
  "serde_yaml",
- "simgame_blocks",
  "simgame_render",
  "simgame_util",
+ "simgame_voxels",
  "simgame_world",
  "smol",
  "structopt",
  "winit",
-]
-
-[[package]]
-name = "simgame_blocks"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "byteorder",
- "cgmath",
- "log",
- "rand 0.7.3",
- "serde",
- "serde_cbor",
- "serde_yaml",
- "simgame_util",
 ]
 
 [[package]]
@@ -2303,9 +2288,9 @@ dependencies = [
  "raw-window-handle",
  "serde",
  "shaderc",
- "simgame_blocks",
  "simgame_types",
  "simgame_util",
+ "simgame_voxels",
  "wgpu",
  "zerocopy",
 ]
@@ -2318,8 +2303,8 @@ dependencies = [
  "cgmath",
  "log",
  "serde",
- "simgame_blocks",
  "simgame_util",
+ "simgame_voxels",
 ]
 
 [[package]]
@@ -2334,6 +2319,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "simgame_voxels"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "byteorder",
+ "cgmath",
+ "log",
+ "rand 0.7.3",
+ "serde",
+ "serde_cbor",
+ "serde_yaml",
+ "simgame_util",
+]
+
+[[package]]
 name = "simgame_world"
 version = "0.1.0"
 dependencies = [
@@ -2345,9 +2345,9 @@ dependencies = [
  "metrics",
  "rand 0.7.3",
  "serde",
- "simgame_blocks",
  "simgame_types",
  "simgame_util",
+ "simgame_voxels",
 ]
 
 [[package]]

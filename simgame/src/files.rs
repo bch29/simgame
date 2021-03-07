@@ -4,7 +4,7 @@ use anyhow::{anyhow, bail, Context, Result};
 use directories::UserDirs;
 use serde::{Deserialize, Serialize};
 
-use simgame_blocks::BlockData;
+use simgame_voxels::VoxelData;
 use simgame_util::Bounds;
 
 use crate::settings::{CoreSettings, Settings};
@@ -123,7 +123,7 @@ impl FileContext {
         res
     }
 
-    pub fn save_world_blocks(&self, save_name: &str, blocks: &BlockData) -> Result<()> {
+    pub fn save_world_voxels(&self, save_name: &str, voxels: &VoxelData) -> Result<()> {
         let save_dir = self.get_save_dir(save_name);
         if !save_dir.is_dir() {
             println!("Creating save directory at {}", save_dir.to_string_lossy());
@@ -142,7 +142,7 @@ impl FileContext {
                 path
             };
             let meta = WorldMeta {
-                world_bounds: blocks.bounds(),
+                world_bounds: voxels.bounds(),
             };
             let file = std::fs::File::create(&file_path)
                 .context("Creating world meta file for saved game")?;
@@ -153,17 +153,17 @@ impl FileContext {
         {
             let file_path = {
                 let mut path = save_dir;
-                path.push(&self.core_settings.block_data_file_name);
+                path.push(&self.core_settings.voxel_data_file_name);
                 path
             };
             let file = std::fs::File::create(&file_path)
-                .context("Creating world block data file for saved game")?;
+                .context("Creating world voxel data file for saved game")?;
             let mut encoder = lz4::EncoderBuilder::new()
                 .build(file)
-                .context("Initializing encoder for block data file")?;
-            blocks
-                .serialize_blocks(&mut encoder)
-                .context("Writing out world block data for saved game")?;
+                .context("Initializing encoder for voxel data file")?;
+            voxels
+                .serialize_voxels(&mut encoder)
+                .context("Writing out world voxel data for saved game")?;
             let (_file, res) = encoder.finish();
             res?;
         }
@@ -171,16 +171,16 @@ impl FileContext {
         Ok(())
     }
 
-    pub fn load_debug_world_blocks() -> Result<BlockData> {
+    pub fn load_debug_world_voxels() -> Result<VoxelData> {
         let meta_bytes = include_bytes!("data/debug_saves/small/world_meta.yaml");
-        let block_data_bytes = include_bytes!("data/debug_saves/small/world_block_data.dat");
+        let voxel_data_bytes = include_bytes!("data/debug_saves/small/world_voxel_data.dat");
 
         let meta = Self::load_world_meta(&meta_bytes[..])?;
-        let result = Self::load_world_blocks_data(&meta, &block_data_bytes[..])?;
+        let result = Self::load_world_voxels_data(&meta, &voxel_data_bytes[..])?;
         Ok(result)
     }
 
-    pub fn load_world_blocks(&self, save_name: &str) -> Result<BlockData> {
+    pub fn load_world_voxels(&self, save_name: &str) -> Result<VoxelData> {
         let save_dir = self.get_save_dir(save_name);
         if !save_dir.is_dir() {
             return Err(anyhow!(
@@ -198,7 +198,7 @@ impl FileContext {
 
         if !meta_path.is_file() {
             return Err(anyhow!(
-                "Block meta file for saved game {} does not exist: expected {} to be a file",
+                "Voxel meta file for saved game {} does not exist: expected {} to be a file",
                 save_name,
                 meta_path.to_string_lossy()
             ));
@@ -206,13 +206,13 @@ impl FileContext {
 
         let data_path = {
             let mut path = save_dir;
-            path.push(&self.core_settings.block_data_file_name);
+            path.push(&self.core_settings.voxel_data_file_name);
             path
         };
 
         if !data_path.is_file() {
             return Err(anyhow!(
-                "Block data file for saved game {} does not exist: expected {} to be a file",
+                "Voxel data file for saved game {} does not exist: expected {} to be a file",
                 save_name,
                 data_path.to_string_lossy()
             ));
@@ -222,10 +222,10 @@ impl FileContext {
         let meta_file = std::fs::File::open(meta_path.as_path())
             .context("Opening world meta file for saved game")?;
         let meta = Self::load_world_meta(meta_file)?;
-        log::info!("loading world blocks from {:?}", data_path);
+        log::info!("loading world voxels from {:?}", data_path);
         let data_file = std::fs::File::open(data_path.as_path())
-            .context("Opening block data file for saved game")?;
-        let result = Self::load_world_blocks_data(&meta, data_file)?;
+            .context("Opening voxel data file for saved game")?;
+        let result = Self::load_world_voxels_data(&meta, data_file)?;
         Ok(result)
     }
 
@@ -233,17 +233,17 @@ impl FileContext {
         serde_yaml::from_reader(file).context("Parsing world meta file for saved game")
     }
 
-    pub fn load_world_blocks_data<R>(meta: &WorldMeta, file: R) -> Result<BlockData>
+    pub fn load_world_voxels_data<R>(meta: &WorldMeta, file: R) -> Result<VoxelData>
     where
         R: std::io::Read,
     {
         let mut decompressed =
-            lz4::Decoder::new(file).context("Initializing decoder for block data file")?;
+            lz4::Decoder::new(file).context("Initializing decoder for voxel data file")?;
 
-        let mut world_blocks = BlockData::empty(meta.world_bounds);
-        world_blocks
-            .deserialize_blocks(&mut decompressed)
-            .context("Deserializing block data")?;
-        Ok(world_blocks)
+        let mut world_voxels = VoxelData::empty(meta.world_bounds);
+        world_voxels
+            .deserialize_voxels(&mut decompressed)
+            .context("Deserializing voxel data")?;
+        Ok(world_voxels)
     }
 }

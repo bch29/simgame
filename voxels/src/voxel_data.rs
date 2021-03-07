@@ -8,20 +8,19 @@ use simgame_util::convert_vec;
 use simgame_util::ray::Ray;
 use simgame_util::Bounds;
 
-use crate::config::BlockConfigHelper;
-use crate::core::{blocks_to_u16_mut, Block, BlockRaycastHit, Chunk};
+use crate::config::VoxelConfigHelper;
+use crate::core::{voxels_to_u16_mut, Voxel, VoxelRaycastHit, Chunk};
 use crate::index_utils;
 use crate::octree::Octree;
 
-/// Stores the world's blocks, but not other things like entities.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct BlockData {
+pub struct VoxelData {
     /// Storage for chunks.
     chunks: Octree<Chunk>,
 }
 
 #[derive(Debug, PartialEq)]
-pub struct BlockDataSummary {
+pub struct VoxelDataSummary {
     count_total: usize,
     count_nonempty: usize,
     count_chunks: usize,
@@ -31,15 +30,15 @@ pub struct BlockDataSummary {
     bounds: Bounds<i64>,
 }
 
-impl BlockData {
-    /// Constructs an empty WorldBlocks capable of holding blocks within the given bounds.
-    pub fn empty(min_bounds: Bounds<i64>) -> BlockData {
-        BlockData {
+impl VoxelData {
+    /// Constructs an empty WorldVoxels capable of holding voxels within the given bounds.
+    pub fn empty(min_bounds: Bounds<i64>) -> VoxelData {
+        VoxelData {
             chunks: Octree::new(bounds_to_octree_height(min_bounds)),
         }
     }
 
-    /// Returns the chunk in which the given block position resides.
+    /// Returns the chunk in which the given voxel position resides.
     #[inline]
     pub fn get_chunk(&self, p: Point3<i64>) -> &Chunk {
         let (chunk_pos, _) = index_utils::to_chunk_pos(p);
@@ -57,13 +56,13 @@ impl BlockData {
     }
 
     #[inline]
-    pub fn get_block(&self, p: Point3<i64>) -> Block {
+    pub fn get_voxel(&self, p: Point3<i64>) -> Voxel {
         let (chunk_pos, inner_pos) = index_utils::to_chunk_pos(p);
         let chunk = self
             .chunks
             .get(chunk_pos)
             .expect("requested chunk which is not present");
-        chunk.get_block(inner_pos)
+        chunk.get_voxel(inner_pos)
     }
 
     /// Visits every chunk in the world exactly once, in an unspecified order.
@@ -72,56 +71,56 @@ impl BlockData {
         self.chunks.iter()
     }
 
-    /// Visits every chunk containing blocks inside the given bounding box exactly once, in an
+    /// Visits every chunk containing voxels inside the given bounding box exactly once, in an
     /// unspecified order.
     #[inline]
     pub fn iter_chunks_in_bounds(
         &self,
-        block_bounds: Bounds<i64>,
+        voxel_bounds: Bounds<i64>,
     ) -> impl Iterator<Item = (Point3<i64>, &Chunk)> + '_ {
-        let chunk_bounds = block_bounds.quantize_down(index_utils::chunk_size());
+        let chunk_bounds = voxel_bounds.quantize_down(index_utils::chunk_size());
         self.chunks.iter_in_bounds(chunk_bounds)
     }
 
-    /// Visits every block in the world exactly once, in an unspecified order.
+    /// Visits every voxel in the world exactly once, in an unspecified order.
     #[inline]
-    pub fn iter_blocks(&self) -> impl Iterator<Item = (Point3<i64>, Block)> + '_ {
+    pub fn iter_voxels(&self) -> impl Iterator<Item = (Point3<i64>, Voxel)> + '_ {
         self.chunks.iter().flat_map(move |(chunk_pos, chunk)| {
             chunk
-                .blocks
+                .voxels
                 .iter()
                 .enumerate()
-                .map(move |(inner_index, block)| {
+                .map(move |(inner_index, voxel)| {
                     let loc = index_utils::unpack_index((chunk_pos, inner_index as i64));
-                    (loc, *block)
+                    (loc, *voxel)
                 })
         })
     }
 
-    /// Visits every block in the world exactly once, in an unspecified order.
+    /// Visits every voxel in the world exactly once, in an unspecified order.
     #[inline]
-    pub fn iter_blocks_mut(&mut self) -> impl Iterator<Item = (Point3<i64>, &mut Block)> + '_ {
+    pub fn iter_voxels_mut(&mut self) -> impl Iterator<Item = (Point3<i64>, &mut Voxel)> + '_ {
         self.chunks.iter_mut().flat_map(move |(chunk_pos, chunk)| {
             chunk
-                .blocks
+                .voxels
                 .iter_mut()
                 .enumerate()
-                .map(move |(inner_index, block)| {
+                .map(move |(inner_index, voxel)| {
                     let loc = index_utils::unpack_index((chunk_pos, inner_index as i64));
-                    (loc, block)
+                    (loc, voxel)
                 })
         })
     }
 
-    /// At every possible block position within the given bounds, replace the existing block
+    /// At every possible voxel position within the given bounds, replace the existing voxel
     /// using the given function.
-    pub fn replace_blocks<E, F>(
+    pub fn replace_voxels<E, F>(
         &mut self,
         bounds: Bounds<i64>,
-        mut replace_block: F,
+        mut replace_voxel: F,
     ) -> Result<(), E>
     where
-        F: FnMut(Point3<i64>, Block) -> Result<Block, E>,
+        F: FnMut(Point3<i64>, Voxel) -> Result<Voxel, E>,
     {
         while !self.bounds().contains_bounds(bounds) {
             self.chunks.grow();
@@ -139,16 +138,16 @@ impl BlockData {
             let mut count_nonempty = 0;
 
             for inner_pos in Bounds::from_size(index_utils::chunk_size()).iter_points() {
-                let block_pos = chunk_start + (inner_pos - Point3::origin());
-                if !bounds.contains_point(block_pos) {
+                let voxel_pos = chunk_start + (inner_pos - Point3::origin());
+                if !bounds.contains_point(voxel_pos) {
                     continue;
                 }
 
-                let current_block = current_chunk.get_block(inner_pos);
-                let new_block = replace_block(block_pos, current_block)?;
-                current_chunk.set_block(inner_pos, new_block);
+                let current_voxel = current_chunk.get_voxel(inner_pos);
+                let new_voxel = replace_voxel(voxel_pos, current_voxel)?;
+                current_chunk.set_voxel(inner_pos, new_voxel);
 
-                if new_block != Block::from_u16(0) {
+                if new_voxel != Voxel::from_u16(0) {
                     count_nonempty += 1;
                 }
             }
@@ -160,9 +159,9 @@ impl BlockData {
         Ok(())
     }
 
-    /// Sets the value of a block at the given point.
+    /// Sets the value of a voxel at the given point.
     #[inline]
-    pub fn set_block(&mut self, p: Point3<i64>, val: Block) {
+    pub fn set_voxel(&mut self, p: Point3<i64>, val: Voxel) {
         let (chunk_pos, inner_pos) = index_utils::to_chunk_pos(p);
 
         while !self.bounds().contains_point(p) {
@@ -170,10 +169,10 @@ impl BlockData {
         }
 
         let chunk = self.chunks.get_or_insert(chunk_pos, Chunk::empty);
-        chunk.set_block(inner_pos, val);
+        chunk.set_voxel(inner_pos, val);
     }
 
-    /// Returns a bounding box that is guaranteed to contain every block in the world. No
+    /// Returns a bounding box that is guaranteed to contain every voxel in the world. No
     /// guarantees are made about whether it is the smallest such bounding box.
     pub fn bounds(&self) -> Bounds<i64> {
         self.chunks.bounds().scale_up(index_utils::chunk_size())
@@ -182,8 +181,8 @@ impl BlockData {
     pub fn cast_ray(
         &self,
         ray: &Ray<f64>,
-        block_helper: &BlockConfigHelper,
-    ) -> Option<BlockRaycastHit> {
+        voxel_helper: &VoxelConfigHelper,
+    ) -> Option<VoxelRaycastHit> {
         let chunk_size = convert_vec!(index_utils::chunk_size(), f64);
 
         let chunk_ray = Ray {
@@ -191,58 +190,58 @@ impl BlockData {
             dir: ray.dir.div_element_wise(chunk_size),
         };
 
-        let chunk_hit: BlockRaycastHit = self
+        let chunk_hit: VoxelRaycastHit = self
             .chunks
             .cast_ray(&chunk_ray, |chunk_pos, chunk| {
                 let chunk_origin =
                     chunk_pos.mul_element_wise(Point3::origin() + index_utils::chunk_size());
-                chunk.cast_ray(ray, chunk_origin, block_helper)
+                chunk.cast_ray(ray, chunk_origin, voxel_helper)
             })?
             .data;
 
         Some(chunk_hit)
     }
 
-    /// Serialize the blocks in the world. Returns the number of bytes written.
-    pub fn serialize_blocks<W>(&self, target: &mut W) -> io::Result<i64>
+    /// Serialize the voxels in the world. Returns the number of bytes written.
+    pub fn serialize_voxels<W>(&self, target: &mut W) -> io::Result<i64>
     where
         W: Write,
     {
         self.chunks.serialize(target, &mut |chunk, target| {
             let mut bytes_written = 0;
-            for block in chunk.blocks.iter() {
-                target.write_u16::<BigEndian>(block.to_u16())?;
+            for voxel in chunk.voxels.iter() {
+                target.write_u16::<BigEndian>(voxel.to_u16())?;
                 bytes_written += 2;
             }
             Ok(bytes_written)
         })
     }
 
-    /// Deserialize the world blocks from the given reader.
-    pub fn deserialize_blocks<R: Read>(&mut self, src: &mut R) -> io::Result<()> {
+    /// Deserialize the world voxels from the given reader.
+    pub fn deserialize_voxels<R: Read>(&mut self, src: &mut R) -> io::Result<()> {
         self.chunks = Octree::<Chunk>::deserialize(src, &mut |src| {
-            let mut blocks = [Block::from_u16(0); index_utils::chunk_size_total() as usize];
-            src.read_u16_into::<BigEndian>(blocks_to_u16_mut(&mut blocks))?;
-            Ok(Chunk { blocks })
+            let mut voxels = [Voxel::from_u16(0); index_utils::chunk_size_total() as usize];
+            src.read_u16_into::<BigEndian>(voxels_to_u16_mut(&mut voxels))?;
+            Ok(Chunk { voxels })
         })?;
         Ok(())
     }
 
-    pub fn debug_summary(&self) -> BlockDataSummary {
+    pub fn debug_summary(&self) -> VoxelDataSummary {
         let size = self.bounds().size();
         let count_total = (size.x * size.y * size.z) as usize;
         let mut count_nonempty = 0;
-        for (_, block) in self.iter_blocks() {
-            if !block.is_empty() {
+        for (_, voxel) in self.iter_voxels() {
+            if !voxel.is_empty() {
                 count_nonempty += 1;
             }
         }
 
         let pct_nonempty = (count_nonempty as f64 / count_total as f64) * 100.0;
-        let byte_size = std::mem::size_of::<Block>() * count_total;
+        let byte_size = std::mem::size_of::<Voxel>() * count_total;
         let mb_size = byte_size / (1024 * 1024);
 
-        BlockDataSummary {
+        VoxelDataSummary {
             count_total,
             count_nonempty,
             count_chunks: self.iter_chunks().count(),
@@ -307,31 +306,31 @@ mod tests {
             z: 64,
         });
 
-        let mut original = BlockData::empty(bounds);
+        let mut original = VoxelData::empty(bounds);
 
         let points1 = vec![(0, 0, 0), (3, 4, 5), (24, 25, 26), (24, 35, 36)];
 
         let points2 = vec![(1, 2, 3), (27, 16, 5), (2, 2, 2), (31, 47, 63)];
 
         original
-            .replace_blocks::<(), _>(bounds, |p, _| {
+            .replace_voxels::<(), _>(bounds, |p, _| {
                 Ok(if points1.contains(&p.into()) {
-                    Block::from_u16(1)
+                    Voxel::from_u16(1)
                 } else if points2.contains(&p.into()) {
-                    Block::from_u16(257)
+                    Voxel::from_u16(257)
                 } else {
-                    Block::air()
+                    Voxel::air()
                 })
             })
             .unwrap();
         assert!(original.chunks.check_height_invariant());
 
         let mut buf = Vec::new();
-        original.serialize_blocks(&mut buf).unwrap();
+        original.serialize_voxels(&mut buf).unwrap();
 
-        let mut reserialized = BlockData::empty(bounds);
+        let mut reserialized = VoxelData::empty(bounds);
         reserialized
-            .deserialize_blocks(&mut buf.as_slice())
+            .deserialize_voxels(&mut buf.as_slice())
             .unwrap();
 
         assert_eq!(
@@ -342,33 +341,33 @@ mod tests {
         let chunk_limit = Point3::origin() + index_utils::chunk_size();
 
         assert_eq!(
-            Block::from_u16(1),
+            Voxel::from_u16(1),
             dbg!(original.get_chunk(Point3::new(24, 35, 36)))
-                .get_block(dbg!(Point3::new(24, 35, 36).rem_element_wise(chunk_limit)))
+                .get_voxel(dbg!(Point3::new(24, 35, 36).rem_element_wise(chunk_limit)))
         );
         assert_eq!(
-            Block::from_u16(257),
+            Voxel::from_u16(257),
             reserialized
                 .get_chunk(Point3::new(31, 47, 63))
-                .get_block(Point3::new(31, 47, 63).rem_element_wise(chunk_limit))
+                .get_voxel(Point3::new(31, 47, 63).rem_element_wise(chunk_limit))
         );
 
-        assert_eq!(Block::from_u16(1), reserialized.get_block(Point3::origin()));
+        assert_eq!(Voxel::from_u16(1), reserialized.get_voxel(Point3::origin()));
         assert_eq!(
-            Block::from_u16(1),
-            reserialized.get_block(Point3::new(24, 35, 36))
+            Voxel::from_u16(1),
+            reserialized.get_voxel(Point3::new(24, 35, 36))
         );
         assert_eq!(
-            Block::from_u16(257),
-            reserialized.get_block(Point3::new(31, 47, 63))
+            Voxel::from_u16(257),
+            reserialized.get_voxel(Point3::new(31, 47, 63))
         );
 
-        let collect_blocks = |world: &BlockData| -> Vec<(Point3<i64>, Block)> {
-            world.iter_blocks().filter(|(_, b)| !b.is_empty()).collect()
+        let collect_voxels = |world: &VoxelData| -> Vec<(Point3<i64>, Voxel)> {
+            world.iter_voxels().filter(|(_, b)| !b.is_empty()).collect()
         };
 
         assert!(reserialized.chunks.check_height_invariant());
-        assert_eq!(collect_blocks(&original), collect_blocks(&reserialized));
+        assert_eq!(collect_voxels(&original), collect_voxels(&reserialized));
         assert_eq!(original.chunks.height(), reserialized.chunks.height());
 
         assert_eq!(original, reserialized);
@@ -378,16 +377,16 @@ mod tests {
     fn test_iter_chunks_in_bounds() {
         let bounds = Bounds::from_size(8 * index_utils::chunk_size());
 
-        let mut blocks = BlockData::empty(bounds);
-        blocks
-            .replace_blocks::<(), _>(bounds, |_, _| Ok(Block::from_u16(1)))
+        let mut voxels = VoxelData::empty(bounds);
+        voxels
+            .replace_voxels::<(), _>(bounds, |_, _| Ok(Voxel::from_u16(1)))
             .unwrap();
 
         let cs = index_utils::chunk_size();
 
         assert_eq!(
             point_range(
-                blocks
+                voxels
                     .iter_chunks_in_bounds(Bounds::new(Point3::origin() + 2 * cs, 3 * cs,))
                     .map(|(pos, _)| pos)
             ),
@@ -396,7 +395,7 @@ mod tests {
 
         assert_eq!(
             point_range(
-                blocks
+                voxels
                     .iter_chunks_in_bounds(Bounds::new(
                         Point3::origin() + 2 * cs,
                         3 * cs - Vector3::new(1, 1, 1),
@@ -408,7 +407,7 @@ mod tests {
 
         assert_eq!(
             point_range(
-                blocks
+                voxels
                     .iter_chunks_in_bounds(Bounds::from_limit(
                         Point3::new(6, 6, 6),
                         Point3::new(38, 38, 26),
@@ -420,7 +419,7 @@ mod tests {
 
         assert_eq!(
             point_range(
-                blocks
+                voxels
                     .iter_chunks_in_bounds(Bounds::new(
                         Point3::origin() + 3 * cs - cs / 2,
                         3 * cs - cs / 2 + Vector3::new(1, 0, 0),
@@ -432,7 +431,7 @@ mod tests {
 
         assert_eq!(
             point_range(
-                blocks
+                voxels
                     .iter_chunks_in_bounds(Bounds::new(
                         Point3::origin() + 3 * cs - cs / 2,
                         2 * cs + Vector3::new(1, 1, 1),

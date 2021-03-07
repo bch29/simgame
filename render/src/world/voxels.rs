@@ -1,4 +1,4 @@
-mod block_info;
+mod voxel_info;
 mod chunk_state;
 
 use std::convert::TryInto;
@@ -8,7 +8,7 @@ use anyhow::Result;
 use cgmath::{Point3, Vector3};
 use zerocopy::{AsBytes, FromBytes};
 
-use simgame_blocks::{index_utils, BlockConfigHelper, BlockData, UpdatedBlocksState};
+use simgame_voxels::{index_utils, VoxelConfigHelper, VoxelData, UpdatedVoxelsState};
 use simgame_util::{convert_point, convert_vec, Bounds, DivUp};
 
 use crate::buffer_util::{
@@ -18,24 +18,24 @@ use crate::buffer_util::{
 use crate::mesh::cube::Cube;
 use crate::world;
 
-use block_info::BlockInfoHandler;
+use voxel_info::VoxelInfoHandler;
 use chunk_state::ChunkState;
 
-pub(crate) struct BlocksRenderStateBuilder<'a> {
+pub(crate) struct VoxelsRenderStateBuilder<'a> {
     pub depth_texture: &'a wgpu::Texture,
     pub view_state: &'a world::ViewState,
-    pub blocks: &'a BlockData,
+    pub voxels: &'a VoxelData,
     pub max_visible_chunks: usize,
-    pub block_config: &'a BlockConfigHelper,
+    pub voxel_config: &'a VoxelConfigHelper,
 }
 
-pub(crate) struct BlocksRenderState {
+pub(crate) struct VoxelsRenderState {
     chunk_state: ChunkState,
     compute_stage: ComputeStage,
     render_stage: RenderStage,
 
     #[allow(dead_code)]
-    block_info_handler: BlockInfoHandler,
+    voxel_info_handler: VoxelInfoHandler,
     geometry_buffers: GeometryBuffers,
 }
 
@@ -60,7 +60,7 @@ struct RenderStage {
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, AsBytes, FromBytes, Default)]
-struct BlockRenderInfo {
+struct VoxelRenderInfo {
     // index into texture list, by face
     face_tex_ids: [u32; 6],
     _padding: [u32; 2],
@@ -69,7 +69,7 @@ struct BlockRenderInfo {
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, AsBytes, FromBytes, Default)]
-struct BlockTextureMetadata {
+struct VoxelTextureMetadata {
     periodicity: u32,
 }
 
@@ -107,10 +107,10 @@ struct ChunkMeta {
     _padding1: i32,
 }
 
-impl<'a> BlocksRenderStateBuilder<'a> {
-    pub fn build(self, ctx: &crate::GraphicsContext) -> Result<BlocksRenderState> {
-        let block_info_handler =
-            BlockInfoHandler::new(self.block_config, &ctx.resource_loader, ctx)?;
+impl<'a> VoxelsRenderStateBuilder<'a> {
+    pub fn build(self, ctx: &crate::GraphicsContext) -> Result<VoxelsRenderState> {
+        let voxel_info_handler =
+            VoxelInfoHandler::new(self.voxel_config, &ctx.resource_loader, ctx)?;
 
         let compute_shader = ctx
             .device
@@ -119,7 +119,7 @@ impl<'a> BlocksRenderStateBuilder<'a> {
                 flags: wgpu::ShaderFlags::default(),
                 source: wgpu::ShaderSource::SpirV(
                     ctx.resource_loader
-                        .load_shader("shader/blocks/compute")?
+                        .load_shader("shader/voxels/compute")?
                         .into(),
                 ),
             });
@@ -131,7 +131,7 @@ impl<'a> BlocksRenderStateBuilder<'a> {
                 flags: wgpu::ShaderFlags::default(),
                 source: wgpu::ShaderSource::SpirV(
                     ctx.resource_loader
-                        .load_shader("shader/blocks/vertex")?
+                        .load_shader("shader/voxels/vertex")?
                         .into(),
                 ),
             });
@@ -143,7 +143,7 @@ impl<'a> BlocksRenderStateBuilder<'a> {
                 flags: wgpu::ShaderFlags::default(),
                 source: wgpu::ShaderSource::SpirV(
                     ctx.resource_loader
-                        .load_shader("shader/blocks/fragment")?
+                        .load_shader("shader/voxels/fragment")?
                         .into(),
                 ),
             });
@@ -157,29 +157,29 @@ impl<'a> BlocksRenderStateBuilder<'a> {
         );
 
         if let Some(active_view_box) = self.view_state.params.calculate_view_box() {
-            chunk_state.update_view_box(active_view_box, self.blocks);
+            chunk_state.update_view_box(active_view_box, self.voxels);
         }
 
-        log::info!("initializing blocks compute stage");
+        log::info!("initializing voxels compute stage");
         let compute_stage =
             self.build_compute_stage(ctx, &chunk_state, &geometry_buffers, compute_shader);
 
-        log::info!("initializing blocks render stage");
+        log::info!("initializing voxels render stage");
         let render_stage = self.build_render_stage(
             ctx,
-            &block_info_handler,
+            &voxel_info_handler,
             &chunk_state,
             &geometry_buffers,
             vert_shader,
             frag_shader,
         );
 
-        Ok(BlocksRenderState {
+        Ok(VoxelsRenderState {
             chunk_state,
             compute_stage,
             render_stage,
             geometry_buffers,
-            block_info_handler,
+            voxel_info_handler,
         })
     }
 
@@ -196,7 +196,7 @@ impl<'a> BlocksRenderStateBuilder<'a> {
         let bind_group_layout =
             ctx.device
                 .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                    label: Some("blocks compute layout"),
+                    label: Some("voxels compute layout"),
                     entries: &[
                         // Uniforms
                         wgpu::BindGroupLayoutEntry {
@@ -209,7 +209,7 @@ impl<'a> BlocksRenderStateBuilder<'a> {
                                 min_binding_size: None,
                             },
                         },
-                        // Block type buffer
+                        // Voxel type buffer
                         wgpu::BindGroupLayoutEntry {
                             binding: 1,
                             visibility: wgpu::ShaderStage::COMPUTE,
@@ -289,8 +289,8 @@ impl<'a> BlocksRenderStateBuilder<'a> {
             layout: &bind_group_layout,
             entries: &[
                 uniforms.as_binding(0),
-                // self.block_info_handler.block_info_buf.as_binding(1),
-                chunk_state.block_type_binding(1),
+                // self.voxel_info_handler.voxel_info_buf.as_binding(1),
+                chunk_state.voxel_type_binding(1),
                 chunk_state.chunk_metadata_binding(2),
                 geometry_buffers.faces.as_binding(3),
                 geometry_buffers.indirect.as_binding(4),
@@ -309,7 +309,7 @@ impl<'a> BlocksRenderStateBuilder<'a> {
     fn build_render_stage(
         &self,
         ctx: &crate::GraphicsContext,
-        block_info_handler: &BlockInfoHandler,
+        voxel_info_handler: &VoxelInfoHandler,
         chunk_state: &ChunkState,
         geometry_buffers: &GeometryBuffers,
         vert_shader: wgpu::ShaderModule,
@@ -318,7 +318,7 @@ impl<'a> BlocksRenderStateBuilder<'a> {
         let bind_group_layout =
             ctx.device
                 .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                    label: Some("blocks vertex layout"),
+                    label: Some("voxels vertex layout"),
                     entries: &[
                         // Uniforms
                         wgpu::BindGroupLayoutEntry {
@@ -331,7 +331,7 @@ impl<'a> BlocksRenderStateBuilder<'a> {
                                 ty: wgpu::BufferBindingType::Uniform,
                             },
                         },
-                        // Block info
+                        // Voxel info
                         wgpu::BindGroupLayoutEntry {
                             binding: 1,
                             visibility: wgpu::ShaderStage::VERTEX,
@@ -342,7 +342,7 @@ impl<'a> BlocksRenderStateBuilder<'a> {
                                 min_binding_size: None,
                             },
                         },
-                        // Block types
+                        // Voxel types
                         wgpu::BindGroupLayoutEntry {
                             binding: 2,
                             visibility: wgpu::ShaderStage::VERTEX,
@@ -391,7 +391,7 @@ impl<'a> BlocksRenderStateBuilder<'a> {
                             binding: 6,
                             visibility: wgpu::ShaderStage::FRAGMENT,
                             count: Some(
-                                (block_info_handler.index_map.len() as u32)
+                                (voxel_info_handler.index_map.len() as u32)
                                     .try_into()
                                     .expect("index map len must be nonzero"),
                             ),
@@ -480,15 +480,15 @@ impl<'a> BlocksRenderStateBuilder<'a> {
             layout: &bind_group_layout,
             entries: &[
                 uniforms.as_binding(0),
-                block_info_handler.block_info_buf.as_binding(1),
-                chunk_state.block_type_binding(2),
+                voxel_info_handler.voxel_info_buf.as_binding(1),
+                chunk_state.voxel_type_binding(2),
                 chunk_state.chunk_metadata_binding(3),
                 geometry_buffers.faces.as_binding(4),
-                block_info_handler.texture_metadata_buf.as_binding(5),
+                voxel_info_handler.texture_metadata_buf.as_binding(5),
                 wgpu::BindGroupEntry {
                     binding: 6,
                     resource: wgpu::BindingResource::TextureViewArray(
-                        block_info_handler
+                        voxel_info_handler
                             .texture_arr_views
                             .iter()
                             .collect::<Vec<_>>()
@@ -497,7 +497,7 @@ impl<'a> BlocksRenderStateBuilder<'a> {
                 },
                 wgpu::BindGroupEntry {
                     binding: 7,
-                    resource: wgpu::BindingResource::Sampler(&block_info_handler.sampler),
+                    resource: wgpu::BindingResource::Sampler(&voxel_info_handler.sampler),
                 },
             ],
         });
@@ -516,7 +516,7 @@ impl<'a> BlocksRenderStateBuilder<'a> {
         let faces = InstancedBuffer::new(
             &ctx.device,
             InstancedBufferDesc {
-                label: "block faces",
+                label: "voxel faces",
                 instance_len: (4 * 3 * index_utils::chunk_size_total()) as usize,
                 n_instances: self.max_visible_chunks,
                 usage: wgpu::BufferUsage::STORAGE,
@@ -526,7 +526,7 @@ impl<'a> BlocksRenderStateBuilder<'a> {
         let indirect = InstancedBuffer::new(
             &ctx.device,
             InstancedBufferDesc {
-                label: "block indirect",
+                label: "voxel indirect",
                 instance_len: 4 * 4,
                 n_instances: self.max_visible_chunks,
                 usage: wgpu::BufferUsage::STORAGE | wgpu::BufferUsage::INDIRECT,
@@ -551,7 +551,7 @@ impl<'a> BlocksRenderStateBuilder<'a> {
     }
 }
 
-impl BlocksRenderState {
+impl VoxelsRenderState {
     pub fn set_depth_texture(&mut self, depth_texture: &wgpu::Texture) {
         self.render_stage.depth_texture = depth_texture.create_view(&Default::default());
     }
@@ -569,26 +569,26 @@ impl BlocksRenderState {
         self.render_pass(ctx, frame_render);
 
         metrics::timing!(
-            "render.world.blocks.update_buffers",
+            "render.world.voxels.update_buffers",
             ts_update.duration_since(ts_begin)
         );
     }
 
     pub fn update(
         &mut self,
-        blocks: &BlockData,
-        diff: &UpdatedBlocksState,
+        voxels: &VoxelData,
+        diff: &UpdatedVoxelsState,
         view_state: &world::ViewState,
     ) {
         if let Some(active_view_box) = view_state.params.calculate_view_box() {
             self.compute_stage.uniforms.update_view_box(active_view_box);
 
-            self.chunk_state.update_view_box(active_view_box, blocks);
+            self.chunk_state.update_view_box(active_view_box, voxels);
         } else {
             self.chunk_state.clear_view_box();
         }
 
-        self.chunk_state.apply_chunk_diff(blocks, diff);
+        self.chunk_state.apply_chunk_diff(voxels, diff);
         *self.render_stage.uniforms = RenderUniforms::new(view_state);
     }
 
@@ -687,7 +687,7 @@ impl BufferSyncable for RenderUniforms {
 impl IntoBufferSynced for RenderUniforms {
     fn buffer_sync_desc(&self) -> BufferSyncHelperDesc {
         BufferSyncHelperDesc {
-            label: "world blocks render uniforms",
+            label: "world voxels render uniforms",
             buffer_len: 1,
             max_chunk_len: 1,
             usage: wgpu::BufferUsage::UNIFORM | wgpu::BufferUsage::COPY_DST,

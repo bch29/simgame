@@ -6,7 +6,7 @@ use anyhow::{anyhow, Result};
 use structopt::StructOpt;
 
 use simgame::files::FileContext;
-use simgame_blocks::BlockConfigHelper;
+use simgame_voxels::VoxelConfigHelper;
 use simgame_render::resource::{self, ResourceLoader};
 use simgame_world::{worldgen, World};
 
@@ -106,26 +106,26 @@ async fn run_render_world(ctx: &FileContext, options: &RenderWorldOpts) -> Resul
         resource_options,
     )?;
 
-    let blocks = match &options.save_name {
-        Some(save_name) => ctx.load_world_blocks(save_name)?,
-        None => FileContext::load_debug_world_blocks()?,
+    let voxels = match &options.save_name {
+        Some(save_name) => ctx.load_world_voxels(save_name)?,
+        None => FileContext::load_debug_world_voxels()?,
     };
-    log::info!("Loaded world: {:?}", blocks.debug_summary());
+    log::info!("Loaded world: {:?}", voxels.debug_summary());
 
-    let world = World::new(blocks);
+    let world = World::new(voxels);
 
     let params = simgame::RenderParams {
         trace_path: options.graphics_trace_path.as_deref(),
     };
 
-    let block_helper = BlockConfigHelper::new(&ctx.core_settings.block_config)?;
+    let voxel_helper = VoxelConfigHelper::new(&ctx.core_settings.voxel_config)?;
 
     simgame::test_render(
         world,
         settings.render_test_params,
         params,
         resource_loader,
-        block_helper,
+        voxel_helper,
         ctx.metrics_controller.clone(),
     )
     .await
@@ -139,14 +139,14 @@ fn run_generate(ctx: &FileContext, options: &GenerateWorldOpts) -> Result<()> {
         std::time::Duration::from_secs(10),
     );
 
-    let block_helper = BlockConfigHelper::new(&ctx.core_settings.block_config)?;
+    let voxel_helper = VoxelConfigHelper::new(&ctx.core_settings.voxel_config)?;
 
     let config_file = std::fs::File::open(&options.config)?;
     let config = serde_yaml::from_reader(config_file)?;
-    let blocks = worldgen::generate_world(&config, &block_helper)?;
+    let voxels = worldgen::generate_world(&config, &voxel_helper)?;
 
     log::info!("Saving");
-    ctx.save_world_blocks(options.save_name.as_str(), &blocks)?;
+    ctx.save_world_voxels(options.save_name.as_str(), &voxels)?;
 
     metrics_exporter.turn();
 

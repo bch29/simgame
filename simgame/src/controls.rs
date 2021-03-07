@@ -347,10 +347,10 @@ impl AccelControlState {
 pub fn restrict_visible_size(max_chunks: usize, mut visible_size: Vector3<i32>) -> Vector3<i32> {
     let chunk_size = visible_size_to_chunks(visible_size);
     let max_z_chunks = max_chunks as i32 / (chunk_size.x * chunk_size.y) - 1;
-    let max_z_blocks = simgame_blocks::index_utils::chunk_size().z as i32 * max_z_chunks;
+    let max_z_voxels = simgame_voxels::index_utils::chunk_size().z as i32 * max_z_chunks;
 
-    if visible_size.z > max_z_blocks {
-        visible_size.z = max_z_blocks;
+    if visible_size.z > max_z_voxels {
+        visible_size.z = max_z_voxels;
     }
 
     visible_size

@@ -101,7 +101,7 @@ impl<'a> GuiRenderStateBuilder<'a> {
         let bind_group_layout =
             ctx.device
                 .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                    label: Some("blocks vertex layout"),
+                    label: Some("voxels vertex layout"),
                     entries: &[
                         // Uniforms
                         wgpu::BindGroupLayoutEntry {

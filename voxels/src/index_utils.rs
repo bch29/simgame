@@ -45,7 +45,7 @@ pub fn unpack_index(indices: (Point3<i64>, i64)) -> Point3<i64> {
     chunk_pos.mul_element_wise(origin + chunk_size()) + inner_offset
 }
 
-/// From a point in block coordinates, return the chunk index and the position of the block
+/// From a point in voxel coordinates, return the chunk index and the position of the voxel
 /// within that chunk.
 #[inline]
 pub fn to_chunk_pos(p: Point3<i64>) -> (Point3<i64>, Point3<i64>) {

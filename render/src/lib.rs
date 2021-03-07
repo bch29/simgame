@@ -12,7 +12,7 @@ use anyhow::{anyhow, bail, Result};
 use cgmath::Vector2;
 use raw_window_handle::HasRawWindowHandle;
 
-use simgame_blocks::BlockConfigHelper;
+use simgame_voxels::VoxelConfigHelper;
 use simgame_types::{UpdatedWorldState, World};
 
 pub use world::{visible_size_to_chunks, ViewParams};
@@ -29,7 +29,7 @@ pub struct RenderStateBuilder<'a, W> {
     pub display_size: Vector2<u32>,
     pub view_params: ViewParams,
     pub world: &'a World,
-    pub block_helper: &'a BlockConfigHelper,
+    pub voxel_helper: &'a VoxelConfigHelper,
     pub max_visible_chunks: usize,
 }
 
@@ -97,7 +97,7 @@ where
         let world_render_state = WorldRenderStateBuilder {
             view_params: self.view_params,
             world: self.world,
-            block_helper: self.block_helper,
+            voxel_helper: self.voxel_helper,
             max_visible_chunks: self.max_visible_chunks,
             swapchain: &swapchain_descriptor,
         }

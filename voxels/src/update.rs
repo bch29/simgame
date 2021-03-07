@@ -2,22 +2,22 @@ use std::collections::HashSet;
 
 use cgmath::Point3;
 
-use crate::block_data::BlockData;
+use crate::voxel_data::VoxelData;
 use crate::index_utils;
-use crate::{Block, Chunk};
+use crate::{Voxel, Chunk};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct UpdatedBlocksState {
+pub struct UpdatedVoxelsState {
     pub modified_chunks: HashSet<Point3<i64>>,
 }
 
 #[derive(Debug)]
-pub struct BlockUpdater<'a> {
-    blocks: &'a mut BlockData,
-    updated_state: &'a mut UpdatedBlocksState,
+pub struct VoxelUpdater<'a> {
+    voxels: &'a mut VoxelData,
+    updated_state: &'a mut UpdatedVoxelsState,
 }
 
-impl UpdatedBlocksState {
+impl UpdatedVoxelsState {
     pub fn empty() -> Self {
         Self {
             modified_chunks: HashSet::new(),
@@ -32,7 +32,7 @@ impl UpdatedBlocksState {
         self.modified_chunks.insert(chunk_pos);
     }
 
-    pub fn update_from(&mut self, other: UpdatedBlocksState) {
+    pub fn update_from(&mut self, other: UpdatedVoxelsState) {
         for chunk in other.modified_chunks.into_iter() {
             self.modified_chunks.insert(chunk);
         }
@@ -43,35 +43,35 @@ impl UpdatedBlocksState {
     }
 }
 
-impl<'a> BlockUpdater<'a> {
-    pub fn new(blocks: &'a mut BlockData, updated_state: &'a mut UpdatedBlocksState) -> Self {
+impl<'a> VoxelUpdater<'a> {
+    pub fn new(voxels: &'a mut VoxelData, updated_state: &'a mut UpdatedVoxelsState) -> Self {
         Self {
-            blocks,
+            voxels,
             updated_state,
         }
     }
 
     #[inline]
-    pub fn set_block(&mut self, point: Point3<i64>, block: Block) {
-        self.blocks.set_block(point, block);
+    pub fn set_voxel(&mut self, point: Point3<i64>, voxel: Voxel) {
+        self.voxels.set_voxel(point, voxel);
         let (chunk_pos, _) = index_utils::to_chunk_pos(point);
         self.updated_state.record_chunk_update(chunk_pos);
     }
 
-    /// Set multiple blocks in one pass. Can be more efficient than many calls of 'set_block' if
-    /// the input iterator has good chunk locality (multiple blocks in the same chunk follow each
+    /// Set multiple voxels in one pass. Can be more efficient than many calls of 'set_voxel' if
+    /// the input iterator has good chunk locality (multiple voxels in the same chunk follow each
     /// other directly).
     #[inline]
-    pub fn set_blocks<I>(&mut self, set_blocks: I)
+    pub fn set_voxels<I>(&mut self, set_voxels: I)
     where
-        I: IntoIterator<Item = (Point3<i64>, Block)>,
+        I: IntoIterator<Item = (Point3<i64>, Voxel)>,
     {
-        let chunks = self.blocks.chunks_mut();
-        let mut iter = set_blocks.into_iter();
+        let chunks = self.voxels.chunks_mut();
+        let mut iter = set_voxels.into_iter();
 
-        let ((mut chunk_pos, mut first_local_point), mut first_block) =
-            if let Some((point, block)) = iter.next() {
-                (index_utils::to_chunk_pos(point), block)
+        let ((mut chunk_pos, mut first_local_point), mut first_voxel) =
+            if let Some((point, voxel)) = iter.next() {
+                (index_utils::to_chunk_pos(point), voxel)
             } else {
                 return;
             };
@@ -80,7 +80,7 @@ impl<'a> BlockUpdater<'a> {
 
         while !done {
             // Only do one hash map insert and one octree chunk lookup when we start a run of
-            // blocks in a new chunk. While we are in a chunk, everything gets to be plain array
+            // voxels in a new chunk. While we are in a chunk, everything gets to be plain array
             // operations.
 
             while !chunks.bounds().contains_point(chunk_pos) {
@@ -89,21 +89,21 @@ impl<'a> BlockUpdater<'a> {
 
             let chunk = chunks.get_or_insert(chunk_pos, Chunk::empty);
             self.updated_state.record_chunk_update(chunk_pos);
-            chunk.set_block(first_local_point, first_block);
+            chunk.set_voxel(first_local_point, first_voxel);
 
             done = true;
 
-            for (point, block) in &mut iter {
+            for (point, voxel) in &mut iter {
                 let (new_chunk_pos, local_point) = index_utils::to_chunk_pos(point);
                 if new_chunk_pos != chunk_pos {
                     chunk_pos = new_chunk_pos;
                     first_local_point = local_point;
-                    first_block = block;
+                    first_voxel = voxel;
                     done = false;
                     break;
                 }
 
-                chunk.set_block(local_point, block);
+                chunk.set_voxel(local_point, voxel);
             }
         }
     }

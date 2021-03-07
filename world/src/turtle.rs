@@ -1,7 +1,7 @@
 use anyhow::{anyhow, Result};
 use cgmath::{Angle, EuclideanSpace, InnerSpace, Matrix4, Point3, Rad, SquareMatrix, Vector3};
 
-use simgame_blocks::{primitive, Block};
+use simgame_voxels::{primitive, Voxel};
 
 pub struct Turtle {
     state: TurtleState,
@@ -12,7 +12,7 @@ pub struct Turtle {
 #[derive(Debug, Clone, Copy)]
 pub enum TurtleBrush {
     FilledLine {
-        fill_block: Block,
+        fill_voxel: Voxel,
         round_start: bool,
         round_end: bool,
     },
@@ -20,7 +20,7 @@ pub enum TurtleBrush {
         /// If true, the spheroid is stretched between the start and end points of the drawing.
         /// Otherwise, it is a proper sphere placed directly between the two points.
         stretch: bool,
-        fill_block: Block,
+        fill_voxel: Voxel,
     },
 }
 
@@ -93,11 +93,11 @@ impl Turtle {
 
         match self.state.brush {
             TurtleBrush::FilledLine {
-                fill_block,
+                fill_voxel,
                 round_start,
                 round_end,
             } => self.components.push(primitive::ShapeComponent {
-                fill_block,
+                fill_voxel,
                 primitive: Box::new(primitive::FilledLine {
                     start: self.state.pos,
                     end: end_pos,
@@ -107,7 +107,7 @@ impl Turtle {
                 }),
             }),
             TurtleBrush::Spheroid {
-                fill_block,
+                fill_voxel,
                 stretch,
             } => {
                 let sphere = primitive::Sphere {
@@ -159,7 +159,7 @@ impl Turtle {
                     .expect("spheroid brush resulted in uninvertible transform");
 
                 self.components.push(primitive::ShapeComponent {
-                    fill_block,
+                    fill_voxel,
                     primitive: Box::new(primitive),
                 });
             }

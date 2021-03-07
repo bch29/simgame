@@ -1,7 +1,7 @@
 use cgmath::{Point3, Vector2, Vector3};
 use serde::{Deserialize, Serialize};
 
-use simgame_blocks::BlockConfig;
+use simgame_voxels::VoxelConfig;
 use simgame_render::resource::ResourceConfig;
 use simgame_world::tree::TreeConfig;
 
@@ -16,9 +16,9 @@ pub struct Settings {
 pub struct CoreSettings {
     pub game_name: String,
     pub path_name: String,
-    pub block_data_file_name: String,
+    pub voxel_data_file_name: String,
     pub world_meta_file_name: String,
-    pub block_config: BlockConfig,
+    pub voxel_config: VoxelConfig,
     pub resources: ResourceConfig,
 }
 

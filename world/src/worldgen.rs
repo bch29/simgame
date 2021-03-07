@@ -6,7 +6,7 @@ use log::info;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 
-use simgame_blocks::{Block, BlockConfigHelper, BlockData, BlockUpdater};
+use simgame_voxels::{Voxel, VoxelConfigHelper, VoxelData, VoxelUpdater};
 use simgame_util::Bounds;
 
 use crate::{tree, UpdatedWorldState};
@@ -19,21 +19,21 @@ pub struct GenerateWorldConfig {
 
 pub struct WorldGenerator<'a, R> {
     config: &'a GenerateWorldConfig,
-    block_helper: &'a BlockConfigHelper,
+    voxel_helper: &'a VoxelConfigHelper,
     bounds: Bounds<i64>,
-    blocks: BlockData,
+    voxels: VoxelData,
     rng: &'a mut R,
 }
 
 pub fn generate_world(
     config: &GenerateWorldConfig,
-    block_helper: &BlockConfigHelper,
-) -> Result<BlockData> {
+    voxel_helper: &VoxelConfigHelper,
+) -> Result<VoxelData> {
     info!("Creating empty world: {:?}", config);
 
     let mut rng = rand::thread_rng();
 
-    let mut generator = WorldGenerator::new(config, block_helper, &mut rng);
+    let mut generator = WorldGenerator::new(config, voxel_helper, &mut rng);
     generator.generate()?;
     Ok(generator.finish())
 }
@@ -41,7 +41,7 @@ pub fn generate_world(
 impl<'a, R> WorldGenerator<'a, R> {
     pub fn new(
         config: &'a GenerateWorldConfig,
-        block_helper: &'a BlockConfigHelper,
+        voxel_helper: &'a VoxelConfigHelper,
         rng: &'a mut R,
     ) -> Self {
         let bounds = {
@@ -50,13 +50,13 @@ impl<'a, R> WorldGenerator<'a, R> {
             Bounds::new(origin, config.size)
         };
 
-        let blocks = BlockData::empty(bounds);
+        let voxels = VoxelData::empty(bounds);
 
         Self {
             config,
-            block_helper,
+            voxel_helper,
             bounds,
-            blocks,
+            voxels,
             rng,
         }
     }
@@ -80,8 +80,8 @@ impl<'a, R> WorldGenerator<'a, R> {
         Ok(())
     }
 
-    pub fn finish(self) -> BlockData {
-        self.blocks
+    pub fn finish(self) -> VoxelData {
+        self.voxels
     }
 
     fn generate_terrain(&mut self) -> Result<()>
@@ -101,31 +101,31 @@ impl<'a, R> WorldGenerator<'a, R> {
         let cos_factor = 2.0;
         let sin_factor = 1.0;
 
-        let mut blocks_done = 0;
-        let total_blocks = self.config.size.x * self.config.size.y * self.config.size.z;
+        let mut voxels_done = 0;
+        let total_voxels = self.config.size.x * self.config.size.y * self.config.size.z;
 
         let progress_count = 10;
         let mut next_progress_step = 1;
 
-        let rock_block = self
-            .block_helper
-            .block_by_name("Rock")
-            .ok_or_else(|| anyhow!("Missing block config for Rock"))?
+        let rock_voxel = self
+            .voxel_helper
+            .voxel_by_name("Rock")
+            .ok_or_else(|| anyhow!("Missing voxel config for Rock"))?
             .0;
-        let dirt_block = self
-            .block_helper
-            .block_by_name("Dirt")
-            .ok_or_else(|| anyhow!("Missing block config for Dirt"))?
+        let dirt_voxel = self
+            .voxel_helper
+            .voxel_by_name("Dirt")
+            .ok_or_else(|| anyhow!("Missing voxel config for Dirt"))?
             .0;
-        let grass_block = self
-            .block_helper
-            .block_by_name("Grass")
-            .ok_or_else(|| anyhow!("Missing block config for Grass"))?
+        let grass_voxel = self
+            .voxel_helper
+            .voxel_by_name("Grass")
+            .ok_or_else(|| anyhow!("Missing voxel config for Grass"))?
             .0;
 
         info!("Bounds are {:?}", self.bounds);
-        self.blocks
-            .replace_blocks(self.bounds, |loc, _| -> Result<Block> {
+        self.voxels
+            .replace_voxels(self.bounds, |loc, _| -> Result<Voxel> {
                 // Normalized point with coords in range (0, 1)
                 let p = Vector3 {
                     x: loc.x as f64 / world_size.x,
@@ -144,23 +144,23 @@ impl<'a, R> WorldGenerator<'a, R> {
                 let height_here = base_z + val * terrain_height;
                 let p = p.mul_element_wise(world_size);
 
-                let block = if p.z > height_here {
-                    Block::air()
+                let voxel = if p.z > height_here {
+                    Voxel::air()
                 } else if p.z > height_here - 1. {
-                    grass_block
+                    grass_voxel
                 } else if p.z > height_here - 4. {
-                    dirt_block
+                    dirt_voxel
                 } else {
-                    rock_block
+                    rock_voxel
                 };
 
-                blocks_done += 1;
-                if blocks_done == (next_progress_step * total_blocks) / progress_count {
+                voxels_done += 1;
+                if voxels_done == (next_progress_step * total_voxels) / progress_count {
                     info!("{}%", next_progress_step * 10);
                     next_progress_step += 1;
                 }
 
-                Ok(block)
+                Ok(voxel)
             })
     }
 
@@ -174,10 +174,10 @@ impl<'a, R> WorldGenerator<'a, R> {
         };
 
         let mut updated_state = UpdatedWorldState::empty();
-        let mut block_updater = BlockUpdater::new(&mut self.blocks, &mut updated_state.blocks);
+        let mut voxel_updater = VoxelUpdater::new(&mut self.voxels, &mut updated_state.voxels);
 
-        let tree = tree::generate(tree_config, self.block_helper, &mut self.rng)?;
-        tree.draw(&mut block_updater);
+        let tree = tree::generate(tree_config, self.voxel_helper, &mut self.rng)?;
+        tree.draw(&mut voxel_updater);
 
         Ok(())
     }

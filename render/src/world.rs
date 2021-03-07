@@ -1,13 +1,13 @@
-mod blocks;
+mod voxels;
 
 use anyhow::Result;
 use cgmath::{Deg, InnerSpace, Matrix4, Point3, SquareMatrix, Vector2, Vector3};
 
-use simgame_blocks::BlockConfigHelper;
+use simgame_voxels::VoxelConfigHelper;
 use simgame_types::{UpdatedWorldState, World};
 use simgame_util::{convert_point, convert_vec, Bounds};
 
-pub use blocks::visible_size_to_chunks;
+pub use voxels::visible_size_to_chunks;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ViewParams {
@@ -27,13 +27,13 @@ pub struct ViewState {
 pub(crate) struct WorldRenderStateBuilder<'a> {
     pub view_params: ViewParams,
     pub world: &'a World,
-    pub block_helper: &'a BlockConfigHelper,
+    pub voxel_helper: &'a VoxelConfigHelper,
     pub max_visible_chunks: usize,
     pub swapchain: &'a wgpu::SwapChainDescriptor,
 }
 
 pub(crate) struct WorldRenderState {
-    render_blocks: blocks::BlocksRenderState,
+    render_voxels: voxels::VoxelsRenderState,
 
     view_state: ViewState,
 }
@@ -51,17 +51,17 @@ impl<'a> WorldRenderStateBuilder<'a> {
             rotation: Matrix4::identity(),
         };
 
-        let render_blocks = blocks::BlocksRenderStateBuilder {
+        let render_voxels = voxels::VoxelsRenderStateBuilder {
             view_state: &view_state,
             depth_texture: &depth_texture,
-            blocks: &self.world.blocks,
+            voxels: &self.world.voxels,
             max_visible_chunks: self.max_visible_chunks,
-            block_config: &self.block_helper,
+            voxel_config: &self.voxel_helper,
         }
         .build(ctx)?;
 
         Ok(WorldRenderState {
-            render_blocks,
+            render_voxels,
             view_state,
         })
     }
@@ -96,7 +96,7 @@ impl WorldRenderState {
         let display_size = Vector2::new(swapchain.width, swapchain.height);
 
         let depth_texture = Self::make_depth_texture(&ctx.device, display_size);
-        self.render_blocks.set_depth_texture(&depth_texture);
+        self.render_voxels.set_depth_texture(&depth_texture);
 
         let aspect_ratio = display_size.x as f32 / display_size.y as f32;
         self.view_state.proj = Self::create_projection_matrix(aspect_ratio);
@@ -113,18 +113,18 @@ impl WorldRenderState {
         ctx: &crate::GraphicsContext,
         frame_render: &mut crate::FrameRenderContext,
     ) {
-        self.render_blocks
+        self.render_voxels
             .render_frame(ctx, frame_render, &self.view_state);
     }
 
     pub fn update(&mut self, world: &World, diff: &UpdatedWorldState) {
-        self.render_blocks
-            .update(&world.blocks, &diff.blocks, &self.view_state);
+        self.render_voxels
+            .update(&world.voxels, &diff.voxels, &self.view_state);
     }
 }
 
 impl ViewParams {
-    /// Calculates the box containing blocks that will be rendered according to current view.
+    /// Calculates the box containing voxels that will be rendered according to current view.
     pub fn calculate_view_box(&self) -> Option<Bounds<i32>> {
         let visible_distance = Vector2 {
             x: self.visible_size.x as f32,

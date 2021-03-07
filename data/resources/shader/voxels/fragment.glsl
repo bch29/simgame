@@ -5,7 +5,7 @@
 layout(location = 0) in vec2 v_TexCoord;
 layout(location = 1) in vec3 v_Normal;
 layout(location = 2) in vec4 v_Pos;
-layout(location = 3) flat in uint v_BlockType;
+layout(location = 3) flat in uint v_VoxelType;
 layout(location = 4) in vec3 v_CameraPos;
 layout(location = 5) flat in uint v_TexId;
 layout(location = 0) out vec4 o_Target;
@@ -42,7 +42,7 @@ void main() {
   float diff = max(dot(norm, lightDir), 0.0);
   vec4 diffuse = diff * lightColor;
 
-  float colorScale = 0.3 + (float(v_BlockType) / 8.0) * 0.7;
+  float colorScale = 0.3 + (float(v_VoxelType) / 8.0) * 0.7;
   vec4 colorScaleV = vec4(colorScale * 0.7, colorScale * 0.5, colorScale, 1.);
 
   vec4 texColor = texture(sampler2D(t_Textures[v_TexId], s_Textures), v_TexCoord);

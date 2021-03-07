@@ -4,34 +4,34 @@ use std::convert::TryInto;
 use anyhow::{anyhow, bail, Result};
 use zerocopy::AsBytes;
 
-use simgame_blocks::{config as block, BlockConfigHelper};
+use simgame_voxels::{config as voxel, VoxelConfigHelper};
 
 use crate::buffer_util::{InstancedBuffer, InstancedBufferDesc};
 use crate::mesh::cube::Cube;
 use crate::resource::ResourceLoader;
 
-use super::{BlockRenderInfo, BlockTextureMetadata};
+use super::{VoxelRenderInfo, VoxelTextureMetadata};
 
 #[allow(unused)]
-pub(super) struct BlockInfoHandler {
-    pub index_map: HashMap<block::FaceTexture, usize>,
+pub(super) struct VoxelInfoHandler {
+    pub index_map: HashMap<voxel::FaceTexture, usize>,
 
     texture_arr: Vec<TextureData>,
     pub texture_arr_views: Vec<wgpu::TextureView>,
     pub sampler: wgpu::Sampler,
 
-    pub block_info_buf: InstancedBuffer,
+    pub voxel_info_buf: InstancedBuffer,
     pub texture_metadata_buf: InstancedBuffer,
 }
 
-impl BlockInfoHandler {
+impl VoxelInfoHandler {
     pub fn new(
-        config: &BlockConfigHelper,
+        config: &VoxelConfigHelper,
         resource_loader: &ResourceLoader,
         ctx: &crate::GraphicsContext,
     ) -> Result<Self> {
         let index_map = config.texture_index_map();
-        log::info!("Got {} block textures total", index_map.len());
+        log::info!("Got {} voxel textures total", index_map.len());
 
         let face_texes = {
             let mut face_texes: Vec<_> = index_map
@@ -57,7 +57,7 @@ impl BlockInfoHandler {
             .iter()
             .map(|data| {
                 data.texture.create_view(&wgpu::TextureViewDescriptor {
-                    label: Some("block textures"),
+                    label: Some("voxel textures"),
                     format: Some(wgpu::TextureFormat::Rgba8UnormSrgb),
                     dimension: Some(wgpu::TextureViewDimension::D2),
                     aspect: wgpu::TextureAspect::All,
@@ -84,26 +84,26 @@ impl BlockInfoHandler {
             ..Default::default()
         });
 
-        let block_info_buf = InstancedBuffer::new(
+        let voxel_info_buf = InstancedBuffer::new(
             &ctx.device,
             InstancedBufferDesc {
-                label: "block info",
-                instance_len: std::mem::size_of::<BlockRenderInfo>(),
-                n_instances: config.blocks().len(),
+                label: "voxel info",
+                instance_len: std::mem::size_of::<VoxelRenderInfo>(),
+                n_instances: config.voxels().len(),
                 usage: wgpu::BufferUsage::STORAGE | wgpu::BufferUsage::COPY_DST,
             },
         );
 
-        for (index, block) in config.blocks().iter().enumerate() {
-            let render_info = Self::get_block_render_info(&index_map, block)?;
-            block_info_buf.write(&ctx.queue, index, render_info.as_bytes());
+        for (index, voxel) in config.voxels().iter().enumerate() {
+            let render_info = Self::get_voxel_render_info(&index_map, voxel)?;
+            voxel_info_buf.write(&ctx.queue, index, render_info.as_bytes());
         }
 
         let texture_metadata_buf = InstancedBuffer::new(
             &ctx.device,
             InstancedBufferDesc {
                 label: "texture metadata",
-                instance_len: std::mem::size_of::<BlockTextureMetadata>(),
+                instance_len: std::mem::size_of::<VoxelTextureMetadata>(),
                 n_instances: index_map.len(),
                 usage: wgpu::BufferUsage::STORAGE | wgpu::BufferUsage::COPY_DST,
             },
@@ -121,7 +121,7 @@ impl BlockInfoHandler {
             texture_arr,
             sampler,
 
-            block_info_buf,
+            voxel_info_buf,
             texture_metadata_buf,
         })
     }
@@ -129,14 +129,14 @@ impl BlockInfoHandler {
     fn make_texture(
         ctx: &crate::GraphicsContext,
         resource_loader: &ResourceLoader,
-        face_tex: &block::FaceTexture,
+        face_tex: &voxel::FaceTexture,
     ) -> Result<TextureData> {
         let sample_generator = to_sample_generator(resource_loader, face_tex)?;
 
         let (width, height) = sample_generator.source_dimensions();
         if log2_exact(width).is_none() || log2_exact(height).is_none() {
             bail!(
-                "Block texture resource {:?} has dimensions {}x{}. Expected powers of 2.",
+                "Voxel texture resource {:?} has dimensions {}x{}. Expected powers of 2.",
                 face_tex,
                 width,
                 height
@@ -148,7 +148,7 @@ impl BlockInfoHandler {
             .max(1);
 
         let texture = ctx.device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("block texture array"),
+            label: Some("voxel texture array"),
             size: wgpu::Extent3d {
                 width,
                 height,
@@ -195,10 +195,10 @@ impl BlockInfoHandler {
         })
     }
 
-    fn get_block_render_info(
-        index_map: &HashMap<block::FaceTexture, usize>,
-        block: &block::BlockInfo,
-    ) -> Result<BlockRenderInfo> {
+    fn get_voxel_render_info(
+        index_map: &HashMap<voxel::FaceTexture, usize>,
+        voxel: &voxel::VoxelInfo,
+    ) -> Result<VoxelRenderInfo> {
         let to_index = |face_tex| {
             index_map
                 .get(face_tex)
@@ -206,12 +206,12 @@ impl BlockInfoHandler {
                 .map(|&ix| ix)
         };
 
-        let face_tex_ids = match &block.texture {
-            block::BlockTexture::Uniform(face_tex) => {
+        let face_tex_ids = match &voxel.texture {
+            voxel::VoxelTexture::Uniform(face_tex) => {
                 let index = to_index(face_tex)? as u32;
                 [index; 6]
             }
-            block::BlockTexture::Nonuniform { top, bottom, side } => {
+            voxel::VoxelTexture::Nonuniform { top, bottom, side } => {
                 let index_top = to_index(top)? as u32;
                 let index_bottom = to_index(bottom)? as u32;
                 let index_sides = to_index(side)? as u32;
@@ -225,17 +225,17 @@ impl BlockInfoHandler {
                 ]
             }
         };
-        Ok(BlockRenderInfo {
+        Ok(VoxelRenderInfo {
             face_tex_ids,
             _padding: [0; 2],
             vertex_data: Cube::new(),
         })
     }
 
-    fn get_texture_metadata(face_tex: &block::FaceTexture) -> BlockTextureMetadata {
+    fn get_texture_metadata(face_tex: &voxel::FaceTexture) -> VoxelTextureMetadata {
         match face_tex {
-            block::FaceTexture::SolidColor { .. } => BlockTextureMetadata { periodicity: 1 },
-            block::FaceTexture::Texture { periodicity, .. } => BlockTextureMetadata {
+            voxel::FaceTexture::SolidColor { .. } => VoxelTextureMetadata { periodicity: 1 },
+            voxel::FaceTexture::Texture { periodicity, .. } => VoxelTextureMetadata {
                 periodicity: *periodicity,
             },
         }
@@ -256,10 +256,10 @@ trait SampleGenerator {
 
 fn to_sample_generator(
     resource_loader: &ResourceLoader,
-    face_tex: &block::FaceTexture,
+    face_tex: &voxel::FaceTexture,
 ) -> Result<Box<dyn SampleGenerator>> {
     match face_tex {
-        block::FaceTexture::SolidColor { red, green, blue } => {
+        voxel::FaceTexture::SolidColor { red, green, blue } => {
             log::info!(
                 "Creating solid color texture with R/G/B {}/{}/{}",
                 red,
@@ -272,8 +272,8 @@ fn to_sample_generator(
                 blue: *blue,
             }))
         }
-        block::FaceTexture::Texture { resource, .. } => {
-            log::info!("Loading block texture {:?}", resource);
+        voxel::FaceTexture::Texture { resource, .. } => {
+            log::info!("Loading voxel texture {:?}", resource);
             let image = resource_loader.load_image(&resource[..])?.into_rgba8();
 
             Ok(Box::new(ImageSampleGenerator { image }))

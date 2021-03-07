@@ -3,26 +3,26 @@ use std::collections::{hash_map, HashMap};
 use anyhow::{bail, Result};
 use serde::{Deserialize, Serialize};
 
-use crate::Block;
+use crate::Voxel;
 
-/// A block category.
+/// A voxel category.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[repr(transparent)]
 pub struct Category(String);
 
-/// Specification of a block type.
+/// Specification of a voxel type.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BlockInfo {
+pub struct VoxelInfo {
     pub name: String,
     pub category: Category,
-    #[serde(default = "BlockInfo::default_passable_through")]
+    #[serde(default = "VoxelInfo::default_passable_through")]
     pub passable_through: bool,
-    #[serde(default = "BlockInfo::default_passable_above")]
+    #[serde(default = "VoxelInfo::default_passable_above")]
     pub passable_above: bool,
-    #[serde(default = "BlockInfo::default_speed_modifier")]
+    #[serde(default = "VoxelInfo::default_speed_modifier")]
     pub speed_modifier: f64,
 
-    pub texture: BlockTexture,
+    pub texture: VoxelTexture,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -32,17 +32,17 @@ pub enum FaceTexture {
     /// The face has a texture with the given resource name.
     Texture {
         resource: String,
-        /// The texture repeats after this many blocks
+        /// The texture repeats after this many voxels
         periodicity: u32,
     },
 }
 
-/// Specification of how a block is textured.
+/// Specification of how a voxel is textured.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum BlockTexture {
-    /// The block has the given face texture on all faces.
+pub enum VoxelTexture {
+    /// The voxel has the given face texture on all faces.
     Uniform(FaceTexture),
-    /// The block has the given face textures on corresponding faces.
+    /// The voxel has the given face textures on corresponding faces.
     Nonuniform {
         top: FaceTexture,
         bottom: FaceTexture,
@@ -50,19 +50,19 @@ pub enum BlockTexture {
     },
 }
 
-/// Specification of the selection of available blocks and categories.
+/// Specification of the selection of available voxels and categories.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BlockConfig {
-    blocks: Vec<BlockInfo>,
+pub struct VoxelConfig {
+    voxels: Vec<VoxelInfo>,
 }
 
 #[derive(Debug, Clone)]
-pub struct BlockConfigHelper {
-    blocks_by_name: HashMap<String, (Block, BlockInfo)>,
-    blocks_by_id: Vec<BlockInfo>,
+pub struct VoxelConfigHelper {
+    voxels_by_name: HashMap<String, (Voxel, VoxelInfo)>,
+    voxels_by_id: Vec<VoxelInfo>,
 }
 
-impl BlockInfo {
+impl VoxelInfo {
     pub fn default_passable_through() -> bool {
         false
     }
@@ -74,45 +74,45 @@ impl BlockInfo {
     }
 }
 
-impl BlockConfigHelper {
-    pub fn new(config: &BlockConfig) -> Result<Self> {
-        if config.blocks.is_empty() || config.blocks[0].category != Category("air".into()) {
-            bail!("First entry in block config must have category \"air\"");
+impl VoxelConfigHelper {
+    pub fn new(config: &VoxelConfig) -> Result<Self> {
+        if config.voxels.is_empty() || config.voxels[0].category != Category("air".into()) {
+            bail!("First entry in voxel config must have category \"air\"");
         }
 
-        let blocks_by_id = config.blocks.clone();
+        let voxels_by_id = config.voxels.clone();
 
-        let blocks_by_name = blocks_by_id
+        let voxels_by_name = voxels_by_id
             .iter()
             .enumerate()
-            .map(|(i, block_info)| {
-                let name = block_info.name.clone();
-                let block = Block::from_u16(i as u16);
-                (name, (block, block_info.clone()))
+            .map(|(i, voxel_info)| {
+                let name = voxel_info.name.clone();
+                let voxel = Voxel::from_u16(i as u16);
+                (name, (voxel, voxel_info.clone()))
             })
             .collect();
 
-        for (block_id, block) in blocks_by_id.iter().enumerate() {
-            log::info!("Block id {} is {}", block_id, block.name);
+        for (voxel_id, voxel) in voxels_by_id.iter().enumerate() {
+            log::info!("Voxel id {} is {}", voxel_id, voxel.name);
         }
 
         Ok(Self {
-            blocks_by_name,
-            blocks_by_id,
+            voxels_by_name,
+            voxels_by_id,
         })
     }
 
-    pub fn block_by_name(&self, name: &str) -> Option<(Block, &BlockInfo)> {
-        let (block, block_info) = self.blocks_by_name.get(name)?;
-        Some((*block, block_info))
+    pub fn voxel_by_name(&self, name: &str) -> Option<(Voxel, &VoxelInfo)> {
+        let (voxel, voxel_info) = self.voxels_by_name.get(name)?;
+        Some((*voxel, voxel_info))
     }
 
-    pub fn block_info(&self, block: Block) -> Option<&BlockInfo> {
-        self.blocks_by_id.get(block.to_u16() as usize)
+    pub fn voxel_info(&self, voxel: Voxel) -> Option<&VoxelInfo> {
+        self.voxels_by_id.get(voxel.to_u16() as usize)
     }
 
-    pub fn blocks(&self) -> &[BlockInfo] {
-        &self.blocks_by_id[..]
+    pub fn voxels(&self) -> &[VoxelInfo] {
+        &self.voxels_by_id[..]
     }
 
     pub fn texture_index_map(&self) -> HashMap<FaceTexture, usize> {
@@ -131,24 +131,24 @@ impl BlockConfigHelper {
             }
         };
 
-        for block in self.blocks() {
-            match block.texture.clone() {
-                BlockTexture::Uniform(face_tex) => {
+        for voxel in self.voxels() {
+            match voxel.texture.clone() {
+                VoxelTexture::Uniform(face_tex) => {
                     let index = insert(face_tex);
                     log::info!(
-                        "Block {} gets a uniform texture with index {}",
-                        block.name,
+                        "Voxel {} gets a uniform texture with index {}",
+                        voxel.name,
                         index
                     );
                 }
-                BlockTexture::Nonuniform { top, bottom, side } => {
+                VoxelTexture::Nonuniform { top, bottom, side } => {
                     let index_top = insert(top);
                     let index_bottom = insert(bottom);
                     let index_side = insert(side);
 
                     log::info!(
-                        "Block {} gets a non-uniform texture with indices {}/{}/{}",
-                        block.name,
+                        "Voxel {} gets a non-uniform texture with indices {}/{}/{}",
+                        voxel.name,
                         index_top,
                         index_bottom,
                         index_side

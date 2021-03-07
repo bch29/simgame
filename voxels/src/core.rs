@@ -7,19 +7,19 @@ use simgame_util::convert_bounds;
 use simgame_util::ray::{Intersection, Ray};
 use simgame_util::Bounds;
 
-use crate::config::BlockConfigHelper;
+use crate::config::VoxelConfigHelper;
 use crate::index_utils;
 
-/// Represents the value of a single block in the world. The wrapped value is an index into the
-/// BlockConfig's list of BlockInfo.
+/// Represents the value of a single voxel in the world. The wrapped value is an index into the
+/// VoxelConfig's list of VoxelInfo.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[repr(transparent)]
-pub struct Block(u16);
+pub struct Voxel(u16);
 
-/// Encapsulates a single chunk of blocks. The world is split into chunks to help with cache
+/// Encapsulates a single chunk of voxels. The world is split into chunks to help with cache
 /// locality: if there were no chunks, then any movement in at least one of the dimensions
 /// (probably z) would always result in moving to a different cache line. Under the chunking
-/// system, blocks that are close to each other in space, and are in the same chunk, should be in
+/// system, voxels that are close to each other in space, and are in the same chunk, should be in
 /// the same cache line.
 #[derive(Clone)]
 #[repr(transparent)]
@@ -37,27 +37,27 @@ pub struct Chunk {
      | 16 17 18 19
      v 20 21 22 23
      */
-    pub blocks: [Block; index_utils::chunk_size_total() as usize],
+    pub voxels: [Voxel; index_utils::chunk_size_total() as usize],
 }
 
 #[derive(Debug, Clone)]
-pub struct BlockRaycastHit {
-    pub block: Block,
-    pub block_pos: Point3<i64>,
+pub struct VoxelRaycastHit {
+    pub voxel: Voxel,
+    pub voxel_pos: Point3<i64>,
     pub intersection: Intersection<f64>,
 }
 
-impl Block {
+impl Voxel {
     pub fn is_empty(self) -> bool {
         self.0 == 0
     }
 
     pub fn from_u16(val: u16) -> Self {
-        Block(val)
+        Voxel(val)
     }
 
     pub fn air() -> Self {
-        Block(0)
+        Voxel(0)
     }
 
     pub(crate) fn to_u16(self) -> u16 {
@@ -67,49 +67,49 @@ impl Block {
 
 impl Chunk {
     #[inline]
-    pub fn get_block(&self, p: Point3<i64>) -> Block {
-        self.blocks[index_utils::pack_within_chunk(p) as usize]
+    pub fn get_voxel(&self, p: Point3<i64>) -> Voxel {
+        self.voxels[index_utils::pack_within_chunk(p) as usize]
     }
 
     #[inline]
-    pub fn set_block(&mut self, p: Point3<i64>, val: Block) {
-        self.blocks[index_utils::pack_within_chunk(p) as usize] = val;
+    pub fn set_voxel(&mut self, p: Point3<i64>, val: Voxel) {
+        self.voxels[index_utils::pack_within_chunk(p) as usize] = val;
     }
 
-    /// Creates a chunk filled with zeroes (i.e. empty blocks).
+    /// Creates a chunk filled with zeroes (i.e. empty voxels).
     pub fn empty() -> Chunk {
-        let blocks = [Block(0); index_utils::chunk_size_total() as usize];
-        Chunk { blocks }
+        let voxels = [Voxel(0); index_utils::chunk_size_total() as usize];
+        Chunk { voxels }
     }
 
     pub fn cast_ray(
         &self,
         ray: &Ray<f64>,
         origin: Point3<i64>,
-        _block_helper: &BlockConfigHelper,
-    ) -> Option<BlockRaycastHit> {
-        // TODO: use space subdivision to avoid looping through every single block
-        // TODO: use collision info in block config to handle blocks that are not full cubes
+        _voxel_helper: &VoxelConfigHelper,
+    ) -> Option<VoxelRaycastHit> {
+        // TODO: use space subdivision to avoid looping through every single voxel
+        // TODO: use collision info in voxel config to handle voxels that are not full cubes
 
-        let mut nearest_hit: Option<BlockRaycastHit> = None;
+        let mut nearest_hit: Option<VoxelRaycastHit> = None;
 
         for z in 0..index_utils::chunk_size().z {
             for y in 0..index_utils::chunk_size().y {
                 for x in 0..index_utils::chunk_size().x {
-                    let block_offset = Vector3::new(x, y, z);
-                    let block = self.get_block(Point3::origin() + block_offset);
+                    let voxel_offset = Vector3::new(x, y, z);
+                    let voxel = self.get_voxel(Point3::origin() + voxel_offset);
 
-                    if block.is_empty() {
+                    if voxel.is_empty() {
                         continue;
                     }
 
-                    let block_pos = origin + block_offset;
+                    let voxel_pos = origin + voxel_offset;
                     let bounds =
-                        convert_bounds!(Bounds::new(block_pos, Vector3::new(1, 1, 1)), f64);
+                        convert_bounds!(Bounds::new(voxel_pos, Vector3::new(1, 1, 1)), f64);
                     let hit = match bounds.cast_ray(ray).entry() {
-                        Some(intersection) => BlockRaycastHit {
-                            block,
-                            block_pos,
+                        Some(intersection) => VoxelRaycastHit {
+                            voxel,
+                            voxel_pos,
                             intersection,
                         },
                         None => continue,
@@ -130,12 +130,12 @@ impl Chunk {
 }
 
 #[inline]
-pub fn blocks_to_u16(buf: &[Block]) -> &[u16] {
+pub fn voxels_to_u16(buf: &[Voxel]) -> &[u16] {
     unsafe { slice::from_raw_parts(buf.as_ptr() as *const u16, buf.len()) }
 }
 
 #[inline]
-pub fn blocks_to_u16_mut(buf: &mut [Block]) -> &mut [u16] {
+pub fn voxels_to_u16_mut(buf: &mut [Voxel]) -> &mut [u16] {
     unsafe { slice::from_raw_parts_mut(buf.as_mut_ptr() as *mut u16, buf.len()) }
 }
 
@@ -147,7 +147,7 @@ impl std::fmt::Debug for Chunk {
             for y in 0..index_utils::chunk_size().y {
                 for x in 0..index_utils::chunk_size().x {
                     let ix = index_utils::pack_xyz(index_utils::chunk_size(), Point3 { x, y, z });
-                    write!(f, "{}", self.blocks[ix as usize].0)?;
+                    write!(f, "{}", self.voxels[ix as usize].0)?;
                 }
                 writeln!(f)?;
             }
@@ -159,7 +159,7 @@ impl std::fmt::Debug for Chunk {
 impl std::cmp::PartialEq for Chunk {
     fn eq(&self, other: &Self) -> bool {
         for i in 0..index_utils::chunk_size_total() {
-            if self.blocks[i as usize] != other.blocks[i as usize] {
+            if self.voxels[i as usize] != other.voxels[i as usize] {
                 return false;
             }
         }

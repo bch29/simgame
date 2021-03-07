@@ -1,5 +1,7 @@
 //! Binary space partitioning tree.
 
+#![allow(unused)]
+
 use cgmath::Point3;
 
 use crate::bounds::Bounds;
