@@ -1,7 +1,7 @@
 use cgmath::{BaseFloat, BaseNum, ElementWise, EuclideanSpace, Point3, Vector3};
 use serde::{Deserialize, Serialize};
 
-use crate::ray::{ConvexRaycastResult, Intersection, Ray, Rect};
+use crate::ray::{ConvexRaycastResult, Intersection, Ray, Quad};
 use crate::{DivDown, DivUp, OrdFloat};
 
 /// Represents a half-open cuboid of points: the origin is inclusive and the limit is exclusive.
@@ -139,9 +139,9 @@ impl<T: BaseNum> Bounds<T> {
         self.size.x == T::zero() || self.size.y == T::zero() || self.size.z == T::zero()
     }
 
-    /// Returns rects describing each face of the bounds.
+    /// Returns quads describing each face of the bounds.
     #[inline]
-    pub fn face_rects(&self) -> [Rect<T>; 6]
+    pub fn face_quads(&self) -> [Quad<T>; 6]
     where
         Vector3<T>: std::ops::Neg<Output = Vector3<T>>,
     {
@@ -164,42 +164,42 @@ impl<T: BaseNum> Bounds<T> {
 
         [
             // front
-            Rect {
+            Quad {
                 origin: p(left, bottom, front),
                 horizontal: sx,
                 vertical: sy,
             }
             .flipped(),
             // back
-            Rect {
+            Quad {
                 origin: p(right, bottom, back),
                 horizontal: -sx,
                 vertical: sy,
             }
             .flipped(),
             // left
-            Rect {
+            Quad {
                 origin: p(left, bottom, back),
                 horizontal: -sz,
                 vertical: sy,
             }
             .flipped(),
             // right
-            Rect {
+            Quad {
                 origin: p(right, bottom, front),
                 horizontal: sz,
                 vertical: sy,
             }
             .flipped(),
             // bottom
-            Rect {
+            Quad {
                 origin: p(left, bottom, back),
                 horizontal: sx,
                 vertical: -sz,
             }
             .flipped(),
             // top
-            Rect {
+            Quad {
                 origin: p(left, top, front),
                 horizontal: sx,
                 vertical: sz,
@@ -219,11 +219,11 @@ impl<T: BaseNum> Bounds<T> {
         // `results` array when we get a hit. Sort results by t-value to find entry and exit
         // points.
 
-        let faces = self.face_rects();
+        let faces = self.face_quads();
         let mut results: [Option<Intersection<T>>; 6] = [None; 6];
 
         for i in 0..6 {
-            results[i] = match ray.test_rect(&faces[i]) {
+            results[i] = match ray.test_quad(&faces[i]) {
                 Some(int) if int.t >= T::zero() => Some(int),
                 _ => None,
             };
@@ -686,10 +686,10 @@ mod tests {
     }
 
     #[test]
-    fn test_rects() {
+    fn test_quads() {
         let bounds = Bounds::from_size(Vector3::new(4.0, 5.0, 6.0));
 
-        let faces = bounds.face_rects();
+        let faces = bounds.face_quads();
 
         assert_eq!(faces[0].normal(), -faces[0].flipped().normal());
 

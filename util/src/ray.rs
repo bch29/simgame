@@ -6,9 +6,9 @@ pub struct Ray<T> {
     pub dir: Vector3<T>,
 }
 
-/// Invariant: `vertical` is orthogonal to `horizontal`.
+/// Represents a flat parallelogram in 3D space with a defined front and back face.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Rect<T> {
+pub struct Quad<T> {
     pub origin: Point3<T>,
     pub horizontal: Vector3<T>,
     pub vertical: Vector3<T>,
@@ -34,7 +34,7 @@ pub enum ConvexRaycastResult<T> {
         entry: Intersection<T>,
         exit: Intersection<T>,
     },
-    /// The ray clip a corner or edge of the object, intersecting in one place.
+    /// The ray clipped a corner or edge of the object, intersecting in one place.
     Clip { clip: Intersection<T> },
 }
 
@@ -82,24 +82,24 @@ where
         Some(Intersection { t, normal })
     }
 
-    /// Tests if a rect intersects the ray. If so, returns the ray parameter at the point of
+    /// Tests if a quad intersects the ray. If so, returns the ray parameter at the point of
     /// intersection.
     ///
-    /// Returns bogus results if the rect's `horizontal` and `vertical` are not orthogonal.
-    pub fn test_rect(&self, rect: &Rect<T>) -> Option<Intersection<T>> {
-        let int = self.test_plane(rect.origin, rect.normal())?;
-        let point = self.get(int.t);
+    /// Returns bogus results if the quad's `horizontal` and `vertical` are not orthogonal.
+    pub fn test_quad(&self, quad: &Quad<T>) -> Option<Intersection<T>> {
+        let intersection = self.test_plane(quad.origin, quad.normal())?;
+        let point = self.get(intersection.t);
 
-        // `point` lies on the plane that contains the rect. Now find the x and y coordinates
-        // within the rect (treating `horizontal` as the x axis and `vertical` as the y axis).
+        // `point` lies on the plane that contains the quad. Now find the x and y coordinates
+        // within the quad (treating `horizontal` as the x axis and `vertical` as the y axis).
         // The point at x=1, y=1 is the top-right corner and the point at x=0, y=0 is the origin.
-        // So if x and y lie between those bounds then the ray intersects the rect at t.
+        // So if x and y lie between those bounds then the ray intersects the quad at t.
 
-        let x = (point - rect.origin).dot(rect.horizontal) / rect.horizontal.magnitude2();
-        let y = (point - rect.origin).dot(rect.vertical) / rect.vertical.magnitude2();
+        let x = (point - quad.origin).dot(quad.horizontal) / quad.horizontal.magnitude2();
+        let y = (point - quad.origin).dot(quad.vertical) / quad.vertical.magnitude2();
 
         if x >= T::zero() && x <= T::one() && y >= T::zero() && y <= T::one() {
-            Some(int)
+            Some(intersection)
         } else {
             None
         }
@@ -135,7 +135,7 @@ impl<T> ConvexRaycastResult<T> {
     }
 }
 
-impl<T> Rect<T> {
+impl<T> Quad<T> {
     pub fn normal(&self) -> Vector3<T>
     where
         T: BaseFloat,
@@ -143,13 +143,13 @@ impl<T> Rect<T> {
         self.horizontal.cross(self.vertical).normalize()
     }
 
-    /// Returns a rect representing the back face of `self`.
-    pub fn flipped(&self) -> Rect<T>
+    /// Returns a quad representing the back face of `self`.
+    pub fn flipped(&self) -> Quad<T>
     where
         T: BaseNum,
         Vector3<T>: std::ops::Neg<Output = Vector3<T>>,
     {
-        Rect {
+        Quad {
             origin: self.origin + self.horizontal,
             horizontal: -self.horizontal,
             vertical: self.vertical,
