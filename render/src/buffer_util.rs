@@ -277,19 +277,6 @@ impl<'a, Item> FillBuffer<'a, Item> {
     where
         Item: Copy,
     {
-        // if let Some(mapped_buffer) = self.mapped_buffer.take() {
-        //     let item_size = std::mem::size_of::<Item>();
-        //     encoder.copy_buffer_to_buffer(
-        //         &mapped_buffer,
-        //         0,
-        //         self.target,
-        //         (item_size * self.pos) as BufferAddress,
-        //         (item_size * self.batch_len) as BufferAddress,
-        //     );
-
-        //     self.pos += self.batch_len;
-        // }
-
         self.pos += self.batch_len;
         self.batch_len = 0;
     }

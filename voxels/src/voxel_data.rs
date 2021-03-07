@@ -7,11 +7,11 @@ use cgmath::{ElementWise, EuclideanSpace, Point3};
 use simgame_util::convert_vec;
 use simgame_util::ray::Ray;
 use simgame_util::Bounds;
+use simgame_util::octree::Octree;
 
 use crate::config::VoxelConfigHelper;
 use crate::core::{voxels_to_u16_mut, Voxel, VoxelRaycastHit, Chunk};
 use crate::index_utils;
-use crate::octree::Octree;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VoxelData {

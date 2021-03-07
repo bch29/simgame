@@ -18,7 +18,7 @@ use crate::buffer_util::{
 use crate::mesh::cube::Cube;
 use crate::world;
 
-use voxel_info::VoxelInfoHandler;
+use voxel_info::VoxelInfoManager;
 use chunk_state::ChunkState;
 
 pub(crate) struct VoxelsRenderStateBuilder<'a> {
@@ -33,9 +33,6 @@ pub(crate) struct VoxelsRenderState {
     chunk_state: ChunkState,
     compute_stage: ComputeStage,
     render_stage: RenderStage,
-
-    #[allow(dead_code)]
-    voxel_info_handler: VoxelInfoHandler,
     geometry_buffers: GeometryBuffers,
 }
 
@@ -109,8 +106,8 @@ struct ChunkMeta {
 
 impl<'a> VoxelsRenderStateBuilder<'a> {
     pub fn build(self, ctx: &crate::GraphicsContext) -> Result<VoxelsRenderState> {
-        let voxel_info_handler =
-            VoxelInfoHandler::new(self.voxel_config, &ctx.resource_loader, ctx)?;
+        let voxel_info_manager =
+            VoxelInfoManager::new(self.voxel_config, &ctx.resource_loader, ctx)?;
 
         let compute_shader = ctx
             .device
@@ -167,7 +164,7 @@ impl<'a> VoxelsRenderStateBuilder<'a> {
         log::info!("initializing voxels render stage");
         let render_stage = self.build_render_stage(
             ctx,
-            &voxel_info_handler,
+            &voxel_info_manager,
             &chunk_state,
             &geometry_buffers,
             vert_shader,
@@ -178,8 +175,7 @@ impl<'a> VoxelsRenderStateBuilder<'a> {
             chunk_state,
             compute_stage,
             render_stage,
-            geometry_buffers,
-            voxel_info_handler,
+            geometry_buffers
         })
     }
 
@@ -289,7 +285,7 @@ impl<'a> VoxelsRenderStateBuilder<'a> {
             layout: &bind_group_layout,
             entries: &[
                 uniforms.as_binding(0),
-                // self.voxel_info_handler.voxel_info_buf.as_binding(1),
+                // self.voxel_info_manager.voxel_info_buf.as_binding(1),
                 chunk_state.voxel_type_binding(1),
                 chunk_state.chunk_metadata_binding(2),
                 geometry_buffers.faces.as_binding(3),
@@ -309,7 +305,7 @@ impl<'a> VoxelsRenderStateBuilder<'a> {
     fn build_render_stage(
         &self,
         ctx: &crate::GraphicsContext,
-        voxel_info_handler: &VoxelInfoHandler,
+        voxel_info_manager: &VoxelInfoManager,
         chunk_state: &ChunkState,
         geometry_buffers: &GeometryBuffers,
         vert_shader: wgpu::ShaderModule,
@@ -391,7 +387,7 @@ impl<'a> VoxelsRenderStateBuilder<'a> {
                             binding: 6,
                             visibility: wgpu::ShaderStage::FRAGMENT,
                             count: Some(
-                                (voxel_info_handler.index_map.len() as u32)
+                                (voxel_info_manager.index_map.len() as u32)
                                     .try_into()
                                     .expect("index map len must be nonzero"),
                             ),
@@ -480,15 +476,15 @@ impl<'a> VoxelsRenderStateBuilder<'a> {
             layout: &bind_group_layout,
             entries: &[
                 uniforms.as_binding(0),
-                voxel_info_handler.voxel_info_buf.as_binding(1),
+                voxel_info_manager.voxel_info_buf.as_binding(1),
                 chunk_state.voxel_type_binding(2),
                 chunk_state.chunk_metadata_binding(3),
                 geometry_buffers.faces.as_binding(4),
-                voxel_info_handler.texture_metadata_buf.as_binding(5),
+                voxel_info_manager.texture_metadata_buf.as_binding(5),
                 wgpu::BindGroupEntry {
                     binding: 6,
                     resource: wgpu::BindingResource::TextureViewArray(
-                        voxel_info_handler
+                        voxel_info_manager
                             .texture_arr_views
                             .iter()
                             .collect::<Vec<_>>()
@@ -497,7 +493,7 @@ impl<'a> VoxelsRenderStateBuilder<'a> {
                 },
                 wgpu::BindGroupEntry {
                     binding: 7,
-                    resource: wgpu::BindingResource::Sampler(&voxel_info_handler.sampler),
+                    resource: wgpu::BindingResource::Sampler(&voxel_info_manager.sampler),
                 },
             ],
         });

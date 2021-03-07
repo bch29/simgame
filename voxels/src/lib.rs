@@ -4,7 +4,6 @@ mod voxel_data;
 pub mod config;
 mod core;
 pub mod index_utils;
-pub mod octree;
 pub mod primitive;
 mod update;
 

@@ -2312,6 +2312,7 @@ name = "simgame_util"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "byteorder",
  "cgmath",
  "log",
  "rand 0.7.3",

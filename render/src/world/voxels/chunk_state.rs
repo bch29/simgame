@@ -3,10 +3,9 @@ use std::collections::{HashMap, HashSet};
 use cgmath::{ElementWise, EuclideanSpace, Point3, Vector3};
 
 use simgame_voxels::{index_utils, VoxelData, Chunk, UpdatedVoxelsState};
-use simgame_util::{convert_point, convert_vec, Bounds};
+use simgame_util::{convert_point, convert_vec, Bounds, stable_map::StableMap};
 
 use crate::buffer_util::{BufferSyncHelper, BufferSyncHelperDesc};
-use crate::stable_map::StableMap;
 
 type ActiveChunks = StableMap<Point3<i32>, Chunk>;
 

@@ -13,7 +13,7 @@ use crate::resource::ResourceLoader;
 use super::{VoxelRenderInfo, VoxelTextureMetadata};
 
 #[allow(unused)]
-pub(super) struct VoxelInfoHandler {
+pub(super) struct VoxelInfoManager {
     pub index_map: HashMap<voxel::FaceTexture, usize>,
 
     texture_arr: Vec<TextureData>,
@@ -24,7 +24,7 @@ pub(super) struct VoxelInfoHandler {
     pub texture_metadata_buf: InstancedBuffer,
 }
 
-impl VoxelInfoHandler {
+impl VoxelInfoManager {
     pub fn new(
         config: &VoxelConfigHelper,
         resource_loader: &ResourceLoader,

@@ -4,8 +4,8 @@ use cgmath::{EuclideanSpace, InnerSpace, Point3, Vector3};
 use serde::{Deserialize, Serialize};
 use std::io::{self, Read, Write};
 
-use simgame_util::ray::{ConvexRaycastResult, Ray};
-use simgame_util::{convert_bounds, convert_vec, Bounds, OrdFloat};
+use crate::ray::{ConvexRaycastResult, Ray};
+use crate::{convert_bounds, convert_vec, Bounds, OrdFloat};
 
 /// A tree structure providing a sparse representation of values in a 3D grid.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -480,7 +480,7 @@ impl<T> Octree<T> {
     /// # Example
     /// ```
     /// use cgmath::{Point3, Vector3};
-    /// use simgame_voxels::octree::{self, Octree};
+    /// use simgame_util::octree::{self, Octree};
     /// let height = 7;
     /// let octant = octree::Octant::from_index(3);
     /// let offset = Octree::<()>::octant_offset(height, octant);

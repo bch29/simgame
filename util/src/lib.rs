@@ -1,7 +1,8 @@
 pub mod bounds;
 pub mod bsp;
 pub mod ray;
-// pub mod octree;
+pub mod stable_map;
+pub mod octree;
 
 use cgmath::{Point3, Vector3};
 
