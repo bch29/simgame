@@ -1,7 +1,7 @@
 use cgmath::{BaseFloat, BaseNum, ElementWise, EuclideanSpace, Point3, Vector3};
 use serde::{Deserialize, Serialize};
 
-use crate::ray::{ConvexRaycastResult, Intersection, Ray, Quad};
+use crate::ray::{ConvexRaycastResult, Intersection, Quad, Ray};
 use crate::{DivDown, DivUp, OrdFloat};
 
 /// Represents a half-open cuboid of points: the origin is inclusive and the limit is exclusive.
@@ -287,6 +287,44 @@ impl<T: BaseNum> Bounds<T> {
         } else {
             Some(Self::from_limit(origin, limit))
         }
+    }
+
+    /// Computes the smallest bounding box that contains both self and the given bounds.
+    #[inline]
+    pub fn union(self, bounds: Bounds<T>) -> Self
+    {
+        let max = |a, b| {
+            if a >= b {
+                a
+            } else {
+                b
+            }
+        };
+        let min = |a, b| {
+            if a <= b {
+                a
+            } else {
+                b
+            }
+        };
+
+        let a1 = self.origin();
+        let a2 = bounds.origin();
+        let origin = Point3 {
+            x: min(a1.x, a2.x),
+            y: min(a1.y, a2.y),
+            z: min(a1.z, a2.z),
+        };
+
+        let b1 = self.limit();
+        let b2 = bounds.limit();
+        let limit = Point3 {
+            x: max(b1.x, b2.x),
+            y: max(b1.y, b2.y),
+            z: max(b1.z, b2.z),
+        };
+
+        Bounds::from_limit(origin, limit)
     }
 
     #[inline]
