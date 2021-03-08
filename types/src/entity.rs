@@ -1,26 +1,47 @@
 use serde::{Deserialize, Serialize};
 
+use crate::{World, UpdatedWorldState};
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Entity {
-    pub model: EntityModel,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum EntityModelInfo {
-    Sphere { radius: f32 },
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct EntityConfig {
-    models: Vec<EntityModelInfo>,
+    pub model: ModelKey,
+    pub behaviours: Vec<BehaviorKey>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[repr(transparent)]
-pub struct EntityModel(u16);
+pub struct ModelKey(u16);
 
-impl EntityConfig {
-    pub fn model_info(&self, model: EntityModel) -> Option<&EntityModelInfo> {
-        self.models.get(model.0 as usize)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[repr(transparent)]
+pub struct BehaviorKey(u16);
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum Model {
+    Sphere { radius: f32 },
+}
+
+pub trait Behavior {
+    fn name(&self) -> &str;
+    fn update(&self, entity: &Entity, world: &World, updates: &mut UpdatedWorldState);
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Config {
+    pub models: Vec<Model>,
+}
+
+pub struct Directory {
+    pub config: Config,
+    pub behaviors: Vec<Box<dyn Behavior>>,
+}
+
+impl Directory {
+    pub fn model(&self, key: ModelKey) -> Option<&Model> {
+        self.config.models.get(key.0 as usize)
+    }
+
+    pub fn behavior(&self, key: BehaviorKey) -> Option<&dyn Behavior> {
+        self.behaviors.get(key.0 as usize).map(|x| &**x)
     }
 }

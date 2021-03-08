@@ -2,8 +2,7 @@ use simgame_util::float_octree::Octree as FloatOctree;
 pub use simgame_voxels::{UpdatedVoxelsState, VoxelData};
 
 pub mod entity;
-
-pub use entity::{Entity, EntityConfig, EntityModel, EntityModelInfo};
+pub use entity::Entity;
 
 #[derive(Debug)]
 pub struct World {
