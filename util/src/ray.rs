@@ -14,19 +14,18 @@ pub struct Quad<T> {
     pub vertical: Vector3<T>,
 }
 
-/// A point where a ray intersected with a surface. Contains the t-value identifying the point
-/// along the ray where it hit, and the normal to the surface at the point of intersection.
+/// A point where a ray intersected with a surface.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Intersection<T> {
+    /// The t-value identifying the point along the ray where it hit.
     pub t: T,
+    /// The normal to the surface at the point of intersection.
     pub normal: Vector3<T>,
 }
 
 /// The result of a ray intersection test with a convex 3-dimensional object.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum ConvexRaycastResult<T> {
-    /// The ray missed the object.
-    Miss,
+pub enum ConvexIntersection<T> {
     /// The ray started within the object and hit it on the way out.
     ExitOnly { exit: Intersection<T> },
     /// The ray passed through the object, hitting it on entry and exit.
@@ -84,8 +83,6 @@ where
 
     /// Tests if a quad intersects the ray. If so, returns the ray parameter at the point of
     /// intersection.
-    ///
-    /// Returns bogus results if the quad's `horizontal` and `vertical` are not orthogonal.
     pub fn test_quad(&self, quad: &Quad<T>) -> Option<Intersection<T>> {
         let intersection = self.test_plane(quad.origin, quad.normal())?;
         let point = self.get(intersection.t);
@@ -106,12 +103,12 @@ where
     }
 }
 
-impl<T> ConvexRaycastResult<T> {
+impl<T> ConvexIntersection<T> {
     pub fn entry(&self) -> Option<Intersection<T>>
     where
         T: Clone,
     {
-        use ConvexRaycastResult::*;
+        use ConvexIntersection::*;
 
         match self {
             PassThrough { entry, .. } => Some(entry.clone()),
@@ -120,17 +117,16 @@ impl<T> ConvexRaycastResult<T> {
         }
     }
 
-    pub fn exit(&self) -> Option<Intersection<T>>
+    pub fn exit(&self) -> Intersection<T>
     where
         T: Clone,
     {
-        use ConvexRaycastResult::*;
+        use ConvexIntersection::*;
 
         match self {
-            ExitOnly { exit } => Some(exit.clone()),
-            PassThrough { exit, .. } => Some(exit.clone()),
-            Clip { clip } => Some(clip.clone()),
-            _ => None,
+            ExitOnly { exit } => exit.clone(),
+            PassThrough { exit, .. } => exit.clone(),
+            Clip { clip } => clip.clone(),
         }
     }
 }

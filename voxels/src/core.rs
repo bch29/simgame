@@ -106,7 +106,7 @@ impl Chunk {
                     let voxel_pos = origin + voxel_offset;
                     let bounds =
                         convert_bounds!(Bounds::new(voxel_pos, Vector3::new(1, 1, 1)), f64);
-                    let hit = match bounds.cast_ray(ray).entry() {
+                    let hit = match bounds.cast_ray(ray).and_then(|int| int.entry()) {
                         Some(intersection) => VoxelRaycastHit {
                             voxel,
                             voxel_pos,

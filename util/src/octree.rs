@@ -4,7 +4,7 @@ use cgmath::{EuclideanSpace, InnerSpace, Point3, Vector3};
 use serde::{Deserialize, Serialize};
 use std::io::{self, Read, Write};
 
-use crate::ray::{ConvexRaycastResult, Ray};
+use crate::ray::Ray;
 use crate::{convert_bounds, convert_vec, Bounds, OrdFloat};
 
 /// A tree structure providing a sparse representation of values in a 3D grid.
@@ -301,9 +301,7 @@ impl<T> Octree<T> {
     {
         let test_bounds = self.bounds().translate(offset);
 
-        if convert_bounds!(test_bounds, f64).cast_ray(ray) == ConvexRaycastResult::Miss {
-            return None;
-        }
+        let _intersection = convert_bounds!(test_bounds, f64).cast_ray(ray)?;
 
         match &self.node {
             None => None,

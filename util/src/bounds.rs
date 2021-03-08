@@ -1,7 +1,7 @@
 use cgmath::{BaseFloat, BaseNum, ElementWise, EuclideanSpace, Point3, Vector3};
 use serde::{Deserialize, Serialize};
 
-use crate::ray::{ConvexRaycastResult, Intersection, Quad, Ray};
+use crate::ray::{ConvexIntersection, Intersection, Quad, Ray};
 use crate::{DivDown, DivUp, OrdFloat};
 
 /// Represents a half-open cuboid of points: the origin is inclusive and the limit is exclusive.
@@ -211,7 +211,7 @@ impl<T: BaseNum> Bounds<T> {
     #[inline]
     /// Checks if a ray intersects the bounds and if so returns the entry and exit points. These
     /// may be the same if the ray just touches the bounds on an edge or corner.
-    pub fn cast_ray(&self, ray: &Ray<T>) -> ConvexRaycastResult<T>
+    pub fn cast_ray(&self, ray: &Ray<T>) -> Option<ConvexIntersection<T>>
     where
         T: BaseFloat,
     {
@@ -238,11 +238,11 @@ impl<T: BaseNum> Bounds<T> {
 
         match (first, second) {
             (Some(exit), None) if self.contains_point(ray.origin) => {
-                ConvexRaycastResult::ExitOnly { exit }
+                Some(ConvexIntersection::ExitOnly { exit })
             }
-            (Some(clip), None) => ConvexRaycastResult::Clip { clip },
-            (Some(entry), Some(exit)) => ConvexRaycastResult::PassThrough { entry, exit },
-            _ => ConvexRaycastResult::Miss,
+            (Some(clip), None) => Some(ConvexIntersection::Clip { clip }),
+            (Some(entry), Some(exit)) => Some(ConvexIntersection::PassThrough { entry, exit }),
+            _ => None,
         }
     }
 
@@ -291,8 +291,7 @@ impl<T: BaseNum> Bounds<T> {
 
     /// Computes the smallest bounding box that contains both self and the given bounds.
     #[inline]
-    pub fn union(self, bounds: Bounds<T>) -> Self
-    {
+    pub fn union(self, bounds: Bounds<T>) -> Self {
         let max = |a, b| {
             if a >= b {
                 a
@@ -752,7 +751,7 @@ mod tests {
 
             assert_eq!(
                 res,
-                ConvexRaycastResult::PassThrough {
+                Some(ConvexIntersection::PassThrough {
                     entry: Intersection {
                         t: 1.0,
                         normal: Vector3::new(0.0, 0.0, -1.0)
@@ -761,7 +760,7 @@ mod tests {
                         t: 4.0,
                         normal: Vector3::new(1.0, 0.0, 0.0)
                     }
-                }
+                })
             );
         }
 
@@ -774,7 +773,7 @@ mod tests {
 
             assert_eq!(
                 res,
-                ConvexRaycastResult::PassThrough {
+                Some(ConvexIntersection::PassThrough {
                     entry: Intersection {
                         t: 1.0,
                         normal: Vector3::new(0.0, 0.0, 1.0)
@@ -783,7 +782,7 @@ mod tests {
                         t: 4.0,
                         normal: Vector3::new(-1.0, 0.0, 0.0)
                     }
-                }
+                })
             );
         }
 
@@ -794,7 +793,7 @@ mod tests {
             };
             let res = bounds.cast_ray(&ray);
 
-            assert_eq!(res, ConvexRaycastResult::Miss);
+            assert_eq!(res, None);
         }
     }
 }

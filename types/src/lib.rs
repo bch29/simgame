@@ -1,4 +1,4 @@
-pub use simgame_util::bsp::Bsp;
+use simgame_util::float_octree::Octree as FloatOctree;
 pub use simgame_voxels::{UpdatedVoxelsState, VoxelData};
 
 pub mod entity;
@@ -8,7 +8,7 @@ pub use entity::{Entity, EntityConfig, EntityModel, EntityModelInfo};
 #[derive(Debug)]
 pub struct World {
     pub voxels: VoxelData,
-    pub entities: Bsp<Entity>,
+    pub entities: FloatOctree<Entity>,
 }
 
 #[derive(Debug)]
@@ -20,7 +20,7 @@ impl World {
     pub fn new(voxels: VoxelData) -> World {
         World {
             voxels,
-            entities: Bsp::new(),
+            entities: FloatOctree::new(),
         }
     }
 }
