@@ -13,9 +13,11 @@ use winit::{
     window::{Window, WindowBuilder},
 };
 
-use simgame_render::resource::ResourceLoader;
 pub use simgame_render::RenderParams;
-use simgame_render::{visible_size_to_chunks, RenderState, RenderStateBuilder, ViewParams};
+use simgame_render::{
+    resource::ResourceLoader, visible_size_to_chunks, RenderState,
+    RenderStateInputs, Renderer, RendererBuilder, ViewParams,
+};
 use simgame_util::{convert_point, convert_vec};
 use simgame_voxels::VoxelConfigHelper;
 use simgame_world::World;
@@ -66,6 +68,7 @@ pub struct TestRender {
     control_state: controls::ControlState,
     cursor_reset_position: Point2<f64>,
     time_tracker: TimeTracker,
+    renderer: Renderer,
     render_state: RenderState,
     view_params: ViewParams,
     has_cursor_control: bool,
@@ -185,17 +188,21 @@ impl<'a> TestRenderBuilder<'a> {
             look_at_dir: self.test_params.look_at_dir,
         };
 
-        let render_state = RenderStateBuilder {
+        let renderer = RendererBuilder {
             window: &window,
-            physical_win_size,
             resource_loader: self.resource_loader,
-            world: &self.world,
             voxel_helper: &self.voxel_helper,
-            view_params,
             max_visible_chunks: self.test_params.max_visible_chunks,
         }
         .build(self.render_params.clone())
         .await?;
+
+        let render_state = renderer.create_state(RenderStateInputs {
+            physical_win_size,
+            world: &self.world,
+            view_params,
+            voxel_helper: &self.voxel_helper,
+        })?;
 
         let control_state = controls::ControlState::new(&self.test_params);
 
@@ -235,6 +242,7 @@ impl<'a> TestRenderBuilder<'a> {
             control_state,
             cursor_reset_position,
             time_tracker,
+            renderer,
             render_state,
             view_params,
             has_cursor_control: false,
@@ -329,8 +337,10 @@ impl TestRender {
                         event_size
                     );
 
-                    self.render_state
-                        .update_win_size(Vector2::new(new_size.width, new_size.height))?;
+                    self.renderer.update_win_size(
+                        &mut self.render_state,
+                        Vector2::new(new_size.width, new_size.height),
+                    )?;
                 }
                 _ => {}
             },
@@ -364,16 +374,18 @@ impl TestRender {
     }
 
     fn redraw(&mut self) -> Result<()> {
-        self.render_state.set_world_view(self.view_params);
+        self.renderer
+            .set_world_view(&mut self.render_state, self.view_params);
 
         let world_diff = self.world_state.world_diff()?;
 
         {
             let world = self.world.lock().unwrap();
-            self.render_state.update(&*world, world_diff);
+            self.renderer
+                .update(&mut self.render_state, &*world, world_diff);
         }
 
-        self.render_state.render_frame()?;
+        self.renderer.render_frame(&mut self.render_state)?;
         world_diff.clear();
 
         Ok(())

@@ -5,7 +5,7 @@ use std::convert::TryInto;
 use std::time::Instant;
 
 use anyhow::Result;
-use cgmath::{Point3, Vector3, Matrix4};
+use cgmath::{Matrix4, Point3, Vector3};
 use zerocopy::{AsBytes, FromBytes};
 
 use simgame_util::{convert_point, Bounds};
@@ -16,18 +16,10 @@ use crate::buffer_util::{
     InstancedBufferDesc, IntoBufferSynced,
 };
 use crate::ViewState;
+use crate::pipelines;
 
 use chunk_state::ChunkState;
 pub(crate) use voxel_info::VoxelInfoManager;
-
-pub(crate) struct VoxelRenderStateBuilder<'a> {
-    pub depth_texture: &'a wgpu::Texture,
-    pub view_state: &'a ViewState,
-    pub model: Matrix4<f32>,
-    pub voxels: &'a VoxelData,
-    pub max_visible_chunks: usize,
-    pub pipeline: &'a VoxelRenderPipeline,
-}
 
 /// Holds the static pipeline for rendering voxels. Can be used to render multiple different pieces
 /// of voxel geometry simultaneously.
@@ -39,6 +31,19 @@ pub(crate) struct VoxelRenderPipeline {
 
     render_pipeline: wgpu::RenderPipeline,
     render_bind_group_layout: wgpu::BindGroupLayout,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct VoxelRenderInput<'a> {
+    pub model: Matrix4<f32>,
+    pub voxels: &'a VoxelData,
+    pub max_visible_chunks: usize,
+    pub view_state: &'a ViewState,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct VoxelRenderInputDelta<'a> {
+    pub voxels: &'a UpdatedVoxelsState,
 }
 
 /// Holds the current state (including GPU buffers) of rendering a particular piece of voxel
@@ -393,25 +398,6 @@ impl VoxelRenderPipeline {
         })
     }
 
-    pub fn render_frame(
-        &self,
-        ctx: &crate::GraphicsContext,
-        frame_render: &mut crate::FrameRenderContext,
-        state: &mut VoxelRenderState,
-        _view_state: &ViewState,
-    ) {
-        let ts_begin = Instant::now();
-        state.chunk_state.update_buffers(&ctx.queue);
-        let ts_update = Instant::now();
-        self.compute_pass(ctx, frame_render, state);
-        self.render_pass(ctx, frame_render, state);
-
-        metrics::timing!(
-            "render.world.voxels.update_buffers",
-            ts_update.duration_since(ts_begin)
-        );
-    }
-
     fn compute_pass(
         &self,
         ctx: &crate::GraphicsContext,
@@ -485,53 +471,20 @@ impl VoxelRenderPipeline {
             }
         }
     }
-}
-
-impl<'a> VoxelRenderStateBuilder<'a> {
-    pub fn build(self, ctx: &crate::GraphicsContext) -> Result<VoxelRenderState> {
-        let geometry_buffers = self.build_geometry_buffers(ctx);
-
-        let mut chunk_state = ChunkState::new(
-            &ctx.device,
-            self.max_visible_chunks,
-            self.view_state.params.visible_size,
-        );
-
-        if let Some(active_view_box) = self.view_state.params.calculate_view_box() {
-            chunk_state.update_view_box(active_view_box, self.voxels);
-        }
-
-        log::info!("initializing voxels compute stage");
-        let compute_stage =
-            self.build_compute_stage(ctx, &chunk_state, &geometry_buffers);
-
-        log::info!("initializing voxels render stage");
-        let render_stage = self.build_render_stage(
-            ctx,
-            &chunk_state,
-            &geometry_buffers,
-        );
-
-        Ok(VoxelRenderState {
-            chunk_state,
-            compute_stage,
-            render_stage,
-            geometry_buffers,
-        })
-    }
 
     fn build_compute_stage(
         &self,
         ctx: &crate::GraphicsContext,
+        input: VoxelRenderInput,
         chunk_state: &ChunkState,
         geometry_buffers: &GeometryBuffers,
     ) -> ComputeStage {
-        let uniforms = ComputeUniforms::new(self.view_state.params.calculate_view_box())
+        let uniforms = ComputeUniforms::new(input.view_state.params.calculate_view_box())
             .into_buffer_synced(&ctx.device);
 
         let bind_group = ctx.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: None,
-            layout: &self.pipeline.compute_bind_group_layout,
+            layout: &self.compute_bind_group_layout,
             entries: &[
                 uniforms.as_binding(0),
                 // self.voxel_info_manager.voxel_info_buf.as_binding(1),
@@ -552,25 +505,28 @@ impl<'a> VoxelRenderStateBuilder<'a> {
     fn build_render_stage(
         &self,
         ctx: &crate::GraphicsContext,
+        params: pipelines::Params,
+        input: VoxelRenderInput,
         chunk_state: &ChunkState,
         geometry_buffers: &GeometryBuffers,
     ) -> RenderStage {
-        let uniforms = RenderUniforms::new(&self.view_state, self.model).into_buffer_synced(&ctx.device);
+        let uniforms =
+            RenderUniforms::new(&input.view_state, input.model).into_buffer_synced(&ctx.device);
 
         let bind_group = ctx.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: None,
-            layout: &self.pipeline.render_bind_group_layout,
+            layout: &self.render_bind_group_layout,
             entries: &[
                 uniforms.as_binding(0),
-                self.pipeline.voxel_info.voxel_info_buf.as_binding(1),
+                self.voxel_info.voxel_info_buf.as_binding(1),
                 chunk_state.voxel_type_binding(2),
                 chunk_state.chunk_metadata_binding(3),
                 geometry_buffers.faces.as_binding(4),
-                self.pipeline.voxel_info.texture_metadata_buf.as_binding(5),
+                self.voxel_info.texture_metadata_buf.as_binding(5),
                 wgpu::BindGroupEntry {
                     binding: 6,
                     resource: wgpu::BindingResource::TextureViewArray(
-                        self.pipeline.voxel_info
+                        self.voxel_info
                             .texture_arr_views
                             .iter()
                             .collect::<Vec<_>>()
@@ -579,25 +535,29 @@ impl<'a> VoxelRenderStateBuilder<'a> {
                 },
                 wgpu::BindGroupEntry {
                     binding: 7,
-                    resource: wgpu::BindingResource::Sampler(&self.pipeline.voxel_info.sampler),
+                    resource: wgpu::BindingResource::Sampler(&self.voxel_info.sampler),
                 },
             ],
         });
 
         RenderStage {
             uniforms,
-            depth_texture: self.depth_texture.create_view(&Default::default()),
+            depth_texture: params.depth_texture.create_view(&Default::default()),
             bind_group,
         }
     }
 
-    fn build_geometry_buffers(&self, ctx: &crate::GraphicsContext) -> GeometryBuffers {
+    fn build_geometry_buffers(
+        &self,
+        ctx: &crate::GraphicsContext,
+        input: VoxelRenderInput,
+    ) -> GeometryBuffers {
         let faces = InstancedBuffer::new(
             &ctx.device,
             InstancedBufferDesc {
                 label: "voxel faces",
                 instance_len: (4 * 3 * index_utils::chunk_size_total()) as usize,
-                n_instances: self.max_visible_chunks,
+                n_instances: input.max_visible_chunks,
                 usage: wgpu::BufferUsage::STORAGE,
             },
         );
@@ -607,7 +567,7 @@ impl<'a> VoxelRenderStateBuilder<'a> {
             InstancedBufferDesc {
                 label: "voxel indirect",
                 instance_len: 4 * 4,
-                n_instances: self.max_visible_chunks,
+                n_instances: input.max_visible_chunks,
                 usage: wgpu::BufferUsage::STORAGE | wgpu::BufferUsage::INDIRECT,
             },
         );
@@ -630,28 +590,86 @@ impl<'a> VoxelRenderStateBuilder<'a> {
     }
 }
 
-impl VoxelRenderState {
-    pub fn set_depth_texture(&mut self, depth_texture: &wgpu::Texture) {
-        self.render_stage.depth_texture = depth_texture.create_view(&Default::default());
+impl pipelines::Pipeline for VoxelRenderPipeline {
+    type State = VoxelRenderState;
+
+    fn render_frame(
+        &self,
+        ctx: &crate::GraphicsContext,
+        frame_render: &mut crate::FrameRenderContext,
+        state: &mut VoxelRenderState,
+    ) {
+        let ts_begin = Instant::now();
+        state.chunk_state.update_buffers(&ctx.queue);
+        let ts_update = Instant::now();
+        self.compute_pass(ctx, frame_render, state);
+        self.render_pass(ctx, frame_render, state);
+
+        metrics::timing!(
+            "render.world.voxels.update_buffers",
+            ts_update.duration_since(ts_begin)
+        );
     }
 
-    pub fn update(
-        &mut self,
-        voxels: &VoxelData,
-        diff: &UpdatedVoxelsState,
-        view_state: &ViewState,
-        model: Matrix4<f32>,
-    ) {
-        if let Some(active_view_box) = view_state.params.calculate_view_box() {
+    fn create_state(
+        &self,
+        ctx: &crate::GraphicsContext,
+        params: pipelines::Params,
+        input: VoxelRenderInput,
+    ) -> Result<Self::State> {
+        let geometry_buffers = self.build_geometry_buffers(ctx, input);
+
+        let mut chunk_state = ChunkState::new(
+            &ctx.device,
+            input.max_visible_chunks,
+            input.view_state.params.visible_size,
+        );
+
+        if let Some(active_view_box) = input.view_state.params.calculate_view_box() {
+            chunk_state.update_view_box(active_view_box, input.voxels);
+        }
+
+        log::info!("initializing voxels compute stage");
+        let compute_stage = self.build_compute_stage(ctx, input, &chunk_state, &geometry_buffers);
+
+        log::info!("initializing voxels render stage");
+        let render_stage =
+            self.build_render_stage(ctx, params, input, &chunk_state, &geometry_buffers);
+
+        Ok(VoxelRenderState {
+            chunk_state,
+            compute_stage,
+            render_stage,
+            geometry_buffers,
+        })
+    }
+}
+
+impl<'a> pipelines::State<'a> for VoxelRenderState {
+    type Input = VoxelRenderInput<'a>;
+    type InputDelta = VoxelRenderInputDelta<'a>;
+
+    fn update(&mut self, input: VoxelRenderInput, delta: VoxelRenderInputDelta) {
+        if let Some(active_view_box) = input.view_state.params.calculate_view_box() {
             self.compute_stage.uniforms.update_view_box(active_view_box);
 
-            self.chunk_state.update_view_box(active_view_box, voxels);
+            self.chunk_state
+                .update_view_box(active_view_box, input.voxels);
         } else {
             self.chunk_state.clear_view_box();
         }
 
-        self.chunk_state.apply_chunk_diff(voxels, diff);
-        *self.render_stage.uniforms = RenderUniforms::new(view_state, model);
+        self.chunk_state
+            .apply_chunk_diff(input.voxels, delta.voxels);
+        *self.render_stage.uniforms = RenderUniforms::new(input.view_state, input.model);
+    }
+
+    fn update_window(
+        &mut self,
+        _ctx: &crate::GraphicsContext,
+        params: pipelines::Params,
+    ) {
+        self.render_stage.depth_texture = params.depth_texture.create_view(&Default::default());
     }
 }
 

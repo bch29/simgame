@@ -63,7 +63,7 @@ resources:
     - name: tex/voxel/grass_side
       relative_path: tex/voxel/grass_side.png
       kind: Image
-    # World voxels shaders
+    # Voxel shaders
     - name: shader/voxels/compute
       relative_path: shader/voxels/compute.glsl
       kind: 

@@ -7,19 +7,18 @@ use zerocopy::{AsBytes, FromBytes};
 use crate::buffer_util::{
     BufferSyncHelperDesc, BufferSyncable, BufferSyncedData, FillBuffer, IntoBufferSynced,
 };
+use crate::pipelines;
 
-pub(crate) struct GuiRenderStateBuilder<'a> {
-    pub swapchain: &'a wgpu::SwapChainDescriptor,
+pub(crate) struct GuiRenderPipeline {
+    pipeline: wgpu::RenderPipeline,
+    bind_group_layout: wgpu::BindGroupLayout,
+    sampler: wgpu::Sampler,
+    crosshair_texture: wgpu::TextureView,
+    // multisampled_framebuffer: wgpu::TextureView,
 }
 
 pub(crate) struct GuiRenderState {
-    pipeline: wgpu::RenderPipeline,
-    bind_group_layout: wgpu::BindGroupLayout,
     uniforms: BufferSyncedData<RenderUniforms, RenderUniforms>,
-
-    // multisampled_framebuffer: wgpu::TextureView,
-    sampler: wgpu::Sampler,
-    crosshair_texture: wgpu::TextureView,
 }
 
 #[derive(Debug, Clone, Copy, AsBytes, FromBytes)]
@@ -28,8 +27,8 @@ struct RenderUniforms {
     model: [[f32; 4]; 4],
 }
 
-impl<'a> GuiRenderStateBuilder<'a> {
-    pub fn build(self, ctx: &crate::GraphicsContext) -> Result<GuiRenderState> {
+impl GuiRenderPipeline {
+    pub fn new(ctx: &crate::GraphicsContext) -> Result<GuiRenderPipeline> {
         let vert_shader = ctx
             .device
             .create_shader_module(&wgpu::ShaderModuleDescriptor {
@@ -170,7 +169,7 @@ impl<'a> GuiRenderStateBuilder<'a> {
                     module: &frag_shader,
                     entry_point: "main",
                     targets: &[wgpu::ColorTargetState {
-                        format: self.swapchain.format,
+                        format: wgpu::TextureFormat::Bgra8UnormSrgb,
                         color_blend: wgpu::BlendState {
                             src_factor: wgpu::BlendFactor::SrcAlpha,
                             dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
@@ -199,17 +198,11 @@ impl<'a> GuiRenderStateBuilder<'a> {
                 },
             });
 
-        let aspect_ratio = self.swapchain.width as f32 / self.swapchain.height as f32;
-
-        let uniforms = RenderUniforms::new(aspect_ratio).into_buffer_synced(&ctx.device);
-        uniforms.sync(&ctx.queue);
-
         // let multisampled_framebuffer =
         //     GuiRenderState::create_multisampled_framebuffer(device, self.swapchain, SAMPLE_COUNT);
 
-        Ok(GuiRenderState {
+        Ok(GuiRenderPipeline {
             pipeline,
-            uniforms,
             bind_group_layout,
             // multisampled_framebuffer,
             sampler,
@@ -218,29 +211,55 @@ impl<'a> GuiRenderStateBuilder<'a> {
     }
 }
 
-impl GuiRenderState {
-    pub fn update_swapchain(
+impl<'a> pipelines::State<'a> for GuiRenderState {
+    type Input = ();
+    type InputDelta = ();
+
+    fn update(
+        &mut self,
+        _input: Self::Input,
+        _delta: Self::InputDelta,
+    ) {
+    }
+
+    fn update_window(
         &mut self,
         ctx: &crate::GraphicsContext,
-        swapchain: &wgpu::SwapChainDescriptor,
-    ) -> Result<()> {
+        params: pipelines::Params,
+    ) {
         // self.multisampled_framebuffer =
         //     Self::create_multisampled_framebuffer(device, swapchain, SAMPLE_COUNT);
         //
-        let aspect_ratio = swapchain.width as f32 / swapchain.height as f32;
+        let aspect_ratio = params.physical_win_size.x as f32 / params.physical_win_size.y as f32;
 
         *self.uniforms = RenderUniforms::new(aspect_ratio);
         self.uniforms.sync(&ctx.queue);
+    }
+}
 
-        Ok(())
+impl pipelines::Pipeline for GuiRenderPipeline {
+    type State = GuiRenderState;
+
+    fn create_state<'a>(
+        &self,
+        ctx: &crate::GraphicsContext,
+        params: pipelines::Params<'a>,
+        _input: (),
+    ) -> Result<Self::State> {
+        let aspect_ratio = params.physical_win_size.x as f32 / params.physical_win_size.y as f32;
+        let uniforms = RenderUniforms::new(aspect_ratio).into_buffer_synced(&ctx.device);
+        uniforms.sync(&ctx.queue);
+
+        Ok(GuiRenderState { uniforms })
     }
 
-    pub fn render_frame(
-        &mut self,
+    fn render_frame(
+        &self,
         ctx: &crate::GraphicsContext,
         frame_render: &mut crate::FrameRenderContext,
+        state: &mut GuiRenderState,
     ) {
-        self.uniforms.sync(&ctx.queue);
+        state.uniforms.sync(&ctx.queue);
 
         let bind_group = ctx.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("gui render"),
@@ -249,7 +268,7 @@ impl GuiRenderState {
                 wgpu::BindGroupEntry {
                     binding: 0,
                     resource: wgpu::BindingResource::Buffer {
-                        buffer: self.uniforms.buffer(),
+                        buffer: state.uniforms.buffer(),
                         offset: 0,
                         size: None,
                     },
@@ -285,7 +304,9 @@ impl GuiRenderState {
 
         rpass.draw(0..4, 0..1);
     }
+}
 
+impl GuiRenderState {
     #[allow(dead_code)]
     fn create_multisampled_framebuffer(
         device: &wgpu::Device,
