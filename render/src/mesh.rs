@@ -1,8 +1,11 @@
 #![allow(dead_code)]
 
 pub mod cube;
+pub mod sphere;
 
 use zerocopy::AsBytes;
+
+pub type Index = u16;
 
 #[derive(Clone, Copy, Debug, AsBytes)]
 #[repr(C)]
@@ -15,7 +18,7 @@ pub struct Vertex {
 #[derive(Clone, Debug)]
 pub struct Mesh {
     pub vertices: Vec<Vertex>,
-    pub indices: Vec<u16>,
+    pub indices: Vec<Index>,
 }
 
 pub fn vertex(pos: [f64; 3], tex_coord: [f64; 2], normal: [f64; 3]) -> Vertex {
@@ -32,16 +35,43 @@ impl Mesh {
     }
 
     pub fn index_buffer_size(&self) -> wgpu::BufferAddress {
-        (std::mem::size_of::<u16>() * self.indices.len()) as u64
+        (std::mem::size_of::<Index>() * self.indices.len()) as u64
     }
 
-    pub fn index_format(&self) -> wgpu::IndexFormat {
+    pub fn index_format() -> wgpu::IndexFormat {
         wgpu::IndexFormat::Uint16
+    }
+
+    pub fn vertex_buffer_layout() -> wgpu::VertexBufferLayout<'static> {
+        wgpu::VertexBufferLayout {
+            array_stride: std::mem::size_of::<Vertex>() as wgpu::BufferAddress,
+            step_mode: wgpu::InputStepMode::Vertex,
+            attributes: &[
+                // pos
+                wgpu::VertexAttribute {
+                    format: wgpu::VertexFormat::Float4,
+                    offset: 0,
+                    shader_location: 0,
+                },
+                // normal
+                wgpu::VertexAttribute {
+                    format: wgpu::VertexFormat::Float3,
+                    offset: 4 * 4,
+                    shader_location: 1,
+                },
+                // tex_coord
+                wgpu::VertexAttribute {
+                    format: wgpu::VertexFormat::Float2,
+                    offset: 4 * 4 + 3 * 4,
+                    shader_location: 2,
+                },
+            ],
+        }
     }
 
     /// Combine another mesh into this one, resulting in a mesh that is the union of the two.
     pub fn union_from(&mut self, other: &Mesh) {
-        let start_index = self.vertices.len() as u16;
+        let start_index = self.vertices.len() as Index;
         self.vertices.extend(other.vertices.iter().cloned());
         self.indices
             .extend(other.indices.iter().cloned().map(|ix| start_index + ix));

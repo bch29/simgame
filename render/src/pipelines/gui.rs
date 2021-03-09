@@ -100,7 +100,7 @@ impl GuiRenderPipeline {
         let bind_group_layout =
             ctx.device
                 .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                    label: Some("voxels vertex layout"),
+                    label: Some("gui vertex layout"),
                     entries: &[
                         // Uniforms
                         wgpu::BindGroupLayoutEntry {
@@ -217,8 +217,7 @@ impl<'a> pipelines::State<'a> for GuiRenderState {
 
     fn update(
         &mut self,
-        _input: Self::Input,
-        _delta: Self::InputDelta,
+        _input: Self::InputDelta,
     ) {
     }
 

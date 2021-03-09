@@ -1,4 +1,4 @@
-mod buffer_util;
+pub mod buffer_util;
 mod mesh;
 mod pipelines;
 pub mod resource;
@@ -8,7 +8,7 @@ mod view;
 use std::time::Instant;
 
 use anyhow::{anyhow, bail, Result};
-use cgmath::{SquareMatrix, Vector2, Vector3};
+use cgmath::{Matrix4, SquareMatrix, Vector2, Vector3};
 use raw_window_handle::HasRawWindowHandle;
 
 use simgame_types::{UpdatedWorldState, World};
@@ -25,11 +25,11 @@ pub struct RendererBuilder<'a, W> {
     pub window: &'a W,
     pub resource_loader: ResourceLoader,
     pub voxel_helper: &'a VoxelConfigHelper,
-    pub max_visible_chunks: usize,
 }
 
 pub struct RenderStateInputs<'a> {
     pub physical_win_size: Vector2<u32>,
+    pub max_visible_chunks: usize,
     pub voxel_helper: &'a VoxelConfigHelper,
     pub view_params: ViewParams,
     pub world: &'a World,
@@ -43,8 +43,10 @@ pub struct RenderParams<'a> {
 /// Holds all state involved in rendering the game.
 pub struct RenderState {
     swapchain: wgpu::SwapChain,
-    gui: pipelines::gui::GuiRenderState,
     world_voxels: pipelines::voxels::VoxelRenderState,
+    square_mesh: pipelines::mesh::MeshRenderState,
+    sphere_mesh: pipelines::mesh::MeshRenderState,
+    gui: pipelines::gui::GuiRenderState,
     view: ViewState,
 }
 
@@ -52,7 +54,6 @@ pub struct RenderState {
 pub struct Renderer {
     ctx: GraphicsContext,
     surface: wgpu::Surface,
-    max_visible_chunks: usize,
     pipelines: Pipelines,
 }
 
@@ -61,8 +62,9 @@ pub fn visible_size_to_chunks(visible_size: Vector3<i32>) -> Vector3<i32> {
 }
 
 struct Pipelines {
-    gui: pipelines::gui::GuiRenderPipeline,
     voxel: pipelines::voxels::VoxelRenderPipeline,
+    mesh: pipelines::mesh::MeshRenderPipeline,
+    gui: pipelines::gui::GuiRenderPipeline,
 }
 
 struct DeviceResult {
@@ -95,22 +97,23 @@ where
             resource_loader: self.resource_loader,
         };
 
-        let max_visible_chunks = self.max_visible_chunks;
-
         let pipelines = {
-            let gui = pipelines::gui::GuiRenderPipeline::new(&ctx)?;
             let voxel = {
-                let voxel_info_manager =
-                    pipelines::voxels::VoxelInfoManager::new(self.voxel_helper, &ctx.resource_loader, &ctx)?;
+                let voxel_info_manager = pipelines::voxels::VoxelInfoManager::new(
+                    self.voxel_helper,
+                    &ctx.resource_loader,
+                    &ctx,
+                )?;
                 pipelines::voxels::VoxelRenderPipeline::new(&ctx, voxel_info_manager)?
             };
-            Pipelines { gui, voxel }
+            let mesh = pipelines::mesh::MeshRenderPipeline::new(&ctx)?;
+            let gui = pipelines::gui::GuiRenderPipeline::new(&ctx)?;
+            Pipelines { voxel, mesh, gui }
         };
 
         Ok(Renderer {
             ctx,
             surface,
-            max_visible_chunks,
             pipelines,
         })
     }
@@ -137,7 +140,27 @@ impl Renderer {
             pipelines::voxels::VoxelRenderInput {
                 model: SquareMatrix::identity(),
                 voxels: &input.world.voxels,
-                max_visible_chunks: self.max_visible_chunks,
+                max_visible_chunks: input.max_visible_chunks,
+                view_state: &view,
+            },
+        )?;
+
+        let square_mesh = self.pipelines.mesh.create_state(
+            &self.ctx,
+            pipeline_params,
+            pipelines::mesh::MeshRenderInput {
+                mesh: &crate::mesh::cube::Cube::new().mesh(),
+                instances: &[],
+                view_state: &view,
+            },
+        )?;
+
+        let sphere_mesh = self.pipelines.mesh.create_state(
+            &self.ctx,
+            pipeline_params,
+            pipelines::mesh::MeshRenderInput {
+                mesh: &crate::mesh::sphere::UnitSphereFace { detail: 20 }.mesh(),
+                instances: &[],
                 view_state: &view,
             },
         )?;
@@ -148,8 +171,10 @@ impl Renderer {
             .create_state(&self.ctx, pipeline_params, ())?;
         Ok(RenderState {
             swapchain,
-            gui,
             world_voxels,
+            square_mesh,
+            sphere_mesh,
+            gui,
             view,
         })
     }
@@ -175,6 +200,8 @@ impl Renderer {
             depth_texture: &depth_texture,
         };
         state.world_voxels.update_window(&self.ctx, pipeline_params);
+        state.square_mesh.update_window(&self.ctx, pipeline_params);
+        state.sphere_mesh.update_window(&self.ctx, pipeline_params);
         state.gui.update_window(&self.ctx, pipeline_params);
         Ok(())
     }
@@ -196,6 +223,12 @@ impl Renderer {
             .voxel
             .render_frame(&self.ctx, &mut render, &mut state.world_voxels);
         self.pipelines
+            .mesh
+            .render_frame(&self.ctx, &mut render, &mut state.square_mesh);
+        self.pipelines
+            .mesh
+            .render_frame(&self.ctx, &mut render, &mut state.sphere_mesh);
+        self.pipelines
             .gui
             .render_frame(&self.ctx, &mut render, &mut state.gui);
 
@@ -211,18 +244,43 @@ impl Renderer {
     }
 
     pub fn update(&self, state: &mut RenderState, world: &World, diff: &UpdatedWorldState) {
-        state.world_voxels.update(
-            pipelines::voxels::VoxelRenderInput {
+        state
+            .world_voxels
+            .update(pipelines::voxels::VoxelRenderInputDelta {
                 model: SquareMatrix::identity(),
                 voxels: &world.voxels,
-                max_visible_chunks: self.max_visible_chunks,
                 view_state: &state.view,
-            },
-            pipelines::voxels::VoxelRenderInputDelta {
-                voxels: &diff.voxels,
-            },
-        );
-        state.gui.update((), ());
+                voxel_diff: &diff.voxels,
+            });
+
+        let base_model =
+            Matrix4::from_translation(Vector3::new(10., 10., 60.)) * Matrix4::from_scale(10.);
+
+        let rots = vec![
+            Matrix4::from_angle_z(cgmath::Deg(0.)), // front
+            Matrix4::from_angle_z(cgmath::Deg(90.)), // right
+            Matrix4::from_angle_z(cgmath::Deg(180.)), // back
+            Matrix4::from_angle_z(cgmath::Deg(270.)), // left
+            Matrix4::from_angle_y(cgmath::Deg(90.)), // bottom
+            // Matrix4::from_angle_y(cgmath::Deg(270.)), // top
+        ];
+
+        let models: Vec<_> = rots.into_iter().map(|rot| base_model * rot).collect();
+
+        // state
+        //     .square_mesh
+        //     .update(pipelines::mesh::MeshRenderInputDelta {
+        //         instances: &[Matrix4::from_translation(Vector3::new(10., 10., 60.))
+        //             * Matrix4::from_scale(10.)],
+        //         view_state: &state.view,
+        //     });
+        state
+            .sphere_mesh
+            .update(pipelines::mesh::MeshRenderInputDelta {
+                instances: models.as_slice(),
+                view_state: &state.view,
+            });
+        state.gui.update(());
     }
 }
 

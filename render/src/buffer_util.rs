@@ -55,7 +55,6 @@ impl<Data, Item> BufferSyncedData<Data, Item> {
         }
     }
 
-    #[allow(dead_code)]
     pub fn from_buffer(data: Data, desc: BufferSyncHelperDesc, buffer: Buffer) -> Self {
         BufferSyncedData {
             data,
@@ -76,13 +75,11 @@ impl<Data, Item> BufferSyncedData<Data, Item> {
     }
 
     #[inline]
-    #[allow(dead_code)]
     pub fn buffer(&self) -> &Buffer {
         &self.buffer
     }
 
     #[inline]
-    #[allow(dead_code)]
     pub fn sync_helper(&self) -> &BufferSyncHelper<Item> {
         &self.helper
     }
@@ -340,7 +337,6 @@ impl InstancedBuffer {
     }
 
     #[inline]
-    #[allow(dead_code)]
     pub fn sync_helper(&self) -> &BufferSyncHelper<u8> {
         &self.helper
     }
@@ -358,6 +354,11 @@ impl InstancedBuffer {
     #[inline]
     pub fn size(&self) -> wgpu::BufferAddress {
         self.helper.desc().buffer_len as _
+    }
+
+    #[inline]
+    pub fn count_instances(&self) -> u32 {
+        self.desc.n_instances as _
     }
 
     #[inline]

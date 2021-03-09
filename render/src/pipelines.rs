@@ -3,6 +3,7 @@ use cgmath::Vector2;
 
 pub mod gui;
 pub mod voxels;
+pub mod mesh;
 
 pub(crate) struct GraphicsContext {
     pub device: wgpu::Device,
@@ -26,7 +27,7 @@ pub(crate) trait State<'a> {
     type Input;
     type InputDelta;
 
-    fn update(&mut self, input: Self::Input, delta: Self::InputDelta);
+    fn update(&mut self, input: Self::InputDelta);
 
     fn update_window(&mut self, ctx: &GraphicsContext, params: Params);
 }

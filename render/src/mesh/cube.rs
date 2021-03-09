@@ -24,6 +24,8 @@ impl Cube {
         let mut indices = Vec::new();
 
         for face in &self.faces {
+            let first_index = vertices.len() as u16;
+
             for i in 0..4 {
                 vertices.push(Vertex {
                     pos: face.vertex_locs[i],
@@ -32,7 +34,7 @@ impl Cube {
                 });
             }
 
-            indices.extend(face.indices.iter().map(|&x| x as u16));
+            indices.extend(face.indices.iter().map(|&x| first_index + x as u16));
         }
 
         Mesh { vertices, indices }

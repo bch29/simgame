@@ -43,7 +43,10 @@ pub(crate) struct VoxelRenderInput<'a> {
 
 #[derive(Clone, Copy)]
 pub(crate) struct VoxelRenderInputDelta<'a> {
-    pub voxels: &'a UpdatedVoxelsState,
+    pub model: Matrix4<f32>,
+    pub view_state: &'a ViewState,
+    pub voxels: &'a VoxelData,
+    pub voxel_diff: &'a UpdatedVoxelsState,
 }
 
 /// Holds the current state (including GPU buffers) of rendering a particular piece of voxel
@@ -649,7 +652,7 @@ impl<'a> pipelines::State<'a> for VoxelRenderState {
     type Input = VoxelRenderInput<'a>;
     type InputDelta = VoxelRenderInputDelta<'a>;
 
-    fn update(&mut self, input: VoxelRenderInput, delta: VoxelRenderInputDelta) {
+    fn update(&mut self, input: VoxelRenderInputDelta) {
         if let Some(active_view_box) = input.view_state.params.calculate_view_box() {
             self.compute_stage.uniforms.update_view_box(active_view_box);
 
@@ -660,7 +663,7 @@ impl<'a> pipelines::State<'a> for VoxelRenderState {
         }
 
         self.chunk_state
-            .apply_chunk_diff(input.voxels, delta.voxels);
+            .apply_chunk_diff(input.voxels, input.voxel_diff);
         *self.render_stage.uniforms = RenderUniforms::new(input.view_state, input.model);
     }
 

@@ -79,6 +79,17 @@ resources:
       kind: 
         Shader:
           kind: Fragment
+    # Mesh shaders
+    - name: shader/mesh/vertex
+      relative_path: shader/mesh/vertex.glsl
+      kind: 
+        Shader:
+          kind: Vertex
+    - name: shader/mesh/fragment
+      relative_path: shader/mesh/fragment.glsl
+      kind: 
+        Shader:
+          kind: Fragment
     # GUI shaders
     - name: shader/gui/vertex
       relative_path: shader/gui/vertex.glsl

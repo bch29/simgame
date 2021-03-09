@@ -15,8 +15,8 @@ use winit::{
 
 pub use simgame_render::RenderParams;
 use simgame_render::{
-    resource::ResourceLoader, visible_size_to_chunks, RenderState,
-    RenderStateInputs, Renderer, RendererBuilder, ViewParams,
+    resource::ResourceLoader, visible_size_to_chunks, RenderState, RenderStateInputs, Renderer,
+    RendererBuilder, ViewParams,
 };
 use simgame_util::{convert_point, convert_vec};
 use simgame_voxels::VoxelConfigHelper;
@@ -72,6 +72,7 @@ pub struct TestRender {
     render_state: RenderState,
     view_params: ViewParams,
     has_cursor_control: bool,
+    focused: bool,
 }
 
 struct TimingParams {
@@ -192,7 +193,6 @@ impl<'a> TestRenderBuilder<'a> {
             window: &window,
             resource_loader: self.resource_loader,
             voxel_helper: &self.voxel_helper,
-            max_visible_chunks: self.test_params.max_visible_chunks,
         }
         .build(self.render_params.clone())
         .await?;
@@ -202,6 +202,7 @@ impl<'a> TestRenderBuilder<'a> {
             world: &self.world,
             view_params,
             voxel_helper: &self.voxel_helper,
+            max_visible_chunks: self.test_params.max_visible_chunks,
         })?;
 
         let control_state = controls::ControlState::new(&self.test_params);
@@ -246,6 +247,7 @@ impl<'a> TestRenderBuilder<'a> {
             render_state,
             view_params,
             has_cursor_control: false,
+            focused: false,
         })
     }
 }
@@ -315,7 +317,7 @@ impl TestRender {
                 WindowEvent::CursorMoved { position, .. } => {
                     if self.has_cursor_control {
                         self.handle_cursor_move(position)?;
-                    } else {
+                    } else if self.focused {
                         self.try_grab_cursor()?;
                     }
                 }
@@ -328,6 +330,7 @@ impl TestRender {
                         self.has_cursor_control = false;
                         self.window.set_cursor_visible(true);
                     }
+                    self.focused = focused;
                 }
                 WindowEvent::Resized(event_size) => {
                     let new_size = self.window.inner_size();
