@@ -16,26 +16,22 @@ impl UnitSphereFace {
         let mut vertices = Vec::new();
         let mut indices = Vec::new();
 
-        let quarter_pi = std::f32::consts::PI / 4.;
-        let half_pi = std::f32::consts::PI / 2.;
-
         let n = 1 + self.detail;
 
         for i in 0..n {
             for j in 0..n {
                 // (square_x, square_y) are coordinates within the square face that we are
                 // projecting from
-                let square_x = i as f32 / self.detail as f32;
-                let square_y = j as f32 / self.detail as f32;
+                let square_x = 2.0 * i as f32 / self.detail as f32 - 1.0;
+                let square_y = 2.0 * j as f32 / self.detail as f32 - 1.0;
 
-                // (theta, phi) are the angular coordinates within the sphere
-                let theta = -quarter_pi + half_pi * square_x;
-                let phi = -quarter_pi + half_pi * square_y;
-
-                // (x, y, z) are the coordinates of the point on the sphere in 3D Euclidean space
-                let x = theta.cos() * phi.cos();
-                let y = theta.sin() * phi.cos();
-                let z = phi.sin();
+                let x = square_x
+                    * (0.5 - square_y * square_y / 6.0).sqrt();
+                let y = square_y
+                    * (0.5 - square_x * square_x / 6.0).sqrt();
+                let z = -(1.0 - square_x * square_x / 2.0 - square_y * square_y / 2.0
+                    + square_x * square_x * square_y * square_y / 3.0)
+                    .sqrt();
 
                 vertices.push(Vertex {
                     pos: [x, y, z, 1.],

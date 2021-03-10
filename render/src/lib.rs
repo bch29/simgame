@@ -253,19 +253,26 @@ impl Renderer {
                 voxel_diff: &diff.voxels,
             });
 
-        let base_model =
-            Matrix4::from_translation(Vector3::new(10., 10., 60.)) * Matrix4::from_scale(10.);
-
-        let rots = vec![
-            Matrix4::from_angle_z(cgmath::Deg(0.)), // front
-            Matrix4::from_angle_z(cgmath::Deg(90.)), // right
-            Matrix4::from_angle_z(cgmath::Deg(180.)), // back
-            Matrix4::from_angle_z(cgmath::Deg(270.)), // left
-            Matrix4::from_angle_y(cgmath::Deg(90.)), // bottom
-            // Matrix4::from_angle_y(cgmath::Deg(270.)), // top
+        let base_models = vec![
+            Matrix4::from_translation(Vector3::new(10., 10., 80.)) * Matrix4::from_scale(10.),
+            Matrix4::from_translation(Vector3::new(50., 10., 80.)) * Matrix4::from_scale(15.),
+            Matrix4::from_translation(Vector3::new(10., 50., 80.)) * Matrix4::from_scale(5.),
+            Matrix4::from_translation(Vector3::new(50., 50., 100.)) * Matrix4::from_scale(5.),
         ];
 
-        let models: Vec<_> = rots.into_iter().map(|rot| base_model * rot).collect();
+        let rots = vec![
+            Matrix4::from_angle_y(cgmath::Deg(0.)),   // front
+            Matrix4::from_angle_y(cgmath::Deg(90.)),  // right
+            Matrix4::from_angle_y(cgmath::Deg(180.)), // back
+            Matrix4::from_angle_y(cgmath::Deg(270.)), // left
+            Matrix4::from_angle_x(cgmath::Deg(90.)),  // bottom
+            Matrix4::from_angle_x(cgmath::Deg(270.)), // top
+        ];
+
+        let models: Vec<_> = rots
+            .into_iter()
+            .flat_map(|rot| base_models.iter().map(move |model| model * rot))
+            .collect();
 
         // state
         //     .square_mesh

@@ -41,7 +41,7 @@ void main() {
     vec4(0.5, 0.0, 0.5, 1.0)
   };
 
-  vec4 texColor = colors[v_InstanceIndex];
+  vec4 texColor = colors[v_InstanceIndex % 6];
 
   vec4 ambient = ambientStrength * ambientColor;
   vec3 norm = normalize(v_Normal);
