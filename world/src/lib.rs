@@ -5,6 +5,6 @@ pub mod turtle;
 mod world_state;
 pub mod worldgen;
 
-pub use simgame_types::{UpdatedWorldState, World};
+pub use simgame_types::{WorldDelta, World};
 
 pub use world_state::{WorldState, WorldStateBuilder};

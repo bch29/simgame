@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use simgame_util::Bounds;
 use simgame_voxels::{Voxel, VoxelConfigHelper, VoxelData, VoxelUpdater};
 
-use crate::{tree, UpdatedWorldState};
+use crate::{tree, WorldDelta};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GenerateWorldConfig {
@@ -173,7 +173,7 @@ impl<'a, R> WorldGenerator<'a, R> {
             None => return Ok(()),
         };
 
-        let mut updated_state = UpdatedWorldState::empty();
+        let mut updated_state = WorldDelta::new();
         let mut voxel_updater = VoxelUpdater::new(&mut self.voxels, &mut updated_state.voxels);
 
         let tree = tree::generate(tree_config, self.voxel_helper, &mut self.rng)?;

@@ -12,7 +12,7 @@ use simgame_voxels::{index_utils, Voxel, VoxelConfigHelper, VoxelRaycastHit, Vox
 use crate::{
     background_object::{self, BackgroundObject},
     tree::{TreeConfig, TreeSystem},
-    UpdatedWorldState, World,
+    WorldDelta, World,
 };
 
 pub struct WorldStateBuilder<'a> {
@@ -33,7 +33,7 @@ pub struct WorldState {
 /// not voxel the rendering thread.
 struct BackgroundState {
     world: Arc<Mutex<World>>,
-    world_diff: UpdatedWorldState,
+    world_diff: WorldDelta,
     _voxel_helper: VoxelConfigHelper,
     rng: rand::rngs::StdRng,
     updating: bool,
@@ -63,7 +63,7 @@ impl<'a> WorldStateBuilder<'a> {
 
         let world_state = BackgroundState {
             _voxel_helper: self.voxel_helper.clone(),
-            world_diff: UpdatedWorldState::empty(),
+            world_diff: WorldDelta::new(),
             rng: SeedableRng::from_entropy(),
             updating: false,
             filled_voxels: (16 * 16 * 4) / 8,
@@ -121,7 +121,7 @@ impl WorldState {
         self.send_action(WorldUpdateAction::ToggleUpdates)
     }
 
-    pub fn world_diff(&mut self) -> Result<&mut UpdatedWorldState> {
+    pub fn world_diff(&mut self) -> Result<&mut WorldDelta> {
         let connection = self
             .connection
             .as_mut()
@@ -239,7 +239,7 @@ impl BackgroundState {
 impl BackgroundObject for BackgroundState {
     type UserAction = WorldUpdateAction;
     type TickAction = Tick;
-    type Response = UpdatedWorldState;
+    type Response = WorldDelta;
 
     fn receive_user(&mut self, action: WorldUpdateAction) -> Result<()> {
         match action {
@@ -254,19 +254,19 @@ impl BackgroundObject for BackgroundState {
         self.tick(elapsed)
     }
 
-    fn produce_response(&mut self) -> Result<Option<UpdatedWorldState>> {
+    fn produce_response(&mut self) -> Result<Option<WorldDelta>> {
         if self.world_diff.is_empty() {
             return Ok(None);
         }
-        let mut diff = UpdatedWorldState::empty();
+        let mut diff = WorldDelta::new();
         std::mem::swap(&mut self.world_diff, &mut diff);
         Ok(Some(diff))
     }
 }
 
-impl background_object::Cumulative for UpdatedWorldState {
+impl background_object::Cumulative for WorldDelta {
     fn empty() -> Self {
-        UpdatedWorldState::empty()
+        WorldDelta::new()
     }
 
     fn append(&mut self, other: Self) -> Result<()> {

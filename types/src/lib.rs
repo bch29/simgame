@@ -7,11 +7,17 @@ pub use entity::Entity;
 #[derive(Debug)]
 pub struct World {
     pub voxels: VoxelData,
-    pub entities: FloatOctree<Entity>,
+    pub entities: EntityState,
 }
 
 #[derive(Debug)]
-pub struct UpdatedWorldState {
+pub struct EntityState {
+    pub entities: Vec<Entity>,
+    pub entity_locations: FloatOctree<usize>,
+}
+
+#[derive(Debug)]
+pub struct WorldDelta {
     pub voxels: UpdatedVoxelsState,
 }
 
@@ -19,27 +25,48 @@ impl World {
     pub fn new(voxels: VoxelData) -> World {
         World {
             voxels,
-            entities: FloatOctree::new(),
+            entities: EntityState::new(),
         }
     }
 }
 
-impl UpdatedWorldState {
-    pub fn empty() -> Self {
+impl EntityState {
+    pub fn new() -> EntityState {
+        EntityState {
+            entities: Vec::new(),
+            entity_locations: FloatOctree::new(),
+        }
+    }
+}
+
+impl WorldDelta {
+    pub fn new() -> Self {
         Self {
             voxels: UpdatedVoxelsState::empty(),
         }
     }
 
     pub fn clear(&mut self) {
-        self.voxels.clear()
+        self.voxels.clear();
     }
 
-    pub fn update_from(&mut self, other: UpdatedWorldState) {
-        self.voxels.update_from(other.voxels)
+    pub fn update_from(&mut self, other: WorldDelta) {
+        self.voxels.update_from(other.voxels);
     }
 
     pub fn is_empty(&self) -> bool {
         self.voxels.is_empty()
+    }
+}
+
+impl Default for EntityState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Default for WorldDelta {
+    fn default() -> Self {
+        Self::new()
     }
 }

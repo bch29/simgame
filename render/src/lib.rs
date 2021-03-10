@@ -11,7 +11,7 @@ use anyhow::{anyhow, bail, Result};
 use cgmath::{Matrix4, SquareMatrix, Vector2, Vector3};
 use raw_window_handle::HasRawWindowHandle;
 
-use simgame_types::{UpdatedWorldState, World};
+use simgame_types::{World, WorldDelta};
 use simgame_util::{convert_vec, DivUp};
 use simgame_voxels::{index_utils, VoxelConfigHelper};
 
@@ -258,7 +258,7 @@ impl Renderer {
         Ok(())
     }
 
-    pub fn update(&self, state: &mut RenderState, world: &World, diff: &UpdatedWorldState) {
+    pub fn update(&self, state: &mut RenderState, world: &World, diff: &WorldDelta) {
         state
             .world_voxels
             .update(pipelines::voxels::VoxelRenderInputDelta {
