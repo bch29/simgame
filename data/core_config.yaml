@@ -7,34 +7,50 @@ voxel_config:
   voxels:
     - name: Air
       category: air
-      texture:
-        Uniform: {SolidColor: {red: 255, green: 255, blue: 255}}
+      texture: { Uniform: { resource: tex/voxel/air } }
     - name: Rock
       category: rock
       texture:
-        Uniform: {Texture: {resource: "tex/voxel/rock", x_periodicity: 2, y_periodicity: 2}}
+        Uniform:
+          resource: tex/voxel/rock
+          x_periodicity: 2
+          y_periodicity: 2
     - name: Leaf
       category: foliage
       speed_modifier: 0.5
-      texture:
-        Uniform: {Texture: {resource: "tex/voxel/leaf", x_periodicity: 1, y_periodicity: 1}}
+      texture: { Uniform: { resource: tex/voxel/leaf } }
     - name: Wood
       category: wood
       texture:
-        Uniform: {Texture: {resource: "tex/voxel/wood", x_periodicity: 2, y_periodicity: 2}}
+        Uniform:
+          resource: tex/voxel/wood
+          x_periodicity: 2
+          y_periodicity: 2
     - name: Dirt
       category: dirt
       speed_modifier: 0.8
       texture:
-        Uniform: {Texture: {resource: "tex/voxel/dirt", x_periodicity: 2, y_periodicity: 2}}
+        Uniform:
+          resource: tex/voxel/dirt
+          x_periodicity: 2
+          y_periodicity: 2
     - name: Grass
       category: dirt
       speed_modifier: 0.8
       texture:
         Nonuniform:
-          top: {Texture: {resource: "tex/voxel/grass_top", x_periodicity: 2, y_periodicity: 2}}
-          bottom: {Texture: {resource: "tex/voxel/dirt", x_periodicity: 2, y_periodicity: 2}}
-          side: {Texture: {resource: "tex/voxel/grass_side", x_periodicity: 2, y_periodicity: 1}}
+          top:
+            resource: tex/voxel/grass_top
+            x_periodicity: 2
+            y_periodicity: 2
+          bottom:
+            resource: tex/voxel/dirt
+            x_periodicity: 2
+            y_periodicity: 2
+          side:
+            resource: tex/voxel/grass_side
+            x_periodicity: 2
+            y_periodicity: 1
 
 resources:
   root: ./resources
@@ -42,62 +58,57 @@ resources:
   resources:
     # GUI textures
     - name: tex/gui/crosshair
-      relative_path: tex/gui/crosshair.png
-      kind: Image
+      kind: { Image: { relative_path: tex/gui/crosshair.png } }
     # Voxel textures
     - name: tex/voxel/rock
-      relative_path: tex/voxel/rock.png
-      kind: Image
+      kind: { Image: { relative_path: tex/voxel/rock.png } }
     - name: tex/voxel/leaf
-      relative_path: tex/voxel/leaf.png
-      kind: Image
+      kind: { Image: { relative_path: tex/voxel/leaf.png } }
     - name: tex/voxel/wood
-      relative_path: tex/voxel/wood.png
-      kind: Image
+      kind: { Image: { relative_path: tex/voxel/wood.png } }
     - name: tex/voxel/dirt
-      relative_path: tex/voxel/dirt.png
-      kind: Image
+      kind: { Image: { relative_path: tex/voxel/dirt.png } }
     - name: tex/voxel/grass_top
-      relative_path: tex/voxel/grass_top.png
-      kind: Image
+      kind: { Image: { relative_path: tex/voxel/grass_top.png } }
     - name: tex/voxel/grass_side
-      relative_path: tex/voxel/grass_side.png
-      kind: Image
+      kind: { Image: { relative_path: tex/voxel/grass_side.png } }
+    - name: tex/voxel/air
+      kind: { SolidColor: { red: 255, green: 255, blue: 255 } }
     # Voxel shaders
     - name: shader/voxels/compute
-      relative_path: shader/voxels/compute.glsl
-      kind: 
+      kind:
         Shader:
+          relative_path: shader/voxels/compute.glsl
           kind: Compute
     - name: shader/voxels/vertex
-      relative_path: shader/voxels/vertex.glsl
-      kind: 
+      kind:
         Shader:
+          relative_path: shader/voxels/vertex.glsl
           kind: Vertex
     - name: shader/voxels/fragment
-      relative_path: shader/voxels/fragment.glsl
-      kind: 
+      kind:
         Shader:
+          relative_path: shader/voxels/fragment.glsl
           kind: Fragment
     # Mesh shaders
     - name: shader/mesh/vertex
-      relative_path: shader/mesh/vertex.glsl
-      kind: 
+      kind:
         Shader:
+          relative_path: shader/mesh/vertex.glsl
           kind: Vertex
     - name: shader/mesh/fragment
-      relative_path: shader/mesh/fragment.glsl
-      kind: 
+      kind:
         Shader:
+          relative_path: shader/mesh/fragment.glsl
           kind: Fragment
     # GUI shaders
     - name: shader/gui/vertex
-      relative_path: shader/gui/vertex.glsl
-      kind: 
+      kind:
         Shader:
+          relative_path: shader/gui/vertex.glsl
           kind: Vertex
     - name: shader/gui/fragment
-      relative_path: shader/gui/fragment.glsl
-      kind: 
+      kind:
         Shader:
+          relative_path: shader/gui/fragment.glsl
           kind: Fragment

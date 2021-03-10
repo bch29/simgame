@@ -151,7 +151,8 @@ impl VoxelInfoManager {
         resource_loader: &ResourceLoader,
         face_tex: &voxel::FaceTexture,
     ) -> Result<TextureData> {
-        let sample_generator = sample_gen::to_sample_generator(resource_loader, face_tex)?;
+        log::info!("Loading voxel texture {:?}", face_tex.resource);
+        let sample_generator = resource_loader.load_image(face_tex.resource.as_str())?;
 
         let (width, height) = sample_generator.source_dimensions();
         if log2_exact(width).is_none() || log2_exact(height).is_none() {
@@ -253,115 +254,9 @@ impl VoxelInfoManager {
     }
 
     fn get_texture_metadata(face_tex: &voxel::FaceTexture) -> VoxelTextureMetadata {
-        match face_tex {
-            voxel::FaceTexture::SolidColor { .. } => VoxelTextureMetadata {
-                x_periodicity: 1,
-                y_periodicity: 1,
-            },
-            voxel::FaceTexture::Texture {
-                x_periodicity,
-                y_periodicity,
-                ..
-            } => VoxelTextureMetadata {
-                x_periodicity: *x_periodicity,
-                y_periodicity: *y_periodicity,
-            },
-        }
-    }
-}
-
-mod sample_gen {
-    use super::voxel;
-    use super::ResourceLoader;
-    use super::Result;
-
-    pub trait SampleGenerator {
-        /// Returns the buffer of samples and the number of bytes per row in the result.
-        fn generate(&self, width: u32, height: u32) -> (Vec<u8>, u32);
-
-        fn source_dimensions(&self) -> (u32, u32);
-    }
-
-    pub fn to_sample_generator(
-        resource_loader: &ResourceLoader,
-        face_tex: &voxel::FaceTexture,
-    ) -> Result<Box<dyn SampleGenerator>> {
-        match face_tex {
-            voxel::FaceTexture::SolidColor { red, green, blue } => {
-                log::info!(
-                    "Creating solid color texture with R/G/B {}/{}/{}",
-                    red,
-                    green,
-                    blue
-                );
-                Ok(Box::new(SolidColorSampleGenerator {
-                    red: *red,
-                    green: *green,
-                    blue: *blue,
-                }))
-            }
-            voxel::FaceTexture::Texture { resource, .. } => {
-                log::info!("Loading voxel texture {:?}", resource);
-                let image = resource_loader.load_image(&resource[..])?.into_rgba8();
-
-                Ok(Box::new(ImageSampleGenerator { image }))
-            }
-        }
-    }
-
-    struct ImageSampleGenerator {
-        image: image::ImageBuffer<image::Rgba<u8>, Vec<u8>>,
-    }
-
-    struct SolidColorSampleGenerator {
-        red: u8,
-        green: u8,
-        blue: u8,
-    }
-
-    impl SampleGenerator for ImageSampleGenerator {
-        fn generate(&self, width: u32, height: u32) -> (Vec<u8>, u32) {
-            let (img_width, img_height) = self.image.dimensions();
-
-            let resized;
-            let image = if img_width != width || img_height != height {
-                resized = image::imageops::resize(
-                    &self.image,
-                    width,
-                    height,
-                    image::imageops::FilterType::CatmullRom,
-                );
-                &resized
-            } else {
-                &self.image
-            };
-
-            let samples = image.as_flat_samples();
-            let bytes_per_row = samples.layout.height_stride as u32;
-            (samples.as_slice().to_vec(), bytes_per_row)
-        }
-
-        fn source_dimensions(&self) -> (u32, u32) {
-            self.image.dimensions()
-        }
-    }
-
-    impl SampleGenerator for SolidColorSampleGenerator {
-        fn generate(&self, width: u32, height: u32) -> (Vec<u8>, u32) {
-            let mut buf = Vec::with_capacity(width as usize * height as usize * 4);
-            for _row_ix in 0..height {
-                for _col_ix in 0..width {
-                    buf.push(self.red);
-                    buf.push(self.green);
-                    buf.push(self.blue);
-                    buf.push(255); // alpha
-                }
-            }
-            (buf, 4 * width)
-        }
-
-        fn source_dimensions(&self) -> (u32, u32) {
-            (1, 1)
+        VoxelTextureMetadata {
+            x_periodicity: face_tex.x_periodicity.unwrap_or(1),
+            y_periodicity: face_tex.y_periodicity.unwrap_or(1),
         }
     }
 }

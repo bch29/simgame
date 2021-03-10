@@ -52,12 +52,8 @@ impl GuiRenderPipeline {
             });
 
         let crosshair_texture: wgpu::TextureView = {
-            let image = ctx
-                .resource_loader
-                .load_image("tex/gui/crosshair")?
-                .into_rgba8();
-
-            let (width, height) = image.dimensions();
+            let sample_generator = ctx.resource_loader.load_image("tex/gui/crosshair")?;
+            let (width, height) = sample_generator.source_dimensions();
 
             let size = wgpu::Extent3d {
                 width,
@@ -81,14 +77,14 @@ impl GuiRenderPipeline {
                 origin: wgpu::Origin3d::ZERO,
             };
 
-            let samples = image.as_flat_samples();
+            let (samples, bytes_per_row) = sample_generator.generate(width, height);
 
             ctx.queue.write_texture(
                 copy_view,
                 samples.as_slice(),
                 wgpu::TextureDataLayout {
                     offset: 0,
-                    bytes_per_row: samples.layout.height_stride as u32,
+                    bytes_per_row,
                     rows_per_image: 0,
                 },
                 size,
@@ -215,17 +211,9 @@ impl<'a> pipelines::State<'a> for GuiRenderState {
     type Input = ();
     type InputDelta = ();
 
-    fn update(
-        &mut self,
-        _input: Self::InputDelta,
-    ) {
-    }
+    fn update(&mut self, _input: Self::InputDelta) {}
 
-    fn update_window(
-        &mut self,
-        ctx: &crate::GraphicsContext,
-        params: pipelines::Params,
-    ) {
+    fn update_window(&mut self, ctx: &crate::GraphicsContext, params: pipelines::Params) {
         // self.multisampled_framebuffer =
         //     Self::create_multisampled_framebuffer(device, swapchain, SAMPLE_COUNT);
         //

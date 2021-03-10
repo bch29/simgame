@@ -5,7 +5,6 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, bail, Result};
 use byteorder::{ReadBytesExt, WriteBytesExt};
-use image::DynamicImage;
 use serde::{Deserialize, Serialize};
 
 use crate::shaders::{CompileParams, ShaderCompiler, ShaderKind};
@@ -40,14 +39,23 @@ pub struct ResourceConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum ResourceKind {
-    Image,
-    Shader { kind: ShaderKind },
+    Image {
+        relative_path: PathBuf,
+    },
+    SolidColor {
+        red: u8,
+        green: u8,
+        blue: u8,
+    },
+    Shader {
+        relative_path: PathBuf,
+        kind: ShaderKind,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Resource {
     pub name: String,
-    pub relative_path: PathBuf,
     pub kind: ResourceKind,
 }
 
@@ -111,23 +119,37 @@ impl ResourceLoader {
         })
     }
 
-    pub fn open_image(&self, name: &str) -> Result<ImageReader> {
+    pub fn load_image(&self, name: &str) -> Result<Box<dyn SampleGenerator>> {
         let resource = self.get_resource(name)?;
 
-        if resource.kind != ResourceKind::Image {
-            bail!(
+        match resource.kind {
+            ResourceKind::Image { ref relative_path } => {
+                let file = self.open_relative_path(relative_path.as_path())?;
+                let reader = image::io::Reader::new(file).with_guessed_format()?;
+                let image = reader.decode()?;
+                Ok(Box::new(sample_gen::ImageSampleGenerator {
+                    image: image.to_rgba8(),
+                }))
+            }
+            ResourceKind::SolidColor { red, green, blue } => {
+                log::info!(
+                    "Creating solid color texture with R/G/B {}/{}/{}",
+                    red,
+                    green,
+                    blue
+                );
+                Ok(Box::new(sample_gen::SolidColorSampleGenerator {
+                    red,
+                    green,
+                    blue,
+                }))
+            }
+            _ => bail!(
                 "Resource {:?} was loaded as an image, but configured as {:?}",
                 name,
                 resource.kind
-            );
+            ),
         }
-
-        let file = self.open_resource(&resource)?;
-        Ok(image::io::Reader::new(file).with_guessed_format()?)
-    }
-
-    pub fn load_image(&self, name: &str) -> Result<DynamicImage> {
-        Ok(self.open_image(name)?.decode()?)
     }
 
     pub fn get_resource(&self, name: &str) -> Result<&Resource> {
@@ -139,8 +161,11 @@ impl ResourceLoader {
     pub fn load_shader(&self, name: &str) -> Result<Vec<u32>> {
         let resource = self.get_resource(name)?;
 
-        let shader_kind = match &resource.kind {
-            ResourceKind::Shader { kind } => kind.clone(),
+        let (shader_kind, relative_path) = match &resource.kind {
+            ResourceKind::Shader {
+                kind,
+                relative_path,
+            } => (kind.clone(), relative_path.as_path()),
             _ => bail!(
                 "Resource {:?} was loaded as a shader, but configured as {:?}",
                 name,
@@ -148,7 +173,7 @@ impl ResourceLoader {
             ),
         };
 
-        let src_path = self.full_resource_path(resource);
+        let src_path = self.path_to_absolute(relative_path);
         let spirv_path = self.make_artifact_path(resource)?;
 
         let load_spirv = || -> Result<Vec<u32>> {
@@ -201,19 +226,10 @@ impl ResourceLoader {
         }
     }
 
-    fn open_resource(&self, resource: &Resource) -> Result<BufReader<File>> {
-        let path = resource.relative_path.as_path();
-        self.open_relative_path(path)
-    }
-
     fn open_relative_path(&self, relative_path: &Path) -> Result<BufReader<File>> {
         let full_path = self.path_to_absolute(relative_path);
         let file = File::open(full_path.as_path())?;
         Ok(BufReader::new(file))
-    }
-
-    fn full_resource_path(&self, resource: &Resource) -> PathBuf {
-        self.path_to_absolute(resource.relative_path.as_path())
     }
 
     fn make_artifact_path(&self, resource: &Resource) -> Result<PathBuf> {
@@ -254,5 +270,72 @@ impl ResourceLoader {
         let mut res = self.root.clone();
         res.push(relative_path);
         res
+    }
+}
+
+pub use sample_gen::SampleGenerator;
+
+pub mod sample_gen {
+    pub trait SampleGenerator {
+        /// Returns the buffer of samples and the number of bytes per row in the result.
+        fn generate(&self, width: u32, height: u32) -> (Vec<u8>, u32);
+
+        fn source_dimensions(&self) -> (u32, u32);
+    }
+
+    pub struct ImageSampleGenerator {
+        pub image: image::ImageBuffer<image::Rgba<u8>, Vec<u8>>,
+    }
+
+    pub struct SolidColorSampleGenerator {
+        pub red: u8,
+        pub green: u8,
+        pub blue: u8,
+    }
+
+    impl SampleGenerator for ImageSampleGenerator {
+        fn generate(&self, width: u32, height: u32) -> (Vec<u8>, u32) {
+            let (img_width, img_height) = self.image.dimensions();
+
+            let resized;
+            let image = if img_width != width || img_height != height {
+                resized = image::imageops::resize(
+                    &self.image,
+                    width,
+                    height,
+                    image::imageops::FilterType::CatmullRom,
+                );
+                &resized
+            } else {
+                &self.image
+            };
+
+            let samples = image.as_flat_samples();
+            let bytes_per_row = samples.layout.height_stride as u32;
+            (samples.as_slice().to_vec(), bytes_per_row)
+        }
+
+        fn source_dimensions(&self) -> (u32, u32) {
+            self.image.dimensions()
+        }
+    }
+
+    impl SampleGenerator for SolidColorSampleGenerator {
+        fn generate(&self, width: u32, height: u32) -> (Vec<u8>, u32) {
+            let mut buf = Vec::with_capacity(width as usize * height as usize * 4);
+            for _row_ix in 0..height {
+                for _col_ix in 0..width {
+                    buf.push(self.red);
+                    buf.push(self.green);
+                    buf.push(self.blue);
+                    buf.push(255); // alpha
+                }
+            }
+            (buf, 4 * width)
+        }
+
+        fn source_dimensions(&self) -> (u32, u32) {
+            (1, 1)
+        }
     }
 }

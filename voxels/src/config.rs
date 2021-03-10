@@ -26,17 +26,13 @@ pub struct VoxelInfo {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
-pub enum FaceTexture {
-    /// The face has a soid color.
-    SolidColor { red: u8, green: u8, blue: u8 },
-    /// The face has a texture with the given resource name.
-    Texture {
-        resource: String,
-        /// The texture repeats horizontally after this many voxels
-        x_periodicity: u32,
-        /// The texture repeats vertically after this many voxels
-        y_periodicity: u32,
-    },
+pub struct FaceTexture {
+    /// The resource name of the texture image
+    pub resource: String,
+    /// The texture repeats horizontally after this many voxels (1 if None)
+    pub x_periodicity: Option<u32>,
+    /// The texture repeats vertically after this many voxels (1 if None)
+    pub y_periodicity: Option<u32>,
 }
 
 /// Specification of how a voxel is textured.
