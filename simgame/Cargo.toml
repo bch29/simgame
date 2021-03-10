@@ -12,7 +12,7 @@ simgame_util = { path = "../util/" }
 simgame_voxels = { path = "../voxels/" }
 simgame_world = { path = "../world/" }
 simgame_render = { path = "../render/" }
-cgmath = "0.17"
+cgmath = "0.18"
 structopt = "*"
 env_logger = "0.7"
 log = "0.4"

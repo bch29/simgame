@@ -12,7 +12,7 @@ simgame_util = { path = "../util" }
 simgame_voxels = { path = "../voxels" }
 simgame_types = { path = "../types" }
 serde = { version = "1.0", features = ["derive"] }
-cgmath = "0.17"
+cgmath = "0.18"
 anyhow = "1.0"
 log = "0.4"
 raw-window-handle = "0.3"

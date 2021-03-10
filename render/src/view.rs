@@ -74,7 +74,7 @@ impl ViewState {
     }
 
     pub fn view(&self) -> Matrix4<f32> {
-        Matrix4::look_at_dir(
+        Matrix4::look_to_rh(
             Point3::new(0., 0., 0.),
             self.params().look_at_dir,
             Vector3::unit_z(),
