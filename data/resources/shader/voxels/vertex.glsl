@@ -45,7 +45,8 @@ struct ChunkMetadata {
 };
 
 struct VoxelTextureMetadata {
-  uint periodicity;
+  uint x_periodicity;
+  uint y_periodicity;
 };
 
 layout(set = 0, binding = 0) uniform Locals {
@@ -137,7 +138,7 @@ vec2 signedMod(vec2 v, float divisor) {
 }
 
 /// Calculates which part of the face texture to use.
-vec2 getTexOrigin(float periodicity, vec3 voxelPos, vec3 faceNormal) {
+vec2 getTexOrigin(vec2 periodicity, vec3 voxelPos, vec3 faceNormal) {
   vec3 unitX = vec3(1., 0., 0.);
   vec3 unitY = vec3(0., 1., 0.);
   vec3 unitZ = vec3(0., 0., 1.);
@@ -222,7 +223,9 @@ bool decodeAttributes(out Attributes attrs) {
   vec2 faceTexCoord = face.vertexTexCoords[faceVertexIndex];
 
   attrs.texId = b_VoxelRenderInfo[attrs.voxelType].faceTexIds[faceId];
-  float periodicity = float(b_VoxelTextureMetadata[attrs.texId].periodicity);
+  vec2 periodicity = vec2(
+      float(b_VoxelTextureMetadata[attrs.texId].x_periodicity),
+      float(b_VoxelTextureMetadata[attrs.texId].y_periodicity));
   vec3 voxelOffset = attrs.chunkOffset + vec3(voxelAddr.xyz);
   vec2 texOrigin = getTexOrigin(periodicity, voxelOffset, attrs.normal.xyz);
   attrs.texCoord = texOrigin + faceTexCoord / periodicity;

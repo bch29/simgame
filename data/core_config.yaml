@@ -12,29 +12,29 @@ voxel_config:
     - name: Rock
       category: rock
       texture:
-        Uniform: {Texture: {resource: "tex/voxel/rock", periodicity: 2}}
+        Uniform: {Texture: {resource: "tex/voxel/rock", x_periodicity: 2, y_periodicity: 2}}
     - name: Leaf
       category: foliage
       speed_modifier: 0.5
       texture:
-        Uniform: {Texture: {resource: "tex/voxel/leaf", periodicity: 1}}
+        Uniform: {Texture: {resource: "tex/voxel/leaf", x_periodicity: 1, y_periodicity: 1}}
     - name: Wood
       category: wood
       texture:
-        Uniform: {Texture: {resource: "tex/voxel/wood", periodicity: 2}}
+        Uniform: {Texture: {resource: "tex/voxel/wood", x_periodicity: 2, y_periodicity: 2}}
     - name: Dirt
       category: dirt
       speed_modifier: 0.8
       texture:
-        Uniform: {Texture: {resource: "tex/voxel/dirt", periodicity: 2}}
+        Uniform: {Texture: {resource: "tex/voxel/dirt", x_periodicity: 2, y_periodicity: 2}}
     - name: Grass
       category: dirt
       speed_modifier: 0.8
       texture:
         Nonuniform:
-          top: {Texture: {resource: "tex/voxel/grass_top", periodicity: 2}}
-          bottom: {Texture: {resource: "tex/voxel/dirt", periodicity: 2}}
-          side: {Texture: {resource: "tex/voxel/grass_side", periodicity: 2}}
+          top: {Texture: {resource: "tex/voxel/grass_top", x_periodicity: 2, y_periodicity: 2}}
+          bottom: {Texture: {resource: "tex/voxel/dirt", x_periodicity: 2, y_periodicity: 2}}
+          side: {Texture: {resource: "tex/voxel/grass_side", x_periodicity: 2, y_periodicity: 1}}
 
 resources:
   root: ./resources

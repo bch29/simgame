@@ -32,8 +32,10 @@ pub enum FaceTexture {
     /// The face has a texture with the given resource name.
     Texture {
         resource: String,
-        /// The texture repeats after this many voxels
-        periodicity: u32,
+        /// The texture repeats horizontally after this many voxels
+        x_periodicity: u32,
+        /// The texture repeats vertically after this many voxels
+        y_periodicity: u32,
     },
 }
 

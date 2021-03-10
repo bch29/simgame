@@ -26,7 +26,8 @@ pub(crate) struct VoxelInfoManager {
 #[repr(C)]
 #[derive(Debug, Clone, Copy, AsBytes, FromBytes, Default)]
 struct VoxelTextureMetadata {
-    periodicity: u32,
+    x_periodicity: u32,
+    y_periodicity: u32,
 }
 
 #[repr(C)]
@@ -253,9 +254,17 @@ impl VoxelInfoManager {
 
     fn get_texture_metadata(face_tex: &voxel::FaceTexture) -> VoxelTextureMetadata {
         match face_tex {
-            voxel::FaceTexture::SolidColor { .. } => VoxelTextureMetadata { periodicity: 1 },
-            voxel::FaceTexture::Texture { periodicity, .. } => VoxelTextureMetadata {
-                periodicity: *periodicity,
+            voxel::FaceTexture::SolidColor { .. } => VoxelTextureMetadata {
+                x_periodicity: 1,
+                y_periodicity: 1,
+            },
+            voxel::FaceTexture::Texture {
+                x_periodicity,
+                y_periodicity,
+                ..
+            } => VoxelTextureMetadata {
+                x_periodicity: *x_periodicity,
+                y_periodicity: *y_periodicity,
             },
         }
     }
