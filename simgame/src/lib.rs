@@ -156,6 +156,13 @@ fn build_window(event_loop: &EventLoop<()>, settings: &settings::VideoSettings) 
 
 impl<'a> TestRenderBuilder<'a> {
     pub async fn build(self) -> Result<TestRender> {
+        let renderer = RendererBuilder {
+            resource_loader: self.resource_loader,
+            voxel_helper: &self.voxel_helper,
+        }
+        .build(self.render_params.clone())
+        .await?;
+
         let window = build_window(self.event_loop, &self.test_params.video_settings)?;
 
         let physical_win_size = window.inner_size();
@@ -189,15 +196,8 @@ impl<'a> TestRenderBuilder<'a> {
             look_at_dir: self.test_params.look_at_dir,
         };
 
-        let renderer = RendererBuilder {
-            window: &window,
-            resource_loader: self.resource_loader,
-            voxel_helper: &self.voxel_helper,
-        }
-        .build(self.render_params.clone())
-        .await?;
-
         let render_state = renderer.create_state(RenderStateInputs {
+            window: &window,
             physical_win_size,
             world: &self.world,
             view_params,

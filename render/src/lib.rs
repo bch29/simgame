@@ -21,13 +21,13 @@ use resource::ResourceLoader;
 pub use view::ViewParams;
 pub(crate) use view::ViewState;
 
-pub struct RendererBuilder<'a, W> {
-    pub window: &'a W,
+pub struct RendererBuilder<'a> {
     pub resource_loader: ResourceLoader,
     pub voxel_helper: &'a VoxelConfigHelper,
 }
 
-pub struct RenderStateInputs<'a> {
+pub struct RenderStateInputs<'a, W> {
+    pub window: &'a W,
     pub physical_win_size: Vector2<u32>,
     pub max_visible_chunks: usize,
     pub voxel_helper: &'a VoxelConfigHelper,
@@ -47,13 +47,14 @@ pub struct RenderState {
     meshes: Vec<pipelines::mesh::MeshRenderState>,
     gui: pipelines::gui::GuiRenderState,
     view: ViewState,
+    surface: wgpu::Surface,
 }
 
 /// Object responsible for rendering the game.
 pub struct Renderer {
     ctx: GraphicsContext,
-    surface: wgpu::Surface,
     pipelines: Pipelines,
+    instance: wgpu::Instance,
 }
 
 pub fn visible_size_to_chunks(visible_size: Vector3<i32>) -> Vector3<i32> {
@@ -71,14 +72,9 @@ struct DeviceResult {
     queue: wgpu::Queue,
     pub multi_draw_enabled: bool,
 }
-impl<'a, W> RendererBuilder<'a, W>
-where
-    W: HasRawWindowHandle,
-{
+impl<'a> RendererBuilder<'a> {
     pub async fn build(self, params: RenderParams<'a>) -> Result<Renderer> {
         let instance = wgpu::Instance::new(wgpu::BackendBit::PRIMARY);
-
-        let surface = unsafe { instance.create_surface(self.window) };
 
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
@@ -115,19 +111,24 @@ where
 
         Ok(Renderer {
             ctx,
-            surface,
             pipelines,
+            instance,
         })
     }
 }
 
 impl Renderer {
-    pub fn create_state(&self, input: RenderStateInputs) -> Result<RenderState> {
+    pub fn create_state<W: HasRawWindowHandle>(
+        &self,
+        input: RenderStateInputs<W>,
+    ) -> Result<RenderState> {
+        let surface = unsafe { self.instance.create_surface(input.window) };
+
         let swapchain_descriptor = swapchain_descriptor(input.physical_win_size);
         let swapchain = self
             .ctx
             .device
-            .create_swap_chain(&self.surface, &swapchain_descriptor);
+            .create_swap_chain(&surface, &swapchain_descriptor);
 
         let view = ViewState::new(input.view_params, input.physical_win_size);
         let depth_texture = make_depth_texture(&self.ctx.device, input.physical_win_size);
@@ -180,6 +181,7 @@ impl Renderer {
             meshes,
             gui,
             view,
+            surface,
         })
     }
 
@@ -192,7 +194,7 @@ impl Renderer {
         let swapchain = self
             .ctx
             .device
-            .create_swap_chain(&self.surface, &swapchain_descriptor);
+            .create_swap_chain(&state.surface, &swapchain_descriptor);
 
         state.swapchain = swapchain;
 
@@ -267,12 +269,36 @@ impl Renderer {
             });
 
         let mut face_tex_ids = [0u32; 16];
-        face_tex_ids[0] = self.ctx.textures.resource_index("tex/entity/top").expect("cannot find texture") as u32;
-        face_tex_ids[1] = self.ctx.textures.resource_index("tex/entity/bottom").expect("cannot find texture") as u32;
-        face_tex_ids[2] = self.ctx.textures.resource_index("tex/entity/right").expect("cannot find texture") as u32;
-        face_tex_ids[3] = self.ctx.textures.resource_index("tex/entity/left").expect("cannot find texture") as u32;
-        face_tex_ids[4] = self.ctx.textures.resource_index("tex/entity/back").expect("cannot find texture") as u32;
-        face_tex_ids[5] = self.ctx.textures.resource_index("tex/entity/front").expect("cannot find texture") as u32;
+        face_tex_ids[0] = self
+            .ctx
+            .textures
+            .resource_index("tex/entity/top")
+            .expect("cannot find texture") as u32;
+        face_tex_ids[1] = self
+            .ctx
+            .textures
+            .resource_index("tex/entity/bottom")
+            .expect("cannot find texture") as u32;
+        face_tex_ids[2] = self
+            .ctx
+            .textures
+            .resource_index("tex/entity/right")
+            .expect("cannot find texture") as u32;
+        face_tex_ids[3] = self
+            .ctx
+            .textures
+            .resource_index("tex/entity/left")
+            .expect("cannot find texture") as u32;
+        face_tex_ids[4] = self
+            .ctx
+            .textures
+            .resource_index("tex/entity/back")
+            .expect("cannot find texture") as u32;
+        face_tex_ids[5] = self
+            .ctx
+            .textures
+            .resource_index("tex/entity/front")
+            .expect("cannot find texture") as u32;
 
         use pipelines::mesh::MeshInstance;
 
