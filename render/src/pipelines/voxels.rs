@@ -425,11 +425,10 @@ impl VoxelRenderPipeline {
     fn render_pass(
         &self,
         ctx: &crate::GraphicsContext,
+        load_action: crate::pipelines::LoadAction,
         frame_render: &mut crate::FrameRenderContext,
         state: &VoxelRenderState,
     ) {
-        let background_color = wgpu::Color::BLACK;
-
         state.render_stage.uniforms.sync(&ctx.queue);
 
         let mut rpass = frame_render
@@ -440,14 +439,14 @@ impl VoxelRenderPipeline {
                     attachment: &frame_render.frame.output.view,
                     resolve_target: None,
                     ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(background_color),
+                        load: load_action.into_load_op(wgpu::Color::BLACK),
                         store: true,
                     },
                 }],
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachmentDescriptor {
                     attachment: &state.render_stage.depth_texture,
                     depth_ops: Some(wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(1.0),
+                        load: load_action.into_load_op(1.0),
                         store: true,
                     }),
                     stencil_ops: None,
@@ -599,6 +598,7 @@ impl pipelines::Pipeline for VoxelRenderPipeline {
     fn render_frame(
         &self,
         ctx: &crate::GraphicsContext,
+        load_action: crate::pipelines::LoadAction,
         frame_render: &mut crate::FrameRenderContext,
         state: &mut VoxelRenderState,
     ) {
@@ -606,7 +606,7 @@ impl pipelines::Pipeline for VoxelRenderPipeline {
         state.chunk_state.update_buffers(&ctx.queue);
         let ts_update = Instant::now();
         self.compute_pass(ctx, frame_render, state);
-        self.render_pass(ctx, frame_render, state);
+        self.render_pass(ctx, load_action, frame_render, state);
 
         metrics::timing!(
             "render.world.voxels.update_buffers",

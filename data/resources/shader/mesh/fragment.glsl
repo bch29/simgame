@@ -1,10 +1,10 @@
 #version 450
 
-layout(location = 0) in vec3 v_Normal;
-layout(location = 1) in vec2 v_TexCoord;
-layout(location = 2) in vec4 v_Pos;
+layout(location = 0) in vec4 v_Pos;
+layout(location = 1) in vec3 v_Normal;
+layout(location = 2) flat in uint v_TexId;
+layout(location = 3) in vec2 v_TexCoord;
 layout(location = 4) in vec3 v_CameraPos;
-layout(location = 5) flat in uint v_InstanceIndex;
 
 layout(location = 0) out vec4 o_Target;
 
@@ -41,7 +41,7 @@ void main() {
     vec4(0.5, 0.0, 0.5, 1.0)
   };
 
-  vec4 texColor = colors[v_InstanceIndex % 6];
+  vec4 texColor = colors[v_TexId % 6];
 
   vec4 ambient = ambientStrength * ambientColor;
   vec3 norm = normalize(v_Normal);

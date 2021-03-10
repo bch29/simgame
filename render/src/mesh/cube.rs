@@ -23,13 +23,14 @@ impl Cube {
         let mut vertices = Vec::new();
         let mut indices = Vec::new();
 
-        for face in &self.faces {
+        for (face_index, face) in self.faces.iter().enumerate() {
             let first_index = vertices.len() as u16;
 
             for i in 0..4 {
                 vertices.push(Vertex {
                     pos: face.vertex_locs[i],
                     normal: [face.normal[0], face.normal[1], face.normal[2]],
+                    tex_index: face_index as u32,
                     tex_coord: face.vertex_tex_coords[i],
                 });
             }
@@ -48,8 +49,8 @@ impl Cube {
             [0.0, 0.0, -1.0], // bottom
             [1.0, 0.0, 0.0],  // right
             [-1.0, 0.0, 0.0], // left
-            [0.0, 1.0, 0.0],  // front
-            [0.0, -1.0, 0.0], // back
+            [0.0, 1.0, 0.0],  // back
+            [0.0, -1.0, 0.0], // front
         ];
 
         let vertices = [
@@ -81,14 +82,14 @@ impl Cube {
                 [-1.0, 1.0, -1.0],
                 [-1.0, -1.0, -1.0],
             ],
-            // front (0, 1, 0)
+            // back (0, 1, 0)
             [
                 [-1.0, 1.0, 1.0],
                 [1.0, 1.0, 1.0],
                 [1.0, 1.0, -1.0],
                 [-1.0, 1.0, -1.0],
             ],
-            // back (0, -1, 0)
+            // front (0, -1, 0)
             [
                 [1.0, -1.0, 1.0],
                 [-1.0, -1.0, 1.0],
@@ -102,8 +103,8 @@ impl Cube {
             [0, 1, 2, 2, 3, 0], // bottom
             [0, 1, 2, 2, 3, 0], // right
             [0, 1, 2, 2, 3, 0], // left
-            [0, 1, 2, 2, 3, 0], // front
             [0, 1, 2, 2, 3, 0], // back
+            [0, 1, 2, 2, 3, 0], // front
         ];
 
         fn fill_4<T: Copy>(inp: [T; 3], w: T) -> [T; 4] {

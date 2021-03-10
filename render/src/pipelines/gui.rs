@@ -255,6 +255,7 @@ impl pipelines::Pipeline for GuiRenderPipeline {
     fn render_frame(
         &self,
         ctx: &crate::GraphicsContext,
+        load_action: crate::pipelines::LoadAction,
         frame_render: &mut crate::FrameRenderContext,
         state: &mut GuiRenderState,
     ) {
@@ -291,7 +292,7 @@ impl pipelines::Pipeline for GuiRenderPipeline {
                     attachment: &frame_render.frame.output.view,
                     resolve_target: None,
                     ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Load,
+                        load: load_action.into_load_op(wgpu::Color::BLACK),
                         store: true,
                     },
                 }],

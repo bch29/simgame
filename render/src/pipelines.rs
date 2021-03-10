@@ -2,8 +2,8 @@ use anyhow::Result;
 use cgmath::Vector2;
 
 pub mod gui;
-pub mod voxels;
 pub mod mesh;
+pub mod voxels;
 
 pub(crate) struct GraphicsContext {
     pub device: wgpu::Device,
@@ -45,7 +45,23 @@ pub(crate) trait Pipeline {
     fn render_frame(
         &self,
         ctx: &GraphicsContext,
+        load_action: LoadAction,
         frame_render: &mut FrameRenderContext,
         state: &mut Self::State,
     );
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum LoadAction {
+    Load,
+    Clear,
+}
+
+impl LoadAction {
+    pub fn into_load_op<T>(self, clear_value: T) -> wgpu::LoadOp<T> {
+        match self {
+            LoadAction::Load => wgpu::LoadOp::Load,
+            LoadAction::Clear => wgpu::LoadOp::Clear(clear_value),
+        }
+    }
 }

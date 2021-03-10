@@ -44,8 +44,7 @@ pub struct RenderParams<'a> {
 pub struct RenderState {
     swapchain: wgpu::SwapChain,
     world_voxels: pipelines::voxels::VoxelRenderState,
-    square_mesh: pipelines::mesh::MeshRenderState,
-    sphere_mesh: pipelines::mesh::MeshRenderState,
+    meshes: Vec<pipelines::mesh::MeshRenderState>,
     gui: pipelines::gui::GuiRenderState,
     view: ViewState,
 }
@@ -145,25 +144,28 @@ impl Renderer {
             },
         )?;
 
-        let square_mesh = self.pipelines.mesh.create_state(
-            &self.ctx,
-            pipeline_params,
-            pipelines::mesh::MeshRenderInput {
-                mesh: &crate::mesh::cube::Cube::new().mesh(),
-                instances: &[],
-                view_state: &view,
-            },
-        )?;
+        let meshes = {
+            let square = self.pipelines.mesh.create_state(
+                &self.ctx,
+                pipeline_params,
+                pipelines::mesh::MeshRenderInput {
+                    mesh: &crate::mesh::cube::Cube::new().mesh(),
+                    instances: &[],
+                    view_state: &view,
+                },
+            )?;
 
-        let sphere_mesh = self.pipelines.mesh.create_state(
-            &self.ctx,
-            pipeline_params,
-            pipelines::mesh::MeshRenderInput {
-                mesh: &crate::mesh::sphere::UnitSphereFace { detail: 20 }.mesh(),
-                instances: &[],
-                view_state: &view,
-            },
-        )?;
+            let sphere = self.pipelines.mesh.create_state(
+                &self.ctx,
+                pipeline_params,
+                pipelines::mesh::MeshRenderInput {
+                    mesh: &crate::mesh::sphere::UnitSphere { detail: 20 }.mesh(),
+                    instances: &[],
+                    view_state: &view,
+                },
+            )?;
+            vec![square, sphere]
+        };
 
         let gui = self
             .pipelines
@@ -172,8 +174,7 @@ impl Renderer {
         Ok(RenderState {
             swapchain,
             world_voxels,
-            square_mesh,
-            sphere_mesh,
+            meshes,
             gui,
             view,
         })
@@ -200,8 +201,9 @@ impl Renderer {
             depth_texture: &depth_texture,
         };
         state.world_voxels.update_window(&self.ctx, pipeline_params);
-        state.square_mesh.update_window(&self.ctx, pipeline_params);
-        state.sphere_mesh.update_window(&self.ctx, pipeline_params);
+        for mesh in &mut state.meshes {
+            mesh.update_window(&self.ctx, pipeline_params);
+        }
         state.gui.update_window(&self.ctx, pipeline_params);
         Ok(())
     }
@@ -219,18 +221,26 @@ impl Renderer {
 
         let mut render = FrameRenderContext { encoder, frame };
 
-        self.pipelines
-            .voxel
-            .render_frame(&self.ctx, &mut render, &mut state.world_voxels);
-        self.pipelines
-            .mesh
-            .render_frame(&self.ctx, &mut render, &mut state.square_mesh);
-        self.pipelines
-            .mesh
-            .render_frame(&self.ctx, &mut render, &mut state.sphere_mesh);
-        self.pipelines
-            .gui
-            .render_frame(&self.ctx, &mut render, &mut state.gui);
+        self.pipelines.voxel.render_frame(
+            &self.ctx,
+            pipelines::LoadAction::Clear,
+            &mut render,
+            &mut state.world_voxels,
+        );
+        for mesh in &mut state.meshes {
+            self.pipelines.mesh.render_frame(
+                &self.ctx,
+                pipelines::LoadAction::Load,
+                &mut render,
+                mesh,
+            );
+        }
+        self.pipelines.gui.render_frame(
+            &self.ctx,
+            pipelines::LoadAction::Load,
+            &mut render,
+            &mut state.gui,
+        );
 
         let ts_begin = Instant::now();
         self.ctx
@@ -253,40 +263,25 @@ impl Renderer {
                 voxel_diff: &diff.voxels,
             });
 
-        let base_models = vec![
-            Matrix4::from_translation(Vector3::new(10., 10., 80.)) * Matrix4::from_scale(10.),
-            Matrix4::from_translation(Vector3::new(50., 10., 80.)) * Matrix4::from_scale(15.),
-            Matrix4::from_translation(Vector3::new(10., 50., 80.)) * Matrix4::from_scale(5.),
-            Matrix4::from_translation(Vector3::new(50., 50., 100.)) * Matrix4::from_scale(5.),
+        let models = vec![
+            vec![
+                Matrix4::from_translation(Vector3::new(-50., -50., 60.))
+                    * Matrix4::from_scale(10.),
+            ],
+            vec![
+                Matrix4::from_translation(Vector3::new(10., 10., 80.)) * Matrix4::from_scale(10.),
+                Matrix4::from_translation(Vector3::new(50., 10., 80.)) * Matrix4::from_scale(15.),
+                Matrix4::from_translation(Vector3::new(10., 50., 80.)) * Matrix4::from_scale(5.),
+                Matrix4::from_translation(Vector3::new(50., 50., 100.)) * Matrix4::from_scale(5.),
+            ],
         ];
 
-        let rots = vec![
-            Matrix4::from_angle_y(cgmath::Deg(0.)),   // front
-            Matrix4::from_angle_y(cgmath::Deg(90.)),  // right
-            Matrix4::from_angle_y(cgmath::Deg(180.)), // back
-            Matrix4::from_angle_y(cgmath::Deg(270.)), // left
-            Matrix4::from_angle_x(cgmath::Deg(90.)),  // bottom
-            Matrix4::from_angle_x(cgmath::Deg(270.)), // top
-        ];
-
-        let models: Vec<_> = rots
-            .into_iter()
-            .flat_map(|rot| base_models.iter().map(move |model| model * rot))
-            .collect();
-
-        // state
-        //     .square_mesh
-        //     .update(pipelines::mesh::MeshRenderInputDelta {
-        //         instances: &[Matrix4::from_translation(Vector3::new(10., 10., 60.))
-        //             * Matrix4::from_scale(10.)],
-        //         view_state: &state.view,
-        //     });
-        state
-            .sphere_mesh
-            .update(pipelines::mesh::MeshRenderInputDelta {
-                instances: models.as_slice(),
+        for (model, mesh) in models.into_iter().zip(&mut state.meshes) {
+            mesh.update(pipelines::mesh::MeshRenderInputDelta {
+                instances: model.as_slice(),
                 view_state: &state.view,
             });
+        }
         state.gui.update(());
     }
 }

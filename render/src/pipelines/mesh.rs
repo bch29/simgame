@@ -140,7 +140,7 @@ impl MeshRenderPipeline {
                 primitive: wgpu::PrimitiveState {
                     topology: wgpu::PrimitiveTopology::TriangleList,
                     front_face: wgpu::FrontFace::Ccw,
-                    cull_mode: wgpu::CullMode::None,
+                    cull_mode: wgpu::CullMode::Back,
                     strip_index_format: None,
                     polygon_mode: wgpu::PolygonMode::Fill,
                 },
@@ -180,12 +180,14 @@ impl<'a> pipelines::State<'a> for MeshRenderState {
     type InputDelta = MeshRenderInputDelta<'a>;
 
     fn update(&mut self, input: MeshRenderInputDelta<'a>) {
-        self.instances = input
-            .instances
-            .iter()
-            .copied()
-            .map(InstanceMeta::from_matrix4)
-            .collect();
+        self.instances.clear();
+        self.instances.extend(
+            input
+                .instances
+                .iter()
+                .copied()
+                .map(InstanceMeta::from_matrix4),
+        );
 
         *self.uniforms = RenderUniforms::new(input.view_state);
     }
@@ -267,6 +269,7 @@ impl pipelines::Pipeline for MeshRenderPipeline {
     fn render_frame(
         &self,
         ctx: &crate::GraphicsContext,
+        load_action: crate::pipelines::LoadAction,
         frame_render: &mut crate::FrameRenderContext,
         state: &mut MeshRenderState,
     ) {
@@ -299,7 +302,7 @@ impl pipelines::Pipeline for MeshRenderPipeline {
 
         for instance_chunk in state.instances.chunks(INSTANCES_PER_PASS) {
             let n_indexes = state.geometry_buffers.indexes.size() as u32
-                    / std::mem::size_of::<crate::mesh::Index>() as u32;
+                / std::mem::size_of::<crate::mesh::Index>() as u32;
 
             state
                 .geometry_buffers
@@ -314,7 +317,7 @@ impl pipelines::Pipeline for MeshRenderPipeline {
                         attachment: &frame_render.frame.output.view,
                         resolve_target: None,
                         ops: wgpu::Operations {
-                            load: wgpu::LoadOp::Load,
+                            load: load_action.into_load_op(wgpu::Color::BLACK),
                             store: true,
                         },
                     }],
@@ -322,7 +325,7 @@ impl pipelines::Pipeline for MeshRenderPipeline {
                         wgpu::RenderPassDepthStencilAttachmentDescriptor {
                             attachment: &state.depth_texture,
                             depth_ops: Some(wgpu::Operations {
-                                load: wgpu::LoadOp::Load,
+                                load: load_action.into_load_op(1.0),
                                 store: true,
                             }),
                             stencil_ops: None,
@@ -338,11 +341,7 @@ impl pipelines::Pipeline for MeshRenderPipeline {
                 crate::mesh::Mesh::index_format(),
             );
 
-            rpass.draw_indexed(
-                0..n_indexes,
-                0,
-                0..instance_chunk.len() as u32,
-            );
+            rpass.draw_indexed(0..n_indexes, 0, 0..instance_chunk.len() as u32);
         }
     }
 }

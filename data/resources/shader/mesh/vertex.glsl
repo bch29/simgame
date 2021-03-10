@@ -2,13 +2,14 @@
 
 layout(location = 0) in vec4 a_Pos;
 layout(location = 1) in vec3 a_Normal;
-layout(location = 2) in vec2 a_TexCoord;
+layout(location = 2) in uint a_TexId;
+layout(location = 3) in vec2 a_TexCoord;
 
-layout(location = 0) out vec3 v_Normal;
-layout(location = 1) out vec2 v_TexCoord;
-layout(location = 2) out vec4 v_Pos;
+layout(location = 0) out vec4 v_Pos;
+layout(location = 1) out vec3 v_Normal;
+layout(location = 2) out uint v_TexId;
+layout(location = 3) out vec2 v_TexCoord;
 layout(location = 4) out vec3 v_CameraPos;
-layout(location = 5) out uint v_InstanceIndex;
 
 layout(set = 0, binding = 0) uniform Uniforms {
   mat4 u_Proj;
@@ -38,9 +39,9 @@ void main() {
 
   v_Pos = model * a_Pos;
   v_Normal = (model * vec4(a_Normal, 0.0)).xyz;
+  v_TexId = a_TexId;
   v_TexCoord = a_TexCoord;
   v_CameraPos = u_CameraPos;
-  v_InstanceIndex = gl_InstanceIndex;
 
   gl_Position = u_Proj * view * v_Pos;
 }

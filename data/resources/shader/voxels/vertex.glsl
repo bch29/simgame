@@ -6,12 +6,11 @@ const uint CHUNK_SIZE_XYZ = CHUNK_SIZE_XY * CHUNK_SIZE_Z;
 const float scale = 1.0;
 const float half_scale = scale / 2.;
 
-layout(location = 0) out vec2 v_TexCoord;
+layout(location = 0) out vec4 v_Pos;
 layout(location = 1) out vec3 v_Normal;
-layout(location = 2) out vec4 v_Pos;
-layout(location = 3) out uint v_VoxelType;
+layout(location = 2) out uint v_TexId;
+layout(location = 3) out vec2 v_TexCoord;
 layout(location = 4) out vec3 v_CameraPos;
-layout(location = 5) out uint v_TexId;
 
 struct Attributes {
   // mesh data
@@ -256,7 +255,6 @@ void main() {
   v_TexId = attrs.texId;
 
   gl_Position = proj * view * v_Pos;
-  v_VoxelType = attrs.voxelType;
 }
 
 // vi: ft=c
