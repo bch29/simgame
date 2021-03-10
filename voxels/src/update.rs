@@ -7,17 +7,17 @@ use crate::voxel_data::VoxelData;
 use crate::{Chunk, Voxel};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct UpdatedVoxelsState {
+pub struct VoxelDelta {
     pub modified_chunks: HashSet<Point3<i64>>,
 }
 
 #[derive(Debug)]
 pub struct VoxelUpdater<'a> {
     voxels: &'a mut VoxelData,
-    updated_state: &'a mut UpdatedVoxelsState,
+    updated_state: &'a mut VoxelDelta,
 }
 
-impl UpdatedVoxelsState {
+impl VoxelDelta {
     pub fn empty() -> Self {
         Self {
             modified_chunks: HashSet::new(),
@@ -32,7 +32,7 @@ impl UpdatedVoxelsState {
         self.modified_chunks.insert(chunk_pos);
     }
 
-    pub fn update_from(&mut self, other: UpdatedVoxelsState) {
+    pub fn update_from(&mut self, other: VoxelDelta) {
         for chunk in other.modified_chunks.into_iter() {
             self.modified_chunks.insert(chunk);
         }
@@ -44,7 +44,7 @@ impl UpdatedVoxelsState {
 }
 
 impl<'a> VoxelUpdater<'a> {
-    pub fn new(voxels: &'a mut VoxelData, updated_state: &'a mut UpdatedVoxelsState) -> Self {
+    pub fn new(voxels: &'a mut VoxelData, updated_state: &'a mut VoxelDelta) -> Self {
         Self {
             voxels,
             updated_state,

@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use cgmath::{ElementWise, EuclideanSpace, Point3, Vector3};
 
 use simgame_util::{convert_point, convert_vec, stable_map::StableMap, Bounds};
-use simgame_voxels::{index_utils, Chunk, UpdatedVoxelsState, VoxelData};
+use simgame_voxels::{index_utils, Chunk, VoxelDelta, VoxelData};
 
 use crate::buffer_util::{BufferSyncHelper, BufferSyncHelperDesc};
 
@@ -164,7 +164,7 @@ impl ChunkState {
         true
     }
 
-    pub fn apply_chunk_diff(&mut self, voxels: &VoxelData, diff: &UpdatedVoxelsState) {
+    pub fn apply_chunk_diff(&mut self, voxels: &VoxelData, diff: &VoxelDelta) {
         let active_chunk_box = match self.active_view_box {
             Some(active_view_box) => view_box_to_chunks(active_view_box),
             None => return,

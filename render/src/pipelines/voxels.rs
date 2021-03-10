@@ -9,7 +9,7 @@ use cgmath::{Matrix4, Point3, Vector3};
 use zerocopy::{AsBytes, FromBytes};
 
 use simgame_util::{convert_point, Bounds};
-use simgame_voxels::{index_utils, UpdatedVoxelsState, VoxelData};
+use simgame_voxels::{index_utils, VoxelDelta, VoxelData};
 
 use crate::buffer_util::{
     BufferSyncHelperDesc, BufferSyncable, BufferSyncedData, FillBuffer, InstancedBuffer,
@@ -46,7 +46,7 @@ pub(crate) struct VoxelRenderInputDelta<'a> {
     pub model: Matrix4<f32>,
     pub view_state: &'a ViewState,
     pub voxels: &'a VoxelData,
-    pub voxel_diff: &'a UpdatedVoxelsState,
+    pub voxel_diff: &'a VoxelDelta,
 }
 
 /// Holds the current state (including GPU buffers) of rendering a particular piece of voxel

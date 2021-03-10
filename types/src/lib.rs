@@ -1,5 +1,5 @@
 use simgame_util::float_octree::Octree as FloatOctree;
-pub use simgame_voxels::{UpdatedVoxelsState, VoxelData};
+pub use simgame_voxels::{VoxelDelta, VoxelData};
 
 pub mod entity;
 pub use entity::Entity;
@@ -18,7 +18,7 @@ pub struct EntityState {
 
 #[derive(Debug)]
 pub struct WorldDelta {
-    pub voxels: UpdatedVoxelsState,
+    pub voxels: VoxelDelta,
 }
 
 impl World {
@@ -42,7 +42,7 @@ impl EntityState {
 impl WorldDelta {
     pub fn new() -> Self {
         Self {
-            voxels: UpdatedVoxelsState::empty(),
+            voxels: VoxelDelta::empty(),
         }
     }
 
