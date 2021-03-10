@@ -2,7 +2,7 @@
 
 layout(location = 0) in vec4 a_Pos;
 layout(location = 1) in vec3 a_Normal;
-layout(location = 2) in uint a_TexId;
+layout(location = 2) in uint a_FaceId;
 layout(location = 3) in vec2 a_TexCoord;
 
 layout(location = 0) out vec4 v_Pos;
@@ -19,6 +19,7 @@ layout(set = 0, binding = 0) uniform Uniforms {
 
 struct InstanceMeta {
   mat4 model;
+  uint[16] faceTexIds;
 };
 
 layout(set = 0, binding = 1) readonly buffer InstanceMetaBuf {
@@ -39,7 +40,7 @@ void main() {
 
   v_Pos = model * a_Pos;
   v_Normal = (model * vec4(a_Normal, 0.0)).xyz;
-  v_TexId = a_TexId;
+  v_TexId = b_InstanceMeta[gl_InstanceIndex].faceTexIds[a_FaceId];
   v_TexCoord = a_TexCoord;
   v_CameraPos = u_CameraPos;
 

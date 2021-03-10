@@ -30,7 +30,7 @@ impl Cube {
                 vertices.push(Vertex {
                     pos: face.vertex_locs[i],
                     normal: [face.normal[0], face.normal[1], face.normal[2]],
-                    tex_index: face_index as u32,
+                    face_id: face_index as u32,
                     tex_coord: face.vertex_tex_coords[i],
                 });
             }
@@ -42,7 +42,7 @@ impl Cube {
     }
 
     pub fn new() -> Self {
-        let tex_coords = [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
+        let tex_coords = [[1.0, 0.0], [0.0, 0.0], [0.0, 1.0], [1.0, 1.0]];
 
         let normals = [
             [0.0, 0.0, 1.0],  // top
@@ -56,17 +56,17 @@ impl Cube {
         let vertices = [
             // top (0, 0, 1)
             [
-                [-1.0, -1.0, 1.0],
-                [1.0, -1.0, 1.0],
                 [1.0, 1.0, 1.0],
                 [-1.0, 1.0, 1.0],
+                [-1.0, -1.0, 1.0],
+                [1.0, -1.0, 1.0],
             ],
             // bottom (0, 0, -1)
             [
-                [-1.0, 1.0, -1.0],
-                [1.0, 1.0, -1.0],
                 [1.0, -1.0, -1.0],
                 [-1.0, -1.0, -1.0],
+                [-1.0, 1.0, -1.0],
+                [1.0, 1.0, -1.0],
             ],
             // right (1, 0, 0)
             [

@@ -9,7 +9,7 @@ use crate::mesh::{Mesh, Vertex};
 #[repr(C)]
 pub struct UnitSphereFace {
     pub detail: u16,
-    pub tex_index: u32,
+    pub face_id: u32,
 }
 
 #[derive(Clone, Copy, Debug, AsBytes, FromBytes, Default)]
@@ -28,34 +28,37 @@ impl UnitSphereFace {
 
         for i in 0..n {
             for j in 0..n {
+                let u = i as f32 / self.detail as f32;
+                let v = j as f32 / self.detail as f32;
+
                 // (square_x, square_y) are coordinates within the square face that we are
                 // projecting from
-                let square_x = 2.0 * i as f32 / self.detail as f32 - 1.0;
-                let square_y = 2.0 * j as f32 / self.detail as f32 - 1.0;
+                let square_x = 2.0 * u - 1.0;
+                let square_y = 2.0 * v - 1.0;
 
-                let x = square_x * (0.5 - square_y * square_y / 6.0).sqrt();
-                let z = square_y * (0.5 - square_x * square_x / 6.0).sqrt();
-                let y = -(1.0 - square_x * square_x / 2.0 - square_y * square_y / 2.0
+                let sphere_x = square_x * (0.5 - square_y * square_y / 6.0).sqrt();
+                let sphere_z = -square_y * (0.5 - square_x * square_x / 6.0).sqrt();
+                let sphere_y = -(1.0 - square_x * square_x / 2.0 - square_y * square_y / 2.0
                     + square_x * square_x * square_y * square_y / 3.0)
                     .sqrt();
 
                 vertices.push(Vertex {
-                    pos: [x, y, z, 1.],
-                    normal: [x, y, z],
-                    tex_index: self.tex_index,
-                    tex_coord: [square_x, square_y],
+                    pos: [sphere_x, sphere_y, sphere_z, 1.],
+                    normal: [sphere_x, sphere_y, sphere_z],
+                    face_id: self.face_id,
+                    tex_coord: [u, v],
                 });
 
                 // each vertex adds indices for the two triangles forming the square below and to
                 // its right
                 if i < n - 1 && j < n - 1 {
-                    indices.push((1 + j) + (1 + i) * n);
+                    indices.push(j + i * n);
                     indices.push((1 + j) + i * n);
-                    indices.push(j + i * n);
-
-                    indices.push(j + i * n);
-                    indices.push(j + (1 + i) * n);
                     indices.push((1 + j) + (1 + i) * n);
+
+                    indices.push((1 + j) + (1 + i) * n);
+                    indices.push(j + (1 + i) * n);
+                    indices.push(j + i * n);
                 }
             }
         }
@@ -66,7 +69,7 @@ impl UnitSphereFace {
     pub fn new() -> Self {
         UnitSphereFace {
             detail: 6,
-            tex_index: 0,
+            face_id: 0,
         }
     }
 }
@@ -90,7 +93,7 @@ impl UnitSphere {
                 transform,
                 &UnitSphereFace {
                     detail: self.detail,
-                    tex_index: face_index as u32,
+                    face_id: face_index as u32,
                 }
                 .mesh(),
             );

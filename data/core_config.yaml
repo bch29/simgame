@@ -74,6 +74,18 @@ resources:
       kind: { Image: { relative_path: tex/voxel/grass_side.png, mip: Mip } }
     - name: tex/voxel/air
       kind: { SolidColor: { red: 255, green: 255, blue: 255 } }
+    - name: tex/entity/top
+      kind: { Image: { relative_path: tex/entity/top.png, mip: Mip } }
+    - name: tex/entity/bottom
+      kind: { Image: { relative_path: tex/entity/bottom.png, mip: Mip } }
+    - name: tex/entity/left
+      kind: { Image: { relative_path: tex/entity/left.png, mip: Mip } }
+    - name: tex/entity/right
+      kind: { Image: { relative_path: tex/entity/right.png, mip: Mip } }
+    - name: tex/entity/front
+      kind: { Image: { relative_path: tex/entity/front.png, mip: Mip } }
+    - name: tex/entity/back
+      kind: { Image: { relative_path: tex/entity/back.png, mip: Mip } }
     # Voxel shaders
     - name: shader/voxels/compute
       kind:

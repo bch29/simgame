@@ -14,7 +14,7 @@ pub type Index = u16;
 pub struct Vertex {
     pub pos: [f32; 4],
     pub normal: [f32; 3],
-    pub tex_index: u32,
+    pub face_id: u32,
     pub tex_coord: [f32; 2],
 }
 
@@ -24,11 +24,11 @@ pub struct Mesh {
     pub indices: Vec<Index>,
 }
 
-pub fn vertex(pos: [f64; 3], tex_coord: [f64; 2], tex_index: u32, normal: [f64; 3]) -> Vertex {
+pub fn vertex(pos: [f64; 3], tex_coord: [f64; 2], face_id: u32, normal: [f64; 3]) -> Vertex {
     Vertex {
         pos: [pos[0] as f32, pos[1] as f32, pos[2] as f32, 1.0],
         normal: [normal[0] as f32, normal[1] as f32, normal[2] as f32],
-        tex_index,
+        face_id,
         tex_coord: [tex_coord[0] as f32, tex_coord[1] as f32],
     }
 }
@@ -63,7 +63,7 @@ impl Mesh {
                     offset: 4 * 4,
                     shader_location: 1,
                 },
-                // tex_index
+                // face_id
                 wgpu::VertexAttribute {
                     format: wgpu::VertexFormat::Uint,
                     offset: 4 * 4 + 3 * 4,
@@ -96,7 +96,7 @@ impl Mesh {
             Vertex {
                 pos: (transform * pos).into(),
                 normal: (transform.transform_vector(normal)).into(),
-                tex_index: vtx.tex_index,
+                face_id: vtx.face_id,
                 tex_coord: vtx.tex_coord,
             }
         }));

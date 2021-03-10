@@ -162,7 +162,7 @@ impl Renderer {
                 &self.ctx,
                 pipeline_params,
                 pipelines::mesh::MeshRenderInput {
-                    mesh: &crate::mesh::sphere::UnitSphere { detail: 20 }.mesh(),
+                    mesh: &crate::mesh::sphere::UnitSphere { detail: 6 }.mesh(),
                     instances: &[],
                     view_state: &view,
                 },
@@ -266,22 +266,49 @@ impl Renderer {
                 voxel_diff: &diff.voxels,
             });
 
-        let models = vec![
-            vec![
-                Matrix4::from_translation(Vector3::new(-50., -50., 60.))
+        let mut face_tex_ids = [0u32; 16];
+        face_tex_ids[0] = self.ctx.textures.resource_index("tex/entity/top").expect("cannot find texture") as u32;
+        face_tex_ids[1] = self.ctx.textures.resource_index("tex/entity/bottom").expect("cannot find texture") as u32;
+        face_tex_ids[2] = self.ctx.textures.resource_index("tex/entity/right").expect("cannot find texture") as u32;
+        face_tex_ids[3] = self.ctx.textures.resource_index("tex/entity/left").expect("cannot find texture") as u32;
+        face_tex_ids[4] = self.ctx.textures.resource_index("tex/entity/back").expect("cannot find texture") as u32;
+        face_tex_ids[5] = self.ctx.textures.resource_index("tex/entity/front").expect("cannot find texture") as u32;
+
+        use pipelines::mesh::MeshInstance;
+
+        let instances: &[&[MeshInstance]] = &[
+            &[MeshInstance {
+                face_tex_ids,
+                transform: Matrix4::from_translation(Vector3::new(-50., -50., 60.))
                     * Matrix4::from_scale(10.),
-            ],
-            vec![
-                Matrix4::from_translation(Vector3::new(10., 10., 80.)) * Matrix4::from_scale(10.),
-                Matrix4::from_translation(Vector3::new(50., 10., 80.)) * Matrix4::from_scale(15.),
-                Matrix4::from_translation(Vector3::new(10., 50., 80.)) * Matrix4::from_scale(5.),
-                Matrix4::from_translation(Vector3::new(50., 50., 100.)) * Matrix4::from_scale(5.),
+            }],
+            &[
+                MeshInstance {
+                    face_tex_ids,
+                    transform: Matrix4::from_translation(Vector3::new(10., 10., 80.))
+                        * Matrix4::from_scale(10.),
+                },
+                MeshInstance {
+                    face_tex_ids,
+                    transform: Matrix4::from_translation(Vector3::new(50., 10., 80.))
+                        * Matrix4::from_scale(15.),
+                },
+                MeshInstance {
+                    face_tex_ids,
+                    transform: Matrix4::from_translation(Vector3::new(10., 50., 80.))
+                        * Matrix4::from_scale(5.),
+                },
+                MeshInstance {
+                    face_tex_ids,
+                    transform: Matrix4::from_translation(Vector3::new(50., 50., 100.))
+                        * Matrix4::from_scale(5.),
+                },
             ],
         ];
 
-        for (model, mesh) in models.into_iter().zip(&mut state.meshes) {
+        for (instances, mesh) in instances.iter().zip(&mut state.meshes) {
             mesh.update(pipelines::mesh::MeshRenderInputDelta {
-                instances: model.as_slice(),
+                instances,
                 view_state: &state.view,
             });
         }

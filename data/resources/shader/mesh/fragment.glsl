@@ -1,5 +1,7 @@
 #version 450
 
+#extension GL_EXT_nonuniform_qualifier : require
+
 layout(location = 0) in vec4 v_Pos;
 layout(location = 1) in vec3 v_Normal;
 layout(location = 2) flat in uint v_TexId;
@@ -8,8 +10,8 @@ layout(location = 4) in vec3 v_CameraPos;
 
 layout(location = 0) out vec4 o_Target;
 
-/* layout(set = 0, binding = 1) uniform texture2D t_Texture; */
-/* layout(set = 0, binding = 2) uniform sampler s_Texture; */
+layout(set = 0, binding = 6) uniform texture2D[] t_Textures;
+layout(set = 0, binding = 7) uniform sampler s_Textures;
 
 const vec4 ambientColor = vec4(1.0, 1.0, 1.0, 1.0);
 const float ambientStrength = 0.1;
@@ -32,16 +34,18 @@ float spot(vec2 p) {
 }
 
 void main() {
-  vec4[6] colors = {
-    vec4(1.0, 0.0, 0.0, 1.0),
-    vec4(0.0, 1.0, 0.0, 1.0),
-    vec4(0.0, 0.0, 1.0, 1.0),
-    vec4(0.5, 0.5, 0.0, 1.0),
-    vec4(0.0, 0.5, 0.5, 1.0),
-    vec4(0.5, 0.0, 0.5, 1.0)
-  };
+  /* vec4[6] colors = { */
+  /*   vec4(1.0, 0.0, 0.0, 1.0), */
+  /*   vec4(0.0, 1.0, 0.0, 1.0), */
+  /*   vec4(0.0, 0.0, 1.0, 1.0), */
+  /*   vec4(0.5, 0.5, 0.0, 1.0), */
+  /*   vec4(0.0, 0.5, 0.5, 1.0), */
+  /*   vec4(0.5, 0.0, 0.5, 1.0) */
+  /* }; */
 
-  vec4 texColor = colors[v_TexId % 6];
+  /* vec4 texColor = colors[v_TexId % 6]; */
+
+  vec4 texColor = texture(sampler2D(t_Textures[v_TexId], s_Textures), v_TexCoord);
 
   vec4 ambient = ambientStrength * ambientColor;
   vec3 norm = normalize(v_Normal);
@@ -50,7 +54,6 @@ void main() {
   vec4 diffuse = diff * lightColor;
 
   o_Target = (ambient + diffuse) * texColor;
-  /* o_Target = texColor; */
 }
 
 // vi: ft=c
