@@ -89,20 +89,23 @@ where
             .ok_or_else(|| anyhow!("Failed to request wgpu::Adaptor"))?;
 
         let device_result: DeviceResult = request_device(&params, &adapter).await?;
+
+        let textures = self
+            .resource_loader
+            .load_textures(&device_result.device, &device_result.queue)?;
+
         let ctx = GraphicsContext {
             device: device_result.device,
             queue: device_result.queue,
             multi_draw_enabled: device_result.multi_draw_enabled,
             resource_loader: self.resource_loader,
+            textures,
         };
 
         let pipelines = {
             let voxel = {
-                let voxel_info_manager = pipelines::voxels::VoxelInfoManager::new(
-                    self.voxel_helper,
-                    &ctx.resource_loader,
-                    &ctx,
-                )?;
+                let voxel_info_manager =
+                    pipelines::voxels::VoxelInfoManager::new(self.voxel_helper, &ctx)?;
                 pipelines::voxels::VoxelRenderPipeline::new(&ctx, voxel_info_manager)?
             };
             let mesh = pipelines::mesh::MeshRenderPipeline::new(&ctx)?;

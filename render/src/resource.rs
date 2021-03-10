@@ -18,6 +18,16 @@ pub struct ResourceLoader {
     options: ResourceOptions,
 }
 
+pub(crate) struct Textures {
+    textures: Vec<TextureData>,
+    index_map: HashMap<String, usize>, // maps texture resource name to location in array
+}
+
+pub(crate) struct TextureData {
+    pub texture: wgpu::Texture,
+    pub mip_level_count: u32,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ResourceOptions {
     pub recompile_option: RecompileOption,
@@ -41,6 +51,7 @@ pub struct ResourceConfig {
 pub enum ResourceKind {
     Image {
         relative_path: PathBuf,
+        mip: MipType,
     },
     SolidColor {
         red: u8,
@@ -53,13 +64,22 @@ pub enum ResourceKind {
     },
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum MipType {
+    NoMip,
+    Mip,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Resource {
     pub name: String,
     pub kind: ResourceKind,
 }
 
-pub type ImageReader = image::io::Reader<BufReader<File>>;
+pub struct LoadedImage {
+    pub sample_generator: Box<dyn SampleGenerator>,
+    pub mip: MipType,
+}
 
 impl ResourceLoader {
     pub fn new(
@@ -67,16 +87,16 @@ impl ResourceLoader {
         config: ResourceConfig,
         options: ResourceOptions,
     ) -> Result<Self> {
-        let resources = config
-            .resources
-            .iter()
-            .map(|res| {
-                if res.name.is_empty() {
-                    bail!("Resource {:?} has empty name", res);
-                }
-                Ok((res.name.clone(), res.clone()))
-            })
-            .collect::<Result<_>>()?;
+        let mut resources: HashMap<String, Resource> = HashMap::new();
+        for res in &config.resources {
+            if res.name.is_empty() {
+                bail!("Resource {:?} has empty name", res);
+            }
+            if resources.contains_key(res.name.as_str()) {
+                bail!("Duplicate resource name {:?}", res.name);
+            }
+            resources.insert(res.name.clone(), res.clone());
+        }
 
         if let RecompileOption::Subset(subset) = &options.recompile_option {
             let all_shaders: HashSet<String> = config
@@ -119,16 +139,37 @@ impl ResourceLoader {
         })
     }
 
-    pub fn load_image(&self, name: &str) -> Result<Box<dyn SampleGenerator>> {
+    pub fn load_image(&self, name: &str) -> Result<LoadedImage> {
         let resource = self.get_resource(name)?;
+        if let Some(res) = self.load_image_impl(resource)? {
+            Ok(res)
+        } else {
+            bail!(
+                "Resource {:?} was loaded as an image, but configured as {:?}",
+                resource.name,
+                resource.kind
+            )
+        }
+    }
 
+    fn load_image_impl(&self, resource: &Resource) -> Result<Option<LoadedImage>> {
         match resource.kind {
-            ResourceKind::Image { ref relative_path } => {
+            ResourceKind::Image {
+                ref relative_path,
+                mip,
+            } => {
+                log::info!(
+                    "Loading texture from file {:?}",
+                    relative_path
+                );
                 let file = self.open_relative_path(relative_path.as_path())?;
                 let reader = image::io::Reader::new(file).with_guessed_format()?;
                 let image = reader.decode()?;
-                Ok(Box::new(sample_gen::ImageSampleGenerator {
-                    image: image.to_rgba8(),
+                Ok(Some(LoadedImage {
+                    sample_generator: Box::new(sample_gen::ImageSampleGenerator {
+                        image: image.to_rgba8(),
+                    }),
+                    mip,
                 }))
             }
             ResourceKind::SolidColor { red, green, blue } => {
@@ -138,17 +179,16 @@ impl ResourceLoader {
                     green,
                     blue
                 );
-                Ok(Box::new(sample_gen::SolidColorSampleGenerator {
-                    red,
-                    green,
-                    blue,
+                Ok(Some(LoadedImage {
+                    sample_generator: Box::new(sample_gen::SolidColorSampleGenerator {
+                        red,
+                        green,
+                        blue,
+                    }),
+                    mip: MipType::NoMip,
                 }))
             }
-            _ => bail!(
-                "Resource {:?} was loaded as an image, but configured as {:?}",
-                name,
-                resource.kind
-            ),
+            _ => Ok(None),
         }
     }
 
@@ -271,6 +311,155 @@ impl ResourceLoader {
         res.push(relative_path);
         res
     }
+
+    pub(crate) fn load_textures(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+    ) -> Result<Textures> {
+        let mut textures: Vec<TextureData> = Vec::new();
+        let mut index_map: HashMap<String, usize> = HashMap::new();
+
+        for resource in self.resources.values() {
+            if let Some(img) = self.load_image_impl(resource)? {
+                let texture = Self::make_texture(
+                    device,
+                    queue,
+                    resource.name.as_str(),
+                    textures.len(),
+                    img.sample_generator.as_ref(),
+                    img.mip,
+                )?;
+                index_map.insert(resource.name.clone(), textures.len());
+                textures.push(texture);
+            }
+        }
+
+        Ok(Textures {
+            textures,
+            index_map,
+        })
+    }
+
+    fn make_texture(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        name: &str,
+        index: usize,
+        sample_generator: &dyn SampleGenerator,
+        mip_type: MipType,
+    ) -> Result<TextureData> {
+        log::info!("Creating texture {:?} with index {}", name, index);
+
+        let (width, height) = sample_generator.source_dimensions();
+
+        match mip_type {
+            MipType::NoMip => {
+                let texture = device.create_texture(&wgpu::TextureDescriptor {
+                    label: Some(name),
+                    size: wgpu::Extent3d {
+                        width,
+                        height,
+                        depth: 1,
+                    },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                    usage: wgpu::TextureUsage::COPY_DST | wgpu::TextureUsage::SAMPLED,
+                });
+                let copy_view = wgpu::TextureCopyView {
+                    texture: &texture,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d { x: 0, y: 0, z: 0 },
+                };
+
+                let (samples, bytes_per_row) = sample_generator.generate(width, height);
+
+                queue.write_texture(
+                    copy_view,
+                    samples.as_slice(),
+                    wgpu::TextureDataLayout {
+                        offset: 0,
+                        bytes_per_row,
+                        rows_per_image: 0,
+                    },
+                    wgpu::Extent3d {
+                        width,
+                        height,
+                        depth: 1,
+                    },
+                );
+
+                Ok(TextureData {
+                    texture,
+                    mip_level_count: 1,
+                })
+            }
+            MipType::Mip => {
+                if log2_exact(width).is_none() || log2_exact(height).is_none() {
+                    bail!(
+                        "Texture resource {:?} has dimensions {}x{}. Expected powers of 2 for mipped textures.",
+                        name,
+                        width,
+                        height
+                    );
+                }
+
+                let mip_level_count = log2_exact(width.min(height))
+                    .expect("expected dimensions to be powers of 2")
+                    .max(1);
+
+                let texture = device.create_texture(&wgpu::TextureDescriptor {
+                    label: Some("voxel texture array"),
+                    size: wgpu::Extent3d {
+                        width,
+                        height,
+                        depth: 1,
+                    },
+                    mip_level_count,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                    usage: wgpu::TextureUsage::COPY_DST | wgpu::TextureUsage::SAMPLED,
+                });
+
+                log::info!("writing mip levels for {:?}", name);
+                for mip_level in 0..mip_level_count {
+                    let (mip_width, mip_height) = (width >> mip_level, height >> mip_level);
+
+                    let copy_view = wgpu::TextureCopyView {
+                        texture: &texture,
+                        mip_level,
+                        origin: wgpu::Origin3d { x: 0, y: 0, z: 0 },
+                    };
+
+                    let (samples, bytes_per_row) =
+                        sample_generator.generate(mip_width, mip_height);
+
+                    queue.write_texture(
+                        copy_view,
+                        samples.as_slice(),
+                        wgpu::TextureDataLayout {
+                            offset: 0,
+                            bytes_per_row,
+                            rows_per_image: 0,
+                        },
+                        wgpu::Extent3d {
+                            width: mip_width,
+                            height: mip_height,
+                            depth: 1,
+                        },
+                    );
+                }
+
+                Ok(TextureData {
+                    texture,
+                    mip_level_count,
+                })
+            }
+        }
+    }
 }
 
 pub use sample_gen::SampleGenerator;
@@ -337,5 +526,41 @@ pub mod sample_gen {
         fn source_dimensions(&self) -> (u32, u32) {
             (1, 1)
         }
+    }
+}
+
+impl Textures {
+    pub fn textures(&self) -> &[TextureData] {
+        self.textures.as_slice()
+    }
+
+    pub fn resource_index(&self, name: &str) -> Result<usize> {
+        self.index_map.get(name).copied().ok_or_else(|| {
+            anyhow!("Could not find texture for resource {}. Resource either does not exist or is not a texture")
+        })
+    }
+
+    pub fn from_resource(&self, name: &str) -> Result<&TextureData> {
+        Ok(&self.textures[self.resource_index(name)?])
+    }
+}
+
+/// If the value is a power of 2, returns its log base 2. Otherwise, returns `None`.
+fn log2_exact(value: u32) -> Option<u32> {
+    if value == 0 {
+        return None;
+    }
+
+    let mut log2 = 0;
+    let mut shifted = value;
+    while shifted > 1 {
+        shifted >>= 1;
+        log2 += 1;
+    }
+
+    if 1 << log2 == value {
+        Some(log2)
+    } else {
+        None
     }
 }

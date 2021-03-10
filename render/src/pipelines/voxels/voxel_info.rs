@@ -1,21 +1,16 @@
 use std::collections::HashMap;
 use std::convert::TryInto;
 
-use anyhow::{anyhow, bail, Result};
+use anyhow::{anyhow, Result};
 use zerocopy::{AsBytes, FromBytes};
 
 use simgame_voxels::{config as voxel, VoxelConfigHelper};
 
 use crate::buffer_util::{InstancedBuffer, InstancedBufferDesc};
 use crate::mesh::cube::Cube;
-use crate::resource::ResourceLoader;
 
 /// Manages all GPU buffers that are static for any given set of voxel types.
 pub(crate) struct VoxelInfoManager {
-    pub index_map: HashMap<voxel::FaceTexture, usize>,
-
-    #[allow(unused)]
-    texture_arr: Vec<TextureData>,
     pub texture_arr_views: Vec<wgpu::TextureView>,
     pub sampler: wgpu::Sampler,
 
@@ -39,41 +34,22 @@ struct VoxelRenderInfo {
     vertex_data: Cube,
 }
 
-struct TextureData {
-    texture: wgpu::Texture,
-    mip_level_count: u32,
-}
-
 impl VoxelInfoManager {
-    pub fn new(
-        config: &VoxelConfigHelper,
-        resource_loader: &ResourceLoader,
-        ctx: &crate::GraphicsContext,
-    ) -> Result<Self> {
-        let index_map = config.texture_index_map();
-        log::info!("Got {} voxel textures total", index_map.len());
+    pub fn new(config: &VoxelConfigHelper, ctx: &crate::GraphicsContext) -> Result<Self> {
+        let index_map = config
+            .all_face_textures()
+            .into_iter()
+            .map(|face_tex| {
+                let index = ctx
+                    .textures
+                    .resource_index(face_tex.resource.as_str())?;
+                Ok((face_tex, index))
+            })
+            .collect::<Result<HashMap<_, _>>>()?;
 
-        let face_texes = {
-            let mut face_texes: Vec<_> = index_map
-                .iter()
-                .map(|(face_tex, &index)| (index, face_tex))
-                .collect();
-            face_texes.sort_by_key(|(index, _)| *index);
-            face_texes
-        };
-
-        let texture_arr: Vec<TextureData> = {
-            let mut res: Vec<(usize, TextureData)> = face_texes
-                .into_iter()
-                .map(|(index, face_tex)| {
-                    Ok((index, Self::make_texture(ctx, resource_loader, face_tex)?))
-                })
-                .collect::<Result<_>>()?;
-            res.sort_by_key(|(index, _)| *index);
-            res.into_iter().map(|(_, tex)| tex).collect()
-        };
-
-        let texture_arr_views = texture_arr
+        let texture_arr_views = ctx
+            .textures
+            .textures()
             .iter()
             .map(|data| {
                 data.texture.create_view(&wgpu::TextureViewDescriptor {
@@ -124,7 +100,7 @@ impl VoxelInfoManager {
             InstancedBufferDesc {
                 label: "texture metadata",
                 instance_len: std::mem::size_of::<VoxelTextureMetadata>(),
-                n_instances: index_map.len(),
+                n_instances: ctx.textures.textures().len(),
                 usage: wgpu::BufferUsage::STORAGE | wgpu::BufferUsage::COPY_DST,
             },
         );
@@ -135,10 +111,7 @@ impl VoxelInfoManager {
         }
 
         Ok(Self {
-            index_map,
-
             texture_arr_views,
-            texture_arr,
             sampler,
 
             voxel_info_buf,
@@ -146,74 +119,8 @@ impl VoxelInfoManager {
         })
     }
 
-    fn make_texture(
-        ctx: &crate::GraphicsContext,
-        resource_loader: &ResourceLoader,
-        face_tex: &voxel::FaceTexture,
-    ) -> Result<TextureData> {
-        log::info!("Loading voxel texture {:?}", face_tex.resource);
-        let sample_generator = resource_loader.load_image(face_tex.resource.as_str())?;
-
-        let (width, height) = sample_generator.source_dimensions();
-        if log2_exact(width).is_none() || log2_exact(height).is_none() {
-            bail!(
-                "Voxel texture resource {:?} has dimensions {}x{}. Expected powers of 2.",
-                face_tex,
-                width,
-                height
-            );
-        }
-
-        let mip_level_count = log2_exact(width.min(height))
-            .expect("expected dimensions to be powers of 2")
-            .max(1);
-
-        let texture = ctx.device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("voxel texture array"),
-            size: wgpu::Extent3d {
-                width,
-                height,
-                depth: 1,
-            },
-            mip_level_count,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8UnormSrgb,
-            usage: wgpu::TextureUsage::COPY_DST | wgpu::TextureUsage::SAMPLED,
-        });
-
-        log::info!("writing mip levels for {:?}", face_tex);
-        for mip_level in 0..mip_level_count {
-            let (mip_width, mip_height) = (width >> mip_level, height >> mip_level);
-
-            let copy_view = wgpu::TextureCopyView {
-                texture: &texture,
-                mip_level,
-                origin: wgpu::Origin3d { x: 0, y: 0, z: 0 },
-            };
-
-            let (samples, bytes_per_row) = sample_generator.generate(mip_width, mip_height);
-
-            ctx.queue.write_texture(
-                copy_view,
-                samples.as_slice(),
-                wgpu::TextureDataLayout {
-                    offset: 0,
-                    bytes_per_row,
-                    rows_per_image: 0,
-                },
-                wgpu::Extent3d {
-                    width: mip_width,
-                    height: mip_height,
-                    depth: 1,
-                },
-            );
-        }
-
-        Ok(TextureData {
-            texture,
-            mip_level_count,
-        })
+    pub fn texture_array(&self) -> &[wgpu::TextureView] {
+        self.texture_arr_views.as_slice()
     }
 
     fn get_voxel_render_info(
@@ -258,25 +165,5 @@ impl VoxelInfoManager {
             x_periodicity: face_tex.x_periodicity.unwrap_or(1),
             y_periodicity: face_tex.y_periodicity.unwrap_or(1),
         }
-    }
-}
-
-/// If the value is a power of 2, returns its log base 2. Otherwise, returns `None`.
-fn log2_exact(value: u32) -> Option<u32> {
-    if value == 0 {
-        return None;
-    }
-
-    let mut log2 = 0;
-    let mut shifted = value;
-    while shifted > 1 {
-        shifted >>= 1;
-        log2 += 1;
-    }
-
-    if 1 << log2 == value {
-        Some(log2)
-    } else {
-        None
     }
 }

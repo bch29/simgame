@@ -9,6 +9,7 @@ pub(crate) struct GraphicsContext {
     pub device: wgpu::Device,
     pub queue: wgpu::Queue,
     pub resource_loader: crate::resource::ResourceLoader,
+    pub textures: crate::resource::Textures,
     pub multi_draw_enabled: bool,
 }
 

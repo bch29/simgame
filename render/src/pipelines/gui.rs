@@ -51,47 +51,11 @@ impl GuiRenderPipeline {
                 ),
             });
 
-        let crosshair_texture: wgpu::TextureView = {
-            let sample_generator = ctx.resource_loader.load_image("tex/gui/crosshair")?;
-            let (width, height) = sample_generator.source_dimensions();
-
-            let size = wgpu::Extent3d {
-                width,
-                height,
-                depth: 1,
-            };
-
-            let texture = ctx.device.create_texture(&wgpu::TextureDescriptor {
-                label: Some("crosshair"),
-                size,
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: wgpu::TextureDimension::D2,
-                format: wgpu::TextureFormat::Rgba8UnormSrgb,
-                usage: wgpu::TextureUsage::COPY_DST | wgpu::TextureUsage::SAMPLED,
-            });
-
-            let copy_view = wgpu::TextureCopyView {
-                texture: &texture,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-            };
-
-            let (samples, bytes_per_row) = sample_generator.generate(width, height);
-
-            ctx.queue.write_texture(
-                copy_view,
-                samples.as_slice(),
-                wgpu::TextureDataLayout {
-                    offset: 0,
-                    bytes_per_row,
-                    rows_per_image: 0,
-                },
-                size,
-            );
-
-            texture.create_view(&Default::default())
-        };
+        let crosshair_texture = ctx
+            .textures
+            .from_resource("tex/gui/crosshair")?
+            .texture
+            .create_view(&Default::default());
 
         let bind_group_layout =
             ctx.device

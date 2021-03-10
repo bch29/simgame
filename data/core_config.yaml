@@ -58,20 +58,20 @@ resources:
   resources:
     # GUI textures
     - name: tex/gui/crosshair
-      kind: { Image: { relative_path: tex/gui/crosshair.png } }
+      kind: { Image: { relative_path: tex/gui/crosshair.png, mip: NoMip } }
     # Voxel textures
     - name: tex/voxel/rock
-      kind: { Image: { relative_path: tex/voxel/rock.png } }
+      kind: { Image: { relative_path: tex/voxel/rock.png, mip: Mip } }
     - name: tex/voxel/leaf
-      kind: { Image: { relative_path: tex/voxel/leaf.png } }
+      kind: { Image: { relative_path: tex/voxel/leaf.png, mip: Mip } }
     - name: tex/voxel/wood
-      kind: { Image: { relative_path: tex/voxel/wood.png } }
+      kind: { Image: { relative_path: tex/voxel/wood.png, mip: Mip } }
     - name: tex/voxel/dirt
-      kind: { Image: { relative_path: tex/voxel/dirt.png } }
+      kind: { Image: { relative_path: tex/voxel/dirt.png, mip: Mip } }
     - name: tex/voxel/grass_top
-      kind: { Image: { relative_path: tex/voxel/grass_top.png } }
+      kind: { Image: { relative_path: tex/voxel/grass_top.png, mip: Mip } }
     - name: tex/voxel/grass_side
-      kind: { Image: { relative_path: tex/voxel/grass_side.png } }
+      kind: { Image: { relative_path: tex/voxel/grass_side.png, mip: Mip } }
     - name: tex/voxel/air
       kind: { SolidColor: { red: 255, green: 255, blue: 255 } }
     # Voxel shaders

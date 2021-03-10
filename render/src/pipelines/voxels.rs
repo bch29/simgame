@@ -15,8 +15,8 @@ use crate::buffer_util::{
     BufferSyncHelperDesc, BufferSyncable, BufferSyncedData, FillBuffer, InstancedBuffer,
     InstancedBufferDesc, IntoBufferSynced,
 };
-use crate::ViewState;
 use crate::pipelines;
+use crate::ViewState;
 
 use chunk_state::ChunkState;
 pub(crate) use voxel_info::VoxelInfoManager;
@@ -308,7 +308,7 @@ impl VoxelRenderPipeline {
                             binding: 6,
                             visibility: wgpu::ShaderStage::FRAGMENT,
                             count: Some(
-                                (voxel_info.index_map.len() as u32)
+                                (voxel_info.texture_array().len() as u32)
                                     .try_into()
                                     .expect("index map len must be nonzero"),
                             ),
@@ -529,7 +529,7 @@ impl VoxelRenderPipeline {
                     binding: 6,
                     resource: wgpu::BindingResource::TextureViewArray(
                         self.voxel_info
-                            .texture_arr_views
+                            .texture_array()
                             .iter()
                             .collect::<Vec<_>>()
                             .as_slice(),
@@ -609,7 +609,7 @@ impl pipelines::Pipeline for VoxelRenderPipeline {
         self.render_pass(ctx, load_action, frame_render, state);
 
         metrics::timing!(
-            "render.world.voxels.update_buffers",
+            "render.pipelines.voxels.update_buffers",
             ts_update.duration_since(ts_begin)
         );
     }
@@ -667,11 +667,7 @@ impl<'a> pipelines::State<'a> for VoxelRenderState {
         *self.render_stage.uniforms = RenderUniforms::new(input.view_state, input.model);
     }
 
-    fn update_window(
-        &mut self,
-        _ctx: &crate::GraphicsContext,
-        params: pipelines::Params,
-    ) {
+    fn update_window(&mut self, _ctx: &crate::GraphicsContext, params: pipelines::Params) {
         self.render_stage.depth_texture = params.depth_texture.create_view(&Default::default());
     }
 }
@@ -698,7 +694,7 @@ impl BufferSyncable for RenderUniforms {
 impl IntoBufferSynced for RenderUniforms {
     fn buffer_sync_desc(&self) -> BufferSyncHelperDesc {
         BufferSyncHelperDesc {
-            label: "world voxels render uniforms",
+            label: "voxel render uniforms",
             buffer_len: 1,
             max_chunk_len: 1,
             usage: wgpu::BufferUsage::UNIFORM | wgpu::BufferUsage::COPY_DST,

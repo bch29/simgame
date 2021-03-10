@@ -1,4 +1,4 @@
-use std::collections::{hash_map, HashMap};
+use std::collections::{HashMap, HashSet};
 
 use anyhow::{bail, Result};
 use serde::{Deserialize, Serialize};
@@ -113,48 +113,22 @@ impl VoxelConfigHelper {
         &self.voxels_by_id[..]
     }
 
-    pub fn texture_index_map(&self) -> HashMap<FaceTexture, usize> {
-        let mut index_map: HashMap<FaceTexture, usize> = HashMap::new();
-        let mut index = 0;
-
-        let mut insert = |face_tex: FaceTexture| -> usize {
-            let entry = index_map.entry(face_tex);
-            match entry {
-                hash_map::Entry::Occupied(entry) => *entry.get(),
-                hash_map::Entry::Vacant(entry) => {
-                    let res = *entry.insert(index);
-                    index += 1;
-                    res
-                }
-            }
-        };
+    pub fn all_face_textures(&self) -> HashSet<FaceTexture> {
+        let mut result = HashSet::new();
 
         for voxel in self.voxels() {
             match voxel.texture.clone() {
                 VoxelTexture::Uniform(face_tex) => {
-                    let index = insert(face_tex);
-                    log::info!(
-                        "Voxel {} gets a uniform texture with index {}",
-                        voxel.name,
-                        index
-                    );
+                    result.insert(face_tex);
                 }
                 VoxelTexture::Nonuniform { top, bottom, side } => {
-                    let index_top = insert(top);
-                    let index_bottom = insert(bottom);
-                    let index_side = insert(side);
-
-                    log::info!(
-                        "Voxel {} gets a non-uniform texture with indices {}/{}/{}",
-                        voxel.name,
-                        index_top,
-                        index_bottom,
-                        index_side
-                    );
+                    result.insert(top);
+                    result.insert(bottom);
+                    result.insert(side);
                 }
             }
         }
 
-        index_map
+        result
     }
 }
