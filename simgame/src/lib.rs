@@ -64,6 +64,7 @@ pub struct TestRenderBuilder<'a> {
 }
 
 pub struct TestRender {
+    directory: Arc<Directory>,
     world: Arc<Mutex<World>>,
     world_state: WorldState,
     win_dimensions: Vector2<f64>,
@@ -260,13 +261,14 @@ impl<'a> TestRenderBuilder<'a> {
         let world_state = {
             WorldStateBuilder {
                 world: world.clone(),
-                directory,
+                directory: directory.clone(),
                 tree_config: self.test_params.tree.as_ref(),
             }
             .build()?
         };
 
         Ok(TestRender {
+            directory,
             world,
             world_state,
             win_dimensions,
@@ -340,6 +342,7 @@ impl TestRender {
                     ..
                 } => {
                     self.world_state.on_click(
+                        &*self.directory,
                         &self.world,
                         convert_point!(self.view_params.effective_camera_pos(), f64),
                         convert_vec!(self.view_params.look_at_dir, f64),
@@ -413,7 +416,7 @@ impl TestRender {
 
         {
             let world = self.world.lock().unwrap();
-            let entities = self.world_state.active_entities(&*world, None)?;
+            let entities = self.world_state.active_entities(&*self.directory, &*world, None)?;
             let world_diff = self.world_state.world_diff()?;
 
             self.renderer.update(

@@ -288,7 +288,7 @@ impl Renderer {
         for entity in entities {
             let mut face_tex_ids = [0; 16];
             let count_faces = entity.face_tex_ids.len().min(16);
-            face_tex_ids[..count_faces].clone_from_slice(entity.face_tex_ids.as_slice());
+            face_tex_ids[..count_faces].clone_from_slice(entity.face_tex_ids);
 
             let instance = MeshInstance {
                 face_tex_ids,

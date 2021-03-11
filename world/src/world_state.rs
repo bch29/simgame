@@ -26,7 +26,6 @@ pub struct WorldStateBuilder<'a> {
 /// background state.
 pub struct WorldState {
     connection: Option<background_object::Connection<BackgroundState>>,
-    directory: Arc<Directory>,
 }
 
 /// Handles background updates. While locked on the world mutex, the rendering thread will be
@@ -74,7 +73,6 @@ impl<'a> WorldStateBuilder<'a> {
 
         Ok(WorldState {
             connection: Some(connection),
-            directory: self.directory,
         })
     }
 }
@@ -96,6 +94,7 @@ impl WorldState {
 
     pub fn on_click(
         &mut self,
+        directory: &Directory,
         world: &Mutex<World>,
         camera_pos: Point3<f64>,
         camera_facing: Vector3<f64>,
@@ -107,7 +106,7 @@ impl WorldState {
 
         let raycast_hit = {
             let world = world.lock().map_err(|_| anyhow!("world mutex poisoned"))?;
-            match world.voxels.cast_ray(&ray, &self.directory.voxel) {
+            match world.voxels.cast_ray(&ray, &directory.voxel) {
                 None => return Ok(()),
                 Some(raycast_hit) => raycast_hit,
             }
@@ -136,12 +135,13 @@ impl WorldState {
         connection.send_user(action)
     }
 
-    /// Iterates over active entities within the given bounds, for rendering.
-    pub fn active_entities(
+    /// Returns active entities within the given bounds, for rendering.
+    pub fn active_entities<'a>(
         &self,
+        directory: &'a Directory,
         world: &World,
         bounds: Option<Bounds<f64>>,
-    ) -> Result<Vec<ActiveEntityModel>> {
+    ) -> Result<Vec<ActiveEntityModel<'a>>> {
         let mut result = Vec::new();
 
         world
@@ -151,7 +151,7 @@ impl WorldState {
                 let location = bounds.center();
                 let entity = &world.entities.entities[index];
 
-                let model = self.directory.entity.model(entity.model)?;
+                let model = directory.entity.model(entity.model)?;
 
                 let transform =
                     Matrix4::from_translation(convert_point!(location, f32) - Point3::origin())
@@ -159,7 +159,7 @@ impl WorldState {
 
                 result.push(ActiveEntityModel {
                     model_kind: model.kind.clone(),
-                    face_tex_ids: model.face_texture_ids.clone(),
+                    face_tex_ids: &model.face_texture_ids,
                     transform,
                 });
                 Ok(())

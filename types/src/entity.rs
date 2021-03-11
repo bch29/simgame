@@ -50,10 +50,11 @@ pub struct ConcreteModel {
     pub bounds: Bounds<f64>,
 }
 
-pub struct ActiveEntityModel {
+#[derive(Debug, Clone)]
+pub struct ActiveEntityModel<'a> {
     pub model_kind: config::ModelKind,
     pub transform: Matrix4<f32>,
-    pub face_tex_ids: Vec<u32>,
+    pub face_tex_ids: &'a [u32],
 }
 
 pub mod config {
