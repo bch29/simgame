@@ -17,6 +17,7 @@ pub(crate) struct MeshRenderPipeline {
     bind_group_layout: wgpu::BindGroupLayout,
     texture_arr_views: Vec<wgpu::TextureView>,
     sampler: wgpu::Sampler,
+    instance_buffer: InstancedBuffer,
 }
 
 pub(crate) struct MeshRenderState {
@@ -59,7 +60,6 @@ struct MeshInstanceData {
 }
 
 struct GeometryBuffers {
-    instances: InstancedBuffer,
     vertices: InstancedBuffer,
     indexes: InstancedBuffer,
 }
@@ -237,11 +237,22 @@ impl MeshRenderPipeline {
                 },
             });
 
+        let instance_buffer = InstancedBuffer::new(
+            &ctx.device,
+            InstancedBufferDesc {
+                label: "mesh instances",
+                instance_len: std::mem::size_of::<MeshInstanceData>() * INSTANCES_PER_PASS,
+                n_instances: 1,
+                usage: wgpu::BufferUsage::COPY_DST | wgpu::BufferUsage::STORAGE,
+            },
+        );
+
         Ok(MeshRenderPipeline {
             pipeline,
             bind_group_layout,
             texture_arr_views,
             sampler,
+            instance_buffer,
         })
     }
 }
@@ -281,16 +292,6 @@ impl pipelines::Pipeline for MeshRenderPipeline {
         uniforms.sync(&ctx.queue);
 
         let geometry_buffers = {
-            let instances = InstancedBuffer::new(
-                &ctx.device,
-                InstancedBufferDesc {
-                    label: "mesh instances",
-                    instance_len: std::mem::size_of::<MeshInstanceData>() * INSTANCES_PER_PASS,
-                    n_instances: 1,
-                    usage: wgpu::BufferUsage::COPY_DST | wgpu::BufferUsage::STORAGE,
-                },
-            );
-
             let vertices = InstancedBuffer::new(
                 &ctx.device,
                 InstancedBufferDesc {
@@ -315,11 +316,7 @@ impl pipelines::Pipeline for MeshRenderPipeline {
             );
             indexes.write(&ctx.queue, 0, input.mesh.indices.as_bytes());
 
-            GeometryBuffers {
-                instances,
-                vertices,
-                indexes,
-            }
+            GeometryBuffers { vertices, indexes }
         };
 
         Ok(MeshRenderState {
@@ -356,7 +353,7 @@ impl pipelines::Pipeline for MeshRenderPipeline {
                 wgpu::BindGroupEntry {
                     binding: 1,
                     resource: wgpu::BindingResource::Buffer {
-                        buffer: state.geometry_buffers.instances.buffer(),
+                        buffer: self.instance_buffer.buffer(),
                         offset: 0,
                         size: None,
                     },
@@ -378,9 +375,7 @@ impl pipelines::Pipeline for MeshRenderPipeline {
             let n_indexes = state.geometry_buffers.indexes.size() as u32
                 / std::mem::size_of::<crate::mesh::Index>() as u32;
 
-            state
-                .geometry_buffers
-                .instances
+            self.instance_buffer
                 .write(&ctx.queue, 0, instance_chunk.as_bytes());
 
             let mut rpass = frame_render
