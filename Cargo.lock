@@ -2147,6 +2147,7 @@ dependencies = [
  "serde",
  "serde_yaml",
  "simgame_render",
+ "simgame_types",
  "simgame_util",
  "simgame_voxels",
  "simgame_world",

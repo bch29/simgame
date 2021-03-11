@@ -7,6 +7,7 @@ use structopt::StructOpt;
 
 use simgame::files::FileContext;
 use simgame_render::resource::{self, ResourceLoader};
+use simgame_types::entity;
 use simgame_voxels::VoxelConfigHelper;
 use simgame_world::{worldgen, World};
 
@@ -120,12 +121,22 @@ async fn run_render_world(ctx: &FileContext, options: &RenderWorldOpts) -> Resul
 
     let voxel_helper = VoxelConfigHelper::new(&ctx.core_settings.voxel_config)?;
 
+    let texture_index_map = resource_loader.texture_index_map()?;
+    let entity_directory =
+        entity::Directory::new(&ctx.core_settings.entity_config, Vec::new(), |tex_name| {
+            let index = *texture_index_map
+                .get(tex_name)
+                .ok_or_else(|| anyhow!("texture not mapped: {:?}", tex_name))?;
+            Ok(index as u32)
+        })?;
+
     simgame::test_render(
         world,
         settings.render_test_params,
         params,
         resource_loader,
         voxel_helper,
+        entity_directory,
         ctx.metrics_controller.clone(),
     )
     .await

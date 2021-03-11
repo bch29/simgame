@@ -18,6 +18,7 @@ use simgame_render::{
     resource::ResourceLoader, visible_size_to_chunks, RenderState, RenderStateInputs, Renderer,
     RendererBuilder, ViewParams,
 };
+use simgame_types::{entity, Entity};
 use simgame_util::{convert_point, convert_vec};
 use simgame_voxels::VoxelConfigHelper;
 use simgame_world::World;
@@ -31,6 +32,7 @@ pub async fn test_render(
     render_params: RenderParams<'_>,
     resource_loader: ResourceLoader,
     voxel_helper: VoxelConfigHelper,
+    entity_directory: entity::Directory,
     metrics_controller: metrics_runtime::Controller,
 ) -> Result<()> {
     let event_loop = EventLoop::new();
@@ -42,6 +44,7 @@ pub async fn test_render(
         render_params,
         resource_loader,
         voxel_helper,
+        entity_directory,
         metrics_controller,
     }
     .build()
@@ -57,6 +60,7 @@ pub struct TestRenderBuilder<'a> {
     render_params: RenderParams<'a>,
     resource_loader: ResourceLoader,
     voxel_helper: VoxelConfigHelper,
+    entity_directory: entity::Directory,
     metrics_controller: metrics_runtime::Controller,
 }
 
@@ -226,14 +230,48 @@ impl<'a> TestRenderBuilder<'a> {
 
         let cursor_reset_position = Point2::origin() + win_dimensions / 2.;
 
-        let world = Arc::new(Mutex::new(self.world));
+        let entity_directory = self.entity_directory;
 
-        let world_state = WorldStateBuilder {
-            world: world.clone(),
-            voxel_helper: self.voxel_helper.clone(),
-            tree_config: self.test_params.tree.as_ref(),
+        let mut entities = Vec::new();
+        let mut entity_locations = Vec::new();
+
+        for entity in self.test_params.entities {
+            entity_locations.push(entity.location);
+
+            let behaviors = entity
+                .behaviors
+                .iter()
+                .map(|name| {
+                    entity_directory
+                        .behavior_key(name.as_str())
+                        .ok_or_else(|| anyhow!("entity behavior not configured: {:?}", name))
+                })
+            .collect::<Result<_>>()?;
+
+            entities.push(Entity {
+                model: entity_directory
+                    .model_key(entity.model.as_str())
+                    .ok_or_else(|| {
+                        anyhow!("entity model not configured: {:?}", entity.model)
+                    })?,
+                    behaviors,
+            });
         }
-        .build()?;
+
+        let mut world = self.world;
+        world.entities.populate(entities, entity_locations.as_slice());
+
+        let world = Arc::new(Mutex::new(world));
+
+        let world_state = {
+            WorldStateBuilder {
+                world: world.clone(),
+                voxel_helper: self.voxel_helper.clone(),
+                entity_directory,
+                tree_config: self.test_params.tree.as_ref(),
+            }
+            .build()?
+        };
 
         Ok(TestRender {
             world,
@@ -380,16 +418,21 @@ impl TestRender {
         self.renderer
             .set_world_view(&mut self.render_state, self.view_params);
 
-        let world_diff = self.world_state.world_diff()?;
-
         {
             let world = self.world.lock().unwrap();
-            self.renderer
-                .update(&mut self.render_state, &*world, world_diff);
+            let entities = self.world_state.active_entities(&*world, None)?;
+            let world_diff = self.world_state.world_diff()?;
+
+            self.renderer.update(
+                &mut self.render_state,
+                &*world,
+                world_diff,
+                entities.as_slice(),
+            );
+            world_diff.clear();
         }
 
         self.renderer.render_frame(&mut self.render_state)?;
-        world_diff.clear();
 
         Ok(())
     }

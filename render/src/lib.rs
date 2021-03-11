@@ -5,13 +5,14 @@ pub mod resource;
 pub mod shaders;
 mod view;
 
+use std::collections::HashMap;
 use std::time::Instant;
 
 use anyhow::{anyhow, bail, Result};
-use cgmath::{Matrix4, SquareMatrix, Vector2, Vector3};
+use cgmath::{SquareMatrix, Vector2, Vector3};
 use raw_window_handle::HasRawWindowHandle;
 
-use simgame_types::{World, WorldDelta};
+use simgame_types::{entity, ActiveEntityModel, World, WorldDelta};
 use simgame_util::{convert_vec, DivUp};
 use simgame_voxels::{index_utils, VoxelConfigHelper};
 
@@ -44,7 +45,7 @@ pub struct RenderParams<'a> {
 pub struct RenderState {
     swapchain: wgpu::SwapChain,
     world_voxels: pipelines::voxels::VoxelRenderState,
-    meshes: Vec<pipelines::mesh::MeshRenderState>,
+    meshes: HashMap<entity::config::ModelKind, pipelines::mesh::MeshRenderState>,
     gui: pipelines::gui::GuiRenderState,
     view: ViewState,
     surface: wgpu::Surface,
@@ -168,7 +169,13 @@ impl Renderer {
                     view_state: &view,
                 },
             )?;
-            vec![square, sphere]
+
+            vec![
+                (entity::config::ModelKind::Cube, square),
+                (entity::config::ModelKind::Sphere, sphere),
+            ]
+            .into_iter()
+            .collect()
         };
 
         let gui = self
@@ -206,7 +213,7 @@ impl Renderer {
             depth_texture: &depth_texture,
         };
         state.world_voxels.update_window(&self.ctx, pipeline_params);
-        for mesh in &mut state.meshes {
+        for mesh in state.meshes.values_mut() {
             mesh.update_window(&self.ctx, pipeline_params);
         }
         state.gui.update_window(&self.ctx, pipeline_params);
@@ -232,7 +239,7 @@ impl Renderer {
             &mut render,
             &mut state.world_voxels,
         );
-        for mesh in &mut state.meshes {
+        for mesh in state.meshes.values_mut() {
             self.pipelines.mesh.render_frame(
                 &self.ctx,
                 pipelines::LoadAction::Load,
@@ -258,7 +265,13 @@ impl Renderer {
         Ok(())
     }
 
-    pub fn update(&self, state: &mut RenderState, world: &World, diff: &WorldDelta) {
+    pub fn update(
+        &self,
+        state: &mut RenderState,
+        world: &World,
+        diff: &WorldDelta,
+        entities: &[ActiveEntityModel],
+    ) {
         state
             .world_voxels
             .update(pipelines::voxels::VoxelRenderInputDelta {
@@ -268,75 +281,32 @@ impl Renderer {
                 voxel_diff: &diff.voxels,
             });
 
-        let mut face_tex_ids = [0u32; 16];
-        face_tex_ids[0] = self
-            .ctx
-            .textures
-            .resource_index("tex/entity/top")
-            .expect("cannot find texture") as u32;
-        face_tex_ids[1] = self
-            .ctx
-            .textures
-            .resource_index("tex/entity/bottom")
-            .expect("cannot find texture") as u32;
-        face_tex_ids[2] = self
-            .ctx
-            .textures
-            .resource_index("tex/entity/right")
-            .expect("cannot find texture") as u32;
-        face_tex_ids[3] = self
-            .ctx
-            .textures
-            .resource_index("tex/entity/left")
-            .expect("cannot find texture") as u32;
-        face_tex_ids[4] = self
-            .ctx
-            .textures
-            .resource_index("tex/entity/back")
-            .expect("cannot find texture") as u32;
-        face_tex_ids[5] = self
-            .ctx
-            .textures
-            .resource_index("tex/entity/front")
-            .expect("cannot find texture") as u32;
-
         use pipelines::mesh::MeshInstance;
 
-        let instances: &[&[MeshInstance]] = &[
-            &[MeshInstance {
-                face_tex_ids,
-                transform: Matrix4::from_translation(Vector3::new(-50., -50., 60.))
-                    * Matrix4::from_scale(10.),
-            }],
-            &[
-                MeshInstance {
-                    face_tex_ids,
-                    transform: Matrix4::from_translation(Vector3::new(10., 10., 80.))
-                        * Matrix4::from_scale(10.),
-                },
-                MeshInstance {
-                    face_tex_ids,
-                    transform: Matrix4::from_translation(Vector3::new(50., 10., 80.))
-                        * Matrix4::from_scale(15.),
-                },
-                MeshInstance {
-                    face_tex_ids,
-                    transform: Matrix4::from_translation(Vector3::new(10., 50., 80.))
-                        * Matrix4::from_scale(5.),
-                },
-                MeshInstance {
-                    face_tex_ids,
-                    transform: Matrix4::from_translation(Vector3::new(50., 50., 100.))
-                        * Matrix4::from_scale(5.),
-                },
-            ],
-        ];
+        let mut instances: HashMap<entity::config::ModelKind, Vec<MeshInstance>> = HashMap::new();
+        for entity in entities {
+            let mut face_tex_ids = [0; 16];
+            let count_faces = entity.face_tex_ids.len().min(16);
+            face_tex_ids[..count_faces].clone_from_slice(entity.face_tex_ids.as_slice());
 
-        for (instances, mesh) in instances.iter().zip(&mut state.meshes) {
-            mesh.update(pipelines::mesh::MeshRenderInputDelta {
-                instances,
-                view_state: &state.view,
-            });
+            let instance = MeshInstance {
+                face_tex_ids,
+                transform: entity.transform,
+            };
+
+            instances
+                .entry(entity.model_kind.clone())
+                .or_insert_with(Vec::new)
+                .push(instance);
+        }
+
+        for (kind, mesh) in &mut state.meshes {
+            if let Some(instances) = instances.get(kind) {
+                mesh.update(pipelines::mesh::MeshRenderInputDelta {
+                    instances,
+                    view_state: &state.view,
+                });
+            }
         }
         state.gui.update(());
     }
@@ -359,6 +329,7 @@ async fn request_device(
                     max_bind_groups: 6,
                     max_storage_buffers_per_shader_stage: 6,
                     max_storage_textures_per_shader_stage: 6,
+                    max_sampled_textures_per_shader_stage: 1024, // TODO: use proper texture arrays then reduce this limit
                     ..Default::default()
                 },
             },

@@ -67,6 +67,12 @@ impl<T: BaseNum> Bounds<T> {
         Bounds::new(origin, limit - origin)
     }
 
+    #[inline]
+    pub fn from_center(center: Point3<T>, size: Vector3<T>) -> Self {
+        let origin = center - size / (T::one() + T::one());
+        Self::new(origin, size)
+    }
+
     /// Returns the smallest bounds object containing all of the given points. If the input is
     /// empty, returns None.
     #[inline]
@@ -105,6 +111,11 @@ impl<T: BaseNum> Bounds<T> {
     #[inline]
     pub fn limit(self) -> Point3<T> {
         self.origin + self.size
+    }
+
+    #[inline]
+    pub fn center(self) -> Point3<T> {
+        self.origin + self.size / (T::one() + T::one())
     }
 
     #[inline]

@@ -62,9 +62,10 @@ impl<T> Octree<T> {
 
     /// Iterates through all objects in the tree whose bounds intersect with the given bounds.
     #[inline]
-    pub fn iter<F>(&self, bounds: Option<Bounds<f64>>, mut func: F)
+    pub fn iter<'a, E, F>(&'a self, bounds: Option<Bounds<f64>>, mut func: F) -> Result<(), E>
     where
-        F: FnMut(NodeHandle, Bounds<f64>, &T),
+        F: FnMut(NodeHandle, Bounds<f64>, &'a T) -> Result<(), E>,
+        E: 'a,
     {
         if let Some(root) = self.root {
             self.nodes.iter(
@@ -73,14 +74,17 @@ impl<T> Octree<T> {
                 bounds.unwrap_or(root.bounds),
                 &mut func,
             )
+        } else {
+            Ok(())
         }
     }
 
     /// Iterates through all objects in the tree whose bounds intersect with the given bounds.
     #[inline]
-    pub fn iter_mut<F>(&mut self, bounds: Option<Bounds<f64>>, mut func: F)
+    pub fn iter_mut<'a, E, F>(&mut self, bounds: Option<Bounds<f64>>, mut func: F) -> Result<(), E>
     where
-        F: FnMut(NodeHandle, Bounds<f64>, &mut T),
+        F: FnMut(NodeHandle, Bounds<f64>, &mut T) -> Result<(), E>,
+        E: 'a,
     {
         if let Some(root) = self.root {
             self.nodes.iter_mut(
@@ -88,21 +92,24 @@ impl<T> Octree<T> {
                 root,
                 bounds.unwrap_or(root.bounds),
                 &mut func,
-            )
+            )?
         }
+        Ok(())
     }
 
     /// Finds objects in the Octree which intersect the given ray. The `test` function is called on
     /// each object whose bounding box intersects with the ray.  returns `Some`. No guarantees are
     /// made about visit order.
     #[inline]
-    pub fn cast_ray<'a, F>(&'a self, ray: &Ray<f64>, mut test: F)
+    pub fn cast_ray<'a, E, F>(&'a self, ray: &Ray<f64>, mut test: F) -> Result<(), E>
     where
-        F: FnMut(ConvexIntersection<f64>, &'a Object<T>),
+        F: FnMut(ConvexIntersection<f64>, &'a Object<T>) -> Result<(), E>,
+        E: 'a,
     {
         if let Some(root) = self.root {
-            self.nodes.cast_ray(&self.objects, root, ray, &mut test);
+            self.nodes.cast_ray(&self.objects, root, ray, &mut test)?;
         }
+        Ok(())
     }
 
     /// Ensures the tree is large enough to contain the given bounds. If not, expands until it is
@@ -305,64 +312,74 @@ impl OctreeNodePool {
         }
     }
 
-    fn iter<T, F>(
-        &self,
-        objects: &ObjectPool<T>,
+    fn iter<'a, T, E, F>(
+        &'a self,
+        objects: &'a ObjectPool<T>,
         level: OctreeLevel,
         iter_bounds: Bounds<f64>,
         func: &mut F,
-    ) where
-        F: FnMut(NodeHandle, Bounds<f64>, &T),
+    ) -> Result<(), E>
+    where
+        F: FnMut(NodeHandle, Bounds<f64>, &'a T) -> Result<(), E>,
+        E: 'a,
     {
         let (lower_bounds, upper_bounds) = level.axis.cut_bounds(level.bounds);
 
         if let Some(lower) = self[level.node].lower {
             if iter_bounds.intersection(lower_bounds).is_some() {
-                self.iter(objects, level.next(lower, lower_bounds), iter_bounds, func)
+                self.iter(objects, level.next(lower, lower_bounds), iter_bounds, func)?
             }
         }
 
         objects.iter(self[level.node].objects, &mut |object| {
             if iter_bounds.intersection(object.bounds).is_some() {
-                func(level.node, object.bounds, &object.value);
+                func(level.node, object.bounds, &object.value)?;
             }
-        });
+            Ok(())
+        })?;
 
         if let Some(upper) = self[level.node].upper {
             if iter_bounds.intersection(upper_bounds).is_some() {
-                self.iter(objects, level.next(upper, upper_bounds), iter_bounds, func)
+                self.iter(objects, level.next(upper, upper_bounds), iter_bounds, func)?
             }
         }
+
+        Ok(())
     }
 
-    fn iter_mut<T, F>(
-        &mut self,
-        objects: &mut ObjectPool<T>,
+    fn iter_mut<'a, T, E, F>(
+        &'a mut self,
+        objects: &'a mut ObjectPool<T>,
         level: OctreeLevel,
         iter_bounds: Bounds<f64>,
         func: &mut F,
-    ) where
-        F: FnMut(NodeHandle, Bounds<f64>, &mut T),
+    ) -> Result<(), E>
+    where
+        F: FnMut(NodeHandle, Bounds<f64>, &mut T) -> Result<(), E>,
+        E: 'a,
     {
         let (lower_bounds, upper_bounds) = level.axis.cut_bounds(level.bounds);
 
         if let Some(lower) = self[level.node].lower {
             if iter_bounds.intersection(lower_bounds).is_some() {
-                self.iter_mut(objects, level.next(lower, lower_bounds), iter_bounds, func)
+                self.iter_mut(objects, level.next(lower, lower_bounds), iter_bounds, func)?
             }
         }
 
         objects.iter_mut(self[level.node].objects, &mut |object| {
             if iter_bounds.intersection(object.bounds).is_some() {
-                func(level.node, object.bounds, &mut object.value);
+                func(level.node, object.bounds, &mut object.value)?;
             }
-        });
+            Ok(())
+        })?;
 
         if let Some(upper) = self[level.node].upper {
             if iter_bounds.intersection(upper_bounds).is_some() {
-                self.iter_mut(objects, level.next(upper, upper_bounds), iter_bounds, func)
+                self.iter_mut(objects, level.next(upper, upper_bounds), iter_bounds, func)?
             }
         }
+
+        Ok(())
     }
 
     fn depth(&self, node: NodeHandle) -> usize {
@@ -377,34 +394,39 @@ impl OctreeNodePool {
         usize::max(lower_depth, upper_depth)
     }
 
-    fn cast_ray<'a, T, F>(
+    fn cast_ray<'a, T, E, F>(
         &self,
         objects: &'a ObjectPool<T>,
         level: OctreeLevel,
         ray: &Ray<f64>,
         test: &mut F,
-    ) where
-        F: FnMut(ConvexIntersection<f64>, &'a Object<T>),
+    ) -> Result<(), E>
+    where
+        F: FnMut(ConvexIntersection<f64>, &'a Object<T>) -> Result<(), E>,
+        E: 'a,
     {
         let (lower_bounds, upper_bounds) = level.axis.cut_bounds(level.bounds);
 
         if let Some(lower) = self[level.node].lower {
             if lower_bounds.cast_ray(ray).is_some() {
-                self.cast_ray(objects, level.next(lower, lower_bounds), ray, test);
+                self.cast_ray(objects, level.next(lower, lower_bounds), ray, test)?;
             }
         }
 
         objects.iter(self[level.node].objects, &mut |object| {
             if let Some(intersection) = object.bounds.cast_ray(ray) {
-                test(intersection, object)
+                test(intersection, object)?
             }
-        });
+            Ok(())
+        })?;
 
         if let Some(upper) = self[level.node].upper {
             if upper_bounds.cast_ray(ray).is_some() {
-                self.cast_ray(objects, level.next(upper, upper_bounds), ray, test);
+                self.cast_ray(objects, level.next(upper, upper_bounds), ray, test)?
             }
         }
+
+        Ok(())
     }
 }
 
@@ -517,26 +539,31 @@ impl<T> ListNodePool<T> {
         self.push(ListNode { value, next })
     }
 
-    fn iter<'a, F>(&'a self, mut node: Option<NodeHandle>, func: &mut F)
+    fn iter<'a, E, F>(&'a self, mut node: Option<NodeHandle>, func: &mut F) -> Result<(), E>
     where
-        F: FnMut(&'a T),
+        F: FnMut(&'a T) -> Result<(), E>,
+        E: 'a,
     {
         while let Some(node_ix) = node {
             let item = &self[node_ix];
-            func(&item.value);
+            func(&item.value)?;
             node = item.next;
         }
+
+        Ok(())
     }
 
-    fn iter_mut<F>(&mut self, mut node: Option<NodeHandle>, func: &mut F)
+    fn iter_mut<'a, E, F>(&mut self, mut node: Option<NodeHandle>, func: &mut F) -> Result<(), E>
     where
-        F: FnMut(&mut T),
+        F: FnMut(&mut T) -> Result<(), E>,
+        E: 'a,
     {
         while let Some(node_ix) = node {
             let item = &mut self[node_ix];
-            func(&mut item.value);
+            func(&mut item.value)?;
             node = item.next;
         }
+        Ok(())
     }
 }
 

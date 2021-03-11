@@ -4,6 +4,7 @@ use anyhow::{anyhow, Result};
 use cgmath::{EuclideanSpace, Matrix4, Point3, Vector3};
 use rand::SeedableRng;
 
+use simgame_types::{entity, ActiveEntityModel, Entity};
 use simgame_util::ray::Ray;
 use simgame_util::{convert_point, Bounds};
 use simgame_voxels::primitive::{self, Primitive};
@@ -12,12 +13,13 @@ use simgame_voxels::{index_utils, Voxel, VoxelConfigHelper, VoxelRaycastHit, Vox
 use crate::{
     background_object::{self, BackgroundObject},
     tree::{TreeConfig, TreeSystem},
-    WorldDelta, World,
+    World, WorldDelta,
 };
 
 pub struct WorldStateBuilder<'a> {
     pub world: Arc<Mutex<World>>,
     pub voxel_helper: VoxelConfigHelper,
+    pub entity_directory: entity::Directory,
     pub tree_config: Option<&'a TreeConfig>,
 }
 
@@ -26,6 +28,7 @@ pub struct WorldStateBuilder<'a> {
 pub struct WorldState {
     connection: Option<background_object::Connection<BackgroundState>>,
     voxel_helper: VoxelConfigHelper,
+    entity_directory: entity::Directory,
 }
 
 /// Handles background updates. While locked on the world mutex, the rendering thread will be
@@ -76,6 +79,7 @@ impl<'a> WorldStateBuilder<'a> {
         Ok(WorldState {
             connection: Some(connection),
             voxel_helper: self.voxel_helper,
+            entity_directory: self.entity_directory,
         })
     }
 }
@@ -135,6 +139,41 @@ impl WorldState {
             .as_mut()
             .ok_or_else(|| anyhow!("sending action on a closed connection: {:?}", action))?;
         connection.send_user(action)
+    }
+
+    /// Iterates over active entities within the given bounds, for rendering.
+    pub fn active_entities(
+        &self,
+        world: &World,
+        bounds: Option<Bounds<f64>>,
+    ) -> Result<Vec<ActiveEntityModel>> {
+        let mut result = Vec::new();
+
+        world.entities.entity_locations.iter::<anyhow::Error, _>(
+            bounds,
+            |_, bounds, &index| {
+                let location = bounds.center();
+                let entity = &world.entities.entities[index];
+
+                let model = self
+                    .entity_directory
+                    .model(entity.model)
+                    .ok_or_else(|| anyhow!("failed to look up model key {:?}", entity.model))?;
+
+                let transform =
+                    Matrix4::from_translation(convert_point!(location, f32) - Point3::origin())
+                        * model.transform;
+
+                result.push(ActiveEntityModel {
+                    model_kind: model.kind.clone(),
+                    face_tex_ids: model.face_texture_ids.clone(),
+                    transform,
+                });
+                Ok(())
+            },
+        )?;
+
+        Ok(result)
     }
 }
 

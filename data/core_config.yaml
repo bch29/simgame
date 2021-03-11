@@ -3,6 +3,103 @@ path_name: simgame
 voxel_data_file_name: world_voxel_data.dat
 world_meta_file_name: world_meta.yaml
 
+resources:
+  root: ./resources
+  artifact_root: ./resources_bin
+  resources:
+    # GUI textures
+    - name: tex/gui/crosshair
+      kind: { Image: { relative_path: tex/gui/crosshair.png, mip: NoMip } }
+    # Voxel textures
+    - name: tex/voxel/rock
+      kind: { Image: { relative_path: tex/voxel/rock.png, mip: Mip } }
+    - name: tex/voxel/leaf
+      kind: { Image: { relative_path: tex/voxel/leaf.png, mip: Mip } }
+    - name: tex/voxel/wood
+      kind: { Image: { relative_path: tex/voxel/wood.png, mip: Mip } }
+    - name: tex/voxel/dirt
+      kind: { Image: { relative_path: tex/voxel/dirt.png, mip: Mip } }
+    - name: tex/voxel/grass_top
+      kind: { Image: { relative_path: tex/voxel/grass_top.png, mip: Mip } }
+    - name: tex/voxel/grass_side
+      kind: { Image: { relative_path: tex/voxel/grass_side.png, mip: Mip } }
+    - name: tex/voxel/air
+      kind: { SolidColor: { red: 255, green: 255, blue: 255 } }
+    - name: tex/entity/top
+      kind: { Image: { relative_path: tex/entity/top.png, mip: Mip } }
+    - name: tex/entity/bottom
+      kind: { Image: { relative_path: tex/entity/bottom.png, mip: Mip } }
+    - name: tex/entity/left
+      kind: { Image: { relative_path: tex/entity/left.png, mip: Mip } }
+    - name: tex/entity/right
+      kind: { Image: { relative_path: tex/entity/right.png, mip: Mip } }
+    - name: tex/entity/front
+      kind: { Image: { relative_path: tex/entity/front.png, mip: Mip } }
+    - name: tex/entity/back
+      kind: { Image: { relative_path: tex/entity/back.png, mip: Mip } }
+    - name: tex/entity/dwarf/head_top
+      kind: { Image: { relative_path: tex/entity/dwarf/head_top.png, mip: NoMip } }
+    - name: tex/entity/dwarf/head_bottom
+      kind: { Image: { relative_path: tex/entity/dwarf/head_bottom.png, mip: NoMip } }
+    - name: tex/entity/dwarf/head_left
+      kind: { Image: { relative_path: tex/entity/dwarf/head_left.png, mip: NoMip } }
+    - name: tex/entity/dwarf/head_right
+      kind: { Image: { relative_path: tex/entity/dwarf/head_right.png, mip: NoMip } }
+    - name: tex/entity/dwarf/head_front
+      kind: { Image: { relative_path: tex/entity/dwarf/head_front.png, mip: NoMip } }
+    - name: tex/entity/dwarf/head_back
+      kind: { Image: { relative_path: tex/entity/dwarf/head_back.png, mip: NoMip } }
+    - name: tex/entity/goblin/head_top
+      kind: { Image: { relative_path: tex/entity/goblin/head_top.png, mip: NoMip } }
+    - name: tex/entity/goblin/head_bottom
+      kind: { Image: { relative_path: tex/entity/goblin/head_bottom.png, mip: NoMip } }
+    - name: tex/entity/goblin/head_left
+      kind: { Image: { relative_path: tex/entity/goblin/head_left.png, mip: NoMip } }
+    - name: tex/entity/goblin/head_right
+      kind: { Image: { relative_path: tex/entity/goblin/head_right.png, mip: NoMip } }
+    - name: tex/entity/goblin/head_front
+      kind: { Image: { relative_path: tex/entity/goblin/head_front.png, mip: NoMip } }
+    - name: tex/entity/goblin/head_back
+      kind: { Image: { relative_path: tex/entity/goblin/head_back.png, mip: NoMip } }
+    # Voxel shaders
+    - name: shader/voxels/compute
+      kind:
+        Shader:
+          relative_path: shader/voxels/compute.glsl
+          kind: Compute
+    - name: shader/voxels/vertex
+      kind:
+        Shader:
+          relative_path: shader/voxels/vertex.glsl
+          kind: Vertex
+    - name: shader/voxels/fragment
+      kind:
+        Shader:
+          relative_path: shader/voxels/fragment.glsl
+          kind: Fragment
+    # Mesh shaders
+    - name: shader/mesh/vertex
+      kind:
+        Shader:
+          relative_path: shader/mesh/vertex.glsl
+          kind: Vertex
+    - name: shader/mesh/fragment
+      kind:
+        Shader:
+          relative_path: shader/mesh/fragment.glsl
+          kind: Fragment
+    # GUI shaders
+    - name: shader/gui/vertex
+      kind:
+        Shader:
+          relative_path: shader/gui/vertex.glsl
+          kind: Vertex
+    - name: shader/gui/fragment
+      kind:
+        Shader:
+          relative_path: shader/gui/fragment.glsl
+          kind: Fragment
+
 voxel_config:
   voxels:
     - name: Air
@@ -52,75 +149,33 @@ voxel_config:
             x_periodicity: 2
             y_periodicity: 1
 
-resources:
-  root: ./resources
-  artifact_root: ./resources_bin
-  resources:
-    # GUI textures
-    - name: tex/gui/crosshair
-      kind: { Image: { relative_path: tex/gui/crosshair.png, mip: NoMip } }
-    # Voxel textures
-    - name: tex/voxel/rock
-      kind: { Image: { relative_path: tex/voxel/rock.png, mip: Mip } }
-    - name: tex/voxel/leaf
-      kind: { Image: { relative_path: tex/voxel/leaf.png, mip: Mip } }
-    - name: tex/voxel/wood
-      kind: { Image: { relative_path: tex/voxel/wood.png, mip: Mip } }
-    - name: tex/voxel/dirt
-      kind: { Image: { relative_path: tex/voxel/dirt.png, mip: Mip } }
-    - name: tex/voxel/grass_top
-      kind: { Image: { relative_path: tex/voxel/grass_top.png, mip: Mip } }
-    - name: tex/voxel/grass_side
-      kind: { Image: { relative_path: tex/voxel/grass_side.png, mip: Mip } }
-    - name: tex/voxel/air
-      kind: { SolidColor: { red: 255, green: 255, blue: 255 } }
-    - name: tex/entity/top
-      kind: { Image: { relative_path: tex/entity/top.png, mip: Mip } }
-    - name: tex/entity/bottom
-      kind: { Image: { relative_path: tex/entity/bottom.png, mip: Mip } }
-    - name: tex/entity/left
-      kind: { Image: { relative_path: tex/entity/left.png, mip: Mip } }
-    - name: tex/entity/right
-      kind: { Image: { relative_path: tex/entity/right.png, mip: Mip } }
-    - name: tex/entity/front
-      kind: { Image: { relative_path: tex/entity/front.png, mip: Mip } }
-    - name: tex/entity/back
-      kind: { Image: { relative_path: tex/entity/back.png, mip: Mip } }
-    # Voxel shaders
-    - name: shader/voxels/compute
-      kind:
-        Shader:
-          relative_path: shader/voxels/compute.glsl
-          kind: Compute
-    - name: shader/voxels/vertex
-      kind:
-        Shader:
-          relative_path: shader/voxels/vertex.glsl
-          kind: Vertex
-    - name: shader/voxels/fragment
-      kind:
-        Shader:
-          relative_path: shader/voxels/fragment.glsl
-          kind: Fragment
-    # Mesh shaders
-    - name: shader/mesh/vertex
-      kind:
-        Shader:
-          relative_path: shader/mesh/vertex.glsl
-          kind: Vertex
-    - name: shader/mesh/fragment
-      kind:
-        Shader:
-          relative_path: shader/mesh/fragment.glsl
-          kind: Fragment
-    # GUI shaders
-    - name: shader/gui/vertex
-      kind:
-        Shader:
-          relative_path: shader/gui/vertex.glsl
-          kind: Vertex
-    - name: shader/gui/fragment
-      kind:
-        Shader:
-          relative_path: shader/gui/fragment.glsl
-          kind: Fragment
+entity_config:
+  models:
+    - name: dwarf
+      kind: Sphere
+      face_texture_resources:
+        - tex/entity/dwarf/head_top
+        - tex/entity/dwarf/head_bottom
+        - tex/entity/dwarf/head_right
+        - tex/entity/dwarf/head_left
+        - tex/entity/dwarf/head_back
+        - tex/entity/dwarf/head_front
+      transforms:
+        - NonuniformScale: { x: 12, y: 15, z: 10 }
+        - Rotation:
+            axis: { x: 1, y: 0, z: 0 }
+            degrees: -15
+    - name: goblin
+      kind: Cube
+      face_texture_resources:
+        - tex/entity/goblin/head_top
+        - tex/entity/goblin/head_bottom
+        - tex/entity/goblin/head_right
+        - tex/entity/goblin/head_left
+        - tex/entity/goblin/head_back
+        - tex/entity/goblin/head_front
+      transforms:
+        - NonuniformScale: { x: 12, y: 8, z: 10 }
+        - Rotation:
+            axis: { x: 1, y: 0, z: 0 }
+            degrees: 5

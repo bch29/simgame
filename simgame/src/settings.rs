@@ -1,6 +1,7 @@
 use cgmath::{Point3, Vector2, Vector3};
 use serde::{Deserialize, Serialize};
 
+use simgame_types::EntityConfig;
 use simgame_render::resource::ResourceConfig;
 use simgame_voxels::VoxelConfig;
 use simgame_world::tree::TreeConfig;
@@ -19,6 +20,7 @@ pub struct CoreSettings {
     pub voxel_data_file_name: String,
     pub world_meta_file_name: String,
     pub voxel_config: VoxelConfig,
+    pub entity_config: EntityConfig,
     pub resources: ResourceConfig,
 }
 
@@ -34,6 +36,8 @@ pub struct RenderTestParams {
     pub video_settings: VideoSettings,
 
     pub tree: Option<TreeConfig>,
+
+    pub entities: Vec<RenderTestEntity>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -47,6 +51,13 @@ pub enum VideoMode {
 pub struct VideoSettings {
     pub win_dimensions: Vector2<f64>,
     pub video_mode: VideoMode,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RenderTestEntity {
+    pub model: String,
+    pub behaviors: Vec<String>,
+    pub location: Point3<f64>,
 }
 
 impl Default for RenderTestParams {
@@ -64,6 +75,7 @@ impl Default for RenderTestParams {
                 video_mode: VideoMode::Windowed,
             },
             tree: None,
+            entities: Vec::new(),
         }
     }
 }

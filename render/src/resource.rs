@@ -312,13 +312,23 @@ impl ResourceLoader {
         res
     }
 
+    pub fn texture_index_map(&self) -> Result<HashMap<String, usize>> {
+        let mut index_map: HashMap<String, usize> = HashMap::new();
+        for resource in self.resources.values() {
+            if self.load_image_impl(resource)?.is_some() {
+                index_map.insert(resource.name.clone(), index_map.len());
+            }
+        }
+        Ok(index_map)
+    }
+
     pub(crate) fn load_textures(
         &self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
     ) -> Result<Textures> {
         let mut textures: Vec<TextureData> = Vec::new();
-        let mut index_map: HashMap<String, usize> = HashMap::new();
+        let index_map = self.texture_index_map()?;
 
         for resource in self.resources.values() {
             if let Some(img) = self.load_image_impl(resource)? {
@@ -330,7 +340,6 @@ impl ResourceLoader {
                     img.sample_generator.as_ref(),
                     img.mip,
                 )?;
-                index_map.insert(resource.name.clone(), textures.len());
                 textures.push(texture);
             }
         }

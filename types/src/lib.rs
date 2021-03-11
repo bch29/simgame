@@ -1,8 +1,11 @@
-use simgame_util::float_octree::Octree as FloatOctree;
+use cgmath::{Matrix4, Point3, Vector3};
+
+use simgame_util::float_octree::{Octree as FloatOctree, self as octree};
+use simgame_util::Bounds;
 pub use simgame_voxels::{VoxelDelta, VoxelData};
 
 pub mod entity;
-pub use entity::Entity;
+pub use entity::{Entity, EntityConfig};
 
 #[derive(Debug)]
 pub struct World {
@@ -21,6 +24,12 @@ pub struct WorldDelta {
     pub voxels: VoxelDelta,
 }
 
+pub struct ActiveEntityModel {
+    pub model_kind: entity::config::ModelKind,
+    pub transform: Matrix4<f32>,
+    pub face_tex_ids: Vec<u32>,
+}
+
 impl World {
     pub fn new(voxels: VoxelData) -> World {
         World {
@@ -36,6 +45,17 @@ impl EntityState {
             entities: Vec::new(),
             entity_locations: FloatOctree::new(),
         }
+    }
+
+    pub fn populate(&mut self, entities: Vec<Entity>, locations: &[Point3<f64>]) {
+        for (index, (_, location)) in entities.iter().zip(locations).enumerate() {
+            self.entity_locations.insert(octree::Object {
+                value: index,
+                bounds: Bounds::from_center(*location, Vector3::new(2., 2., 2.))
+            });
+        }
+
+        self.entities = entities;
     }
 }
 
