@@ -1,11 +1,14 @@
-use cgmath::{Matrix4, Point3, Vector3};
+use std::collections::HashMap;
 
-use simgame_util::float_octree::{Octree as FloatOctree, self as octree};
+use anyhow::{anyhow, Result};
+use cgmath::{Point3, Vector3};
+
+use simgame_util::float_octree::{self as octree, Octree as FloatOctree};
 use simgame_util::Bounds;
-pub use simgame_voxels::{VoxelDelta, VoxelData};
+pub use simgame_voxels::{VoxelData, VoxelDelta, VoxelDirectory};
 
 pub mod entity;
-pub use entity::{Entity, EntityConfig};
+pub use entity::{ActiveEntityModel, Entity, EntityConfig, EntityDirectory};
 
 #[derive(Debug)]
 pub struct World {
@@ -16,7 +19,7 @@ pub struct World {
 #[derive(Debug)]
 pub struct EntityState {
     pub entities: Vec<Entity>,
-    pub entity_locations: FloatOctree<usize>,
+    pub bounds_tree: FloatOctree<usize>,
 }
 
 #[derive(Debug)]
@@ -24,10 +27,20 @@ pub struct WorldDelta {
     pub voxels: VoxelDelta,
 }
 
-pub struct ActiveEntityModel {
-    pub model_kind: entity::config::ModelKind,
-    pub transform: Matrix4<f32>,
-    pub face_tex_ids: Vec<u32>,
+pub struct Directory {
+    pub voxel: VoxelDirectory,
+    pub entity: EntityDirectory,
+    pub texture: TextureDirectory,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct TextureKey {
+    pub index: usize,
+}
+
+#[derive(Debug, Clone)]
+pub struct TextureDirectory {
+    texture_keys: HashMap<String, TextureKey>,
 }
 
 impl World {
@@ -43,15 +56,15 @@ impl EntityState {
     pub fn new() -> EntityState {
         EntityState {
             entities: Vec::new(),
-            entity_locations: FloatOctree::new(),
+            bounds_tree: FloatOctree::new(),
         }
     }
 
     pub fn populate(&mut self, entities: Vec<Entity>, locations: &[Point3<f64>]) {
         for (index, (_, location)) in entities.iter().zip(locations).enumerate() {
-            self.entity_locations.insert(octree::Object {
+            self.bounds_tree.insert(octree::Object {
                 value: index,
-                bounds: Bounds::from_center(*location, Vector3::new(2., 2., 2.))
+                bounds: Bounds::from_center(*location, Vector3::new(2., 2., 2.)),
             });
         }
 
@@ -88,5 +101,18 @@ impl Default for EntityState {
 impl Default for WorldDelta {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl TextureDirectory {
+    pub fn new(texture_keys: HashMap<String, TextureKey>) -> Self {
+        Self { texture_keys }
+    }
+
+    pub fn texture_key(&self, name: &str) -> Result<TextureKey> {
+        self.texture_keys
+            .get(name)
+            .copied()
+            .ok_or_else(|| anyhow!("texture does not exist: {:?}", name))
     }
 }

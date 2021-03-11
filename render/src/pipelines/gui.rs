@@ -4,6 +4,8 @@ use anyhow::Result;
 use cgmath::Matrix4;
 use zerocopy::{AsBytes, FromBytes};
 
+use simgame_types::Directory;
+
 use crate::buffer_util::{
     BufferSyncHelperDesc, BufferSyncable, BufferSyncedData, FillBuffer, IntoBufferSynced,
 };
@@ -28,7 +30,7 @@ struct RenderUniforms {
 }
 
 impl GuiRenderPipeline {
-    pub fn new(ctx: &crate::GraphicsContext) -> Result<GuiRenderPipeline> {
+    pub fn new(directory: &Directory, ctx: &crate::GraphicsContext) -> Result<GuiRenderPipeline> {
         let vert_shader = ctx
             .device
             .create_shader_module(&wgpu::ShaderModuleDescriptor {
@@ -53,7 +55,7 @@ impl GuiRenderPipeline {
 
         let crosshair_texture = ctx
             .textures
-            .from_resource("tex/gui/crosshair")?
+            .from_resource(&directory.texture, "tex/gui/crosshair")?
             .texture
             .create_view(&Default::default());
 

@@ -12,26 +12,27 @@ use anyhow::{anyhow, bail, Result};
 use cgmath::{SquareMatrix, Vector2, Vector3};
 use raw_window_handle::HasRawWindowHandle;
 
-use simgame_types::{entity, ActiveEntityModel, World, WorldDelta};
+use simgame_types::{entity, ActiveEntityModel, Directory, World, WorldDelta};
 use simgame_util::{convert_vec, DivUp};
-use simgame_voxels::{index_utils, VoxelConfigHelper};
+use simgame_voxels::index_utils;
 
 pub(crate) use pipelines::{FrameRenderContext, GraphicsContext};
 use pipelines::{Pipeline, State as PipelineState};
-use resource::ResourceLoader;
+use resource::{ResourceLoader, TextureLoader};
 pub use view::ViewParams;
 pub(crate) use view::ViewState;
 
 pub struct RendererBuilder<'a> {
     pub resource_loader: ResourceLoader,
-    pub voxel_helper: &'a VoxelConfigHelper,
+    pub texture_loader: TextureLoader,
+    pub directory: &'a Directory,
 }
 
 pub struct RenderStateInputs<'a, W> {
     pub window: &'a W,
     pub physical_win_size: Vector2<u32>,
     pub max_visible_chunks: usize,
-    pub voxel_helper: &'a VoxelConfigHelper,
+    pub directory: &'a Directory,
     pub view_params: ViewParams,
     pub world: &'a World,
 }
@@ -88,8 +89,8 @@ impl<'a> RendererBuilder<'a> {
         let device_result: DeviceResult = request_device(&params, &adapter).await?;
 
         let textures = self
-            .resource_loader
-            .load_textures(&device_result.device, &device_result.queue)?;
+            .texture_loader
+            .load(&device_result.device, &device_result.queue)?;
 
         let ctx = GraphicsContext {
             device: device_result.device,
@@ -102,11 +103,11 @@ impl<'a> RendererBuilder<'a> {
         let pipelines = {
             let voxel = {
                 let voxel_info_manager =
-                    pipelines::voxels::VoxelInfoManager::new(self.voxel_helper, &ctx)?;
+                    pipelines::voxels::VoxelInfoManager::new(&self.directory, &ctx)?;
                 pipelines::voxels::VoxelRenderPipeline::new(&ctx, voxel_info_manager)?
             };
             let mesh = pipelines::mesh::MeshRenderPipeline::new(&ctx)?;
-            let gui = pipelines::gui::GuiRenderPipeline::new(&ctx)?;
+            let gui = pipelines::gui::GuiRenderPipeline::new(&self.directory, &ctx)?;
             Pipelines { voxel, mesh, gui }
         };
 

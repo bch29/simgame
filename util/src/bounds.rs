@@ -1,4 +1,6 @@
-use cgmath::{BaseFloat, BaseNum, ElementWise, EuclideanSpace, Point3, Vector3};
+use cgmath::{
+    BaseFloat, BaseNum, ElementWise, EuclideanSpace, Matrix4, Point3, Transform, Vector3,
+};
 use serde::{Deserialize, Serialize};
 
 use crate::ray::{ConvexIntersection, Intersection, Quad, Ray};
@@ -382,6 +384,19 @@ impl<T: BaseNum> Bounds<T> {
             origin: self.origin() + offset,
             size: self.size,
         }
+    }
+
+    /// Returns a bounds object such after transforming any point in the original bounds, the
+    /// transformed point lies inside the new bounds.
+    #[inline]
+    pub fn transform(self, transform: Matrix4<T>) -> Option<Self> 
+        where T: cgmath::BaseFloat
+    {
+        Self::from_points(
+            self.corners()
+                .iter()
+                .map(|&corner| transform.transform_point(corner)),
+        )
     }
 
     /// Changes the size while keeping the origin the same. Note this also changes the limit.

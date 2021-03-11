@@ -7,7 +7,7 @@ use simgame_util::convert_bounds;
 use simgame_util::ray::{Intersection, Ray};
 use simgame_util::Bounds;
 
-use crate::config::VoxelConfigHelper;
+use crate::config::VoxelDirectory;
 use crate::index_utils;
 
 /// Represents the value of a single voxel in the world. The wrapped value is an index into the
@@ -86,7 +86,7 @@ impl Chunk {
         &self,
         ray: &Ray<f64>,
         origin: Point3<i64>,
-        _voxel_helper: &VoxelConfigHelper,
+        _voxel_directory: &VoxelDirectory,
     ) -> Option<VoxelRaycastHit> {
         // TODO: use space subdivision to avoid looping through every single voxel
         // TODO: use collision info in voxel config to handle voxels that are not full cubes

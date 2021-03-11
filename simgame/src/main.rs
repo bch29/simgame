@@ -7,8 +7,7 @@ use structopt::StructOpt;
 
 use simgame::files::FileContext;
 use simgame_render::resource::{self, ResourceLoader};
-use simgame_types::entity;
-use simgame_voxels::VoxelConfigHelper;
+use simgame_types::{Directory, EntityDirectory, VoxelDirectory};
 use simgame_world::{worldgen, World};
 
 #[derive(Debug, StructOpt)]
@@ -119,24 +118,26 @@ async fn run_render_world(ctx: &FileContext, options: &RenderWorldOpts) -> Resul
         trace_path: options.graphics_trace_path.as_deref(),
     };
 
-    let voxel_helper = VoxelConfigHelper::new(&ctx.core_settings.voxel_config)?;
+    let texture_loader = resource_loader.texture_loader()?;
 
-    let texture_index_map = resource_loader.texture_index_map()?;
-    let entity_directory =
-        entity::Directory::new(&ctx.core_settings.entity_config, Vec::new(), |tex_name| {
-            let index = *texture_index_map
-                .get(tex_name)
-                .ok_or_else(|| anyhow!("texture not mapped: {:?}", tex_name))?;
-            Ok(index as u32)
-        })?;
+    let directory = {
+        let voxel = VoxelDirectory::new(&ctx.core_settings.voxel_config)?;
+        let texture = texture_loader.directory();
+        let entity = EntityDirectory::new(&ctx.core_settings.entity_config, Vec::new(), &texture)?;
+        Directory {
+            voxel,
+            entity,
+            texture,
+        }
+    };
 
     simgame::test_render(
         world,
         settings.render_test_params,
         params,
+        directory,
         resource_loader,
-        voxel_helper,
-        entity_directory,
+        texture_loader,
         ctx.metrics_controller.clone(),
     )
     .await
@@ -150,11 +151,11 @@ fn run_generate(ctx: &FileContext, options: &GenerateWorldOpts) -> Result<()> {
         std::time::Duration::from_secs(10),
     );
 
-    let voxel_helper = VoxelConfigHelper::new(&ctx.core_settings.voxel_config)?;
+    let voxel_directory = VoxelDirectory::new(&ctx.core_settings.voxel_config)?;
 
     let config_file = std::fs::File::open(&options.config)?;
     let config = serde_yaml::from_reader(config_file)?;
-    let voxels = worldgen::generate_world(&config, &voxel_helper)?;
+    let voxels = worldgen::generate_world(&config, &voxel_directory)?;
 
     log::info!("Saving");
     ctx.save_world_voxels(options.save_name.as_str(), &voxels)?;

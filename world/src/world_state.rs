@@ -4,11 +4,11 @@ use anyhow::{anyhow, Result};
 use cgmath::{EuclideanSpace, Matrix4, Point3, Vector3};
 use rand::SeedableRng;
 
-use simgame_types::{entity, ActiveEntityModel, Entity};
+use simgame_types::{ActiveEntityModel, Directory};
 use simgame_util::ray::Ray;
 use simgame_util::{convert_point, Bounds};
 use simgame_voxels::primitive::{self, Primitive};
-use simgame_voxels::{index_utils, Voxel, VoxelConfigHelper, VoxelRaycastHit, VoxelUpdater};
+use simgame_voxels::{index_utils, Voxel, VoxelRaycastHit, VoxelUpdater};
 
 use crate::{
     background_object::{self, BackgroundObject},
@@ -18,8 +18,7 @@ use crate::{
 
 pub struct WorldStateBuilder<'a> {
     pub world: Arc<Mutex<World>>,
-    pub voxel_helper: VoxelConfigHelper,
-    pub entity_directory: entity::Directory,
+    pub directory: Arc<Directory>,
     pub tree_config: Option<&'a TreeConfig>,
 }
 
@@ -27,8 +26,7 @@ pub struct WorldStateBuilder<'a> {
 /// background state.
 pub struct WorldState {
     connection: Option<background_object::Connection<BackgroundState>>,
-    voxel_helper: VoxelConfigHelper,
-    entity_directory: entity::Directory,
+    directory: Arc<Directory>,
 }
 
 /// Handles background updates. While locked on the world mutex, the rendering thread will be
@@ -37,7 +35,6 @@ pub struct WorldState {
 struct BackgroundState {
     world: Arc<Mutex<World>>,
     world_diff: WorldDelta,
-    _voxel_helper: VoxelConfigHelper,
     rng: rand::rngs::StdRng,
     updating: bool,
     filled_voxels: i32,
@@ -60,12 +57,11 @@ enum WorldUpdateAction {
 impl<'a> WorldStateBuilder<'a> {
     pub fn build(self) -> Result<WorldState> {
         let tree_system = match self.tree_config {
-            Some(tree_config) => Some(TreeSystem::new(tree_config, &self.voxel_helper)?),
+            Some(tree_config) => Some(TreeSystem::new(tree_config, &self.directory.voxel)?),
             None => None,
         };
 
         let world_state = BackgroundState {
-            _voxel_helper: self.voxel_helper.clone(),
             world_diff: WorldDelta::new(),
             rng: SeedableRng::from_entropy(),
             updating: false,
@@ -78,8 +74,7 @@ impl<'a> WorldStateBuilder<'a> {
 
         Ok(WorldState {
             connection: Some(connection),
-            voxel_helper: self.voxel_helper,
-            entity_directory: self.entity_directory,
+            directory: self.directory,
         })
     }
 }
@@ -112,7 +107,7 @@ impl WorldState {
 
         let raycast_hit = {
             let world = world.lock().map_err(|_| anyhow!("world mutex poisoned"))?;
-            match world.voxels.cast_ray(&ray, &self.voxel_helper) {
+            match world.voxels.cast_ray(&ray, &self.directory.voxel) {
                 None => return Ok(()),
                 Some(raycast_hit) => raycast_hit,
             }
@@ -149,16 +144,14 @@ impl WorldState {
     ) -> Result<Vec<ActiveEntityModel>> {
         let mut result = Vec::new();
 
-        world.entities.entity_locations.iter::<anyhow::Error, _>(
-            bounds,
-            |_, bounds, &index| {
+        world
+            .entities
+            .bounds_tree
+            .iter::<anyhow::Error, _>(bounds, |_, bounds, &index| {
                 let location = bounds.center();
                 let entity = &world.entities.entities[index];
 
-                let model = self
-                    .entity_directory
-                    .model(entity.model)
-                    .ok_or_else(|| anyhow!("failed to look up model key {:?}", entity.model))?;
+                let model = self.directory.entity.model(entity.model)?;
 
                 let transform =
                     Matrix4::from_translation(convert_point!(location, f32) - Point3::origin())
@@ -170,8 +163,7 @@ impl WorldState {
                     transform,
                 });
                 Ok(())
-            },
-        )?;
+            })?;
 
         Ok(result)
     }

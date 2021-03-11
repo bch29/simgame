@@ -4,7 +4,8 @@ use std::convert::TryInto;
 use anyhow::{anyhow, Result};
 use zerocopy::{AsBytes, FromBytes};
 
-use simgame_voxels::{config as voxel, VoxelConfigHelper};
+use simgame_voxels::{config as voxel};
+use simgame_types::Directory;
 
 use crate::buffer_util::{InstancedBuffer, InstancedBufferDesc};
 use crate::mesh::cube::Cube;
@@ -35,14 +36,15 @@ struct VoxelRenderInfo {
 }
 
 impl VoxelInfoManager {
-    pub fn new(config: &VoxelConfigHelper, ctx: &crate::GraphicsContext) -> Result<Self> {
-        let index_map = config
+    pub fn new(directory: &Directory, ctx: &crate::GraphicsContext) -> Result<Self> {
+        let index_map = directory
+            .voxel
             .all_face_textures()
             .into_iter()
             .map(|face_tex| {
-                let index = ctx
-                    .textures
-                    .resource_index(face_tex.resource.as_str())?;
+                let index = directory
+                    .texture
+                    .texture_key(face_tex.resource.as_str())?.index;
                 Ok((face_tex, index))
             })
             .collect::<Result<HashMap<_, _>>>()?;
@@ -85,12 +87,12 @@ impl VoxelInfoManager {
             InstancedBufferDesc {
                 label: "voxel info",
                 instance_len: std::mem::size_of::<VoxelRenderInfo>(),
-                n_instances: config.voxels().len(),
+                n_instances: directory.voxel.voxels().len(),
                 usage: wgpu::BufferUsage::STORAGE | wgpu::BufferUsage::COPY_DST,
             },
         );
 
-        for (index, voxel) in config.voxels().iter().enumerate() {
+        for (index, voxel) in directory.voxel.voxels().iter().enumerate() {
             let render_info = Self::get_voxel_render_info(&index_map, voxel)?;
             voxel_info_buf.write(&ctx.queue, index, render_info.as_bytes());
         }

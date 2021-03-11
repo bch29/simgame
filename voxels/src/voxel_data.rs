@@ -9,7 +9,7 @@ use simgame_util::octree::Octree;
 use simgame_util::ray::Ray;
 use simgame_util::Bounds;
 
-use crate::config::VoxelConfigHelper;
+use crate::config::VoxelDirectory;
 use crate::core::{voxels_to_u16_mut, Chunk, Voxel, VoxelRaycastHit};
 use crate::index_utils;
 
@@ -181,7 +181,7 @@ impl VoxelData {
     pub fn cast_ray(
         &self,
         ray: &Ray<f64>,
-        voxel_helper: &VoxelConfigHelper,
+        voxel_directory: &VoxelDirectory,
     ) -> Option<VoxelRaycastHit> {
         let chunk_size = convert_vec!(index_utils::chunk_size(), f64);
 
@@ -195,7 +195,7 @@ impl VoxelData {
             .cast_ray(&chunk_ray, |chunk_pos, chunk| {
                 let chunk_origin =
                     chunk_pos.mul_element_wise(Point3::origin() + index_utils::chunk_size());
-                chunk.cast_ray(ray, chunk_origin, voxel_helper)
+                chunk.cast_ray(ray, chunk_origin, voxel_directory)
             })?
             .data;
 

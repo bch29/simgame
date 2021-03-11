@@ -1,8 +1,8 @@
 pub mod bounds;
 pub mod float_octree;
+pub mod octree;
 pub mod ray;
 pub mod stable_map;
-pub mod octree;
 
 use cgmath::{Point3, Vector3};
 
@@ -77,6 +77,22 @@ macro_rules! convert_bounds {
             $crate::convert_vec!($val.size(), $type),
         )
     };
+}
+
+#[macro_export]
+macro_rules! convert_matrix4 {
+    ($val:expr, $type:ty) => {{
+        let values0: &[_; 16] = $val.as_ref();
+        let mut values: [$type; 16] = [0.; 16];
+
+        for (ix, value) in values0.iter().enumerate() {
+            values[ix] = *value as $type;
+        }
+
+        let result: &cgmath::Matrix4<$type> =
+            <&cgmath::Matrix4<$type> as From<&[$type; 16]>>::from(&values);
+        *result
+    }};
 }
 
 macro_rules! impl_div_traits_int {

@@ -55,7 +55,7 @@ pub struct VoxelConfig {
 }
 
 #[derive(Debug, Clone)]
-pub struct VoxelConfigHelper {
+pub struct VoxelDirectory {
     voxels_by_name: HashMap<String, (Voxel, VoxelInfo)>,
     voxels_by_id: Vec<VoxelInfo>,
 }
@@ -72,7 +72,7 @@ impl VoxelInfo {
     }
 }
 
-impl VoxelConfigHelper {
+impl VoxelDirectory {
     pub fn new(config: &VoxelConfig) -> Result<Self> {
         if config.voxels.is_empty() || config.voxels[0].category != Category("air".into()) {
             bail!("First entry in voxel config must have category \"air\"");

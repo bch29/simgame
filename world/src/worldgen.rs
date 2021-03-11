@@ -7,7 +7,7 @@ use rand::Rng;
 use serde::{Deserialize, Serialize};
 
 use simgame_util::Bounds;
-use simgame_voxels::{Voxel, VoxelConfigHelper, VoxelData, VoxelUpdater};
+use simgame_voxels::{Voxel, VoxelDirectory, VoxelData, VoxelUpdater};
 
 use crate::{tree, WorldDelta};
 
@@ -19,7 +19,7 @@ pub struct GenerateWorldConfig {
 
 pub struct WorldGenerator<'a, R> {
     config: &'a GenerateWorldConfig,
-    voxel_helper: &'a VoxelConfigHelper,
+    voxel_directory: &'a VoxelDirectory,
     bounds: Bounds<i64>,
     voxels: VoxelData,
     rng: &'a mut R,
@@ -27,13 +27,13 @@ pub struct WorldGenerator<'a, R> {
 
 pub fn generate_world(
     config: &GenerateWorldConfig,
-    voxel_helper: &VoxelConfigHelper,
+    voxel_directory: &VoxelDirectory,
 ) -> Result<VoxelData> {
     info!("Creating empty world: {:?}", config);
 
     let mut rng = rand::thread_rng();
 
-    let mut generator = WorldGenerator::new(config, voxel_helper, &mut rng);
+    let mut generator = WorldGenerator::new(config, voxel_directory, &mut rng);
     generator.generate()?;
     Ok(generator.finish())
 }
@@ -41,7 +41,7 @@ pub fn generate_world(
 impl<'a, R> WorldGenerator<'a, R> {
     pub fn new(
         config: &'a GenerateWorldConfig,
-        voxel_helper: &'a VoxelConfigHelper,
+        voxel_directory: &'a VoxelDirectory,
         rng: &'a mut R,
     ) -> Self {
         let bounds = {
@@ -54,7 +54,7 @@ impl<'a, R> WorldGenerator<'a, R> {
 
         Self {
             config,
-            voxel_helper,
+            voxel_directory,
             bounds,
             voxels,
             rng,
@@ -108,17 +108,17 @@ impl<'a, R> WorldGenerator<'a, R> {
         let mut next_progress_step = 1;
 
         let rock_voxel = self
-            .voxel_helper
+            .voxel_directory
             .voxel_by_name("Rock")
             .ok_or_else(|| anyhow!("Missing voxel config for Rock"))?
             .0;
         let dirt_voxel = self
-            .voxel_helper
+            .voxel_directory
             .voxel_by_name("Dirt")
             .ok_or_else(|| anyhow!("Missing voxel config for Dirt"))?
             .0;
         let grass_voxel = self
-            .voxel_helper
+            .voxel_directory
             .voxel_by_name("Grass")
             .ok_or_else(|| anyhow!("Missing voxel config for Grass"))?
             .0;
@@ -176,7 +176,7 @@ impl<'a, R> WorldGenerator<'a, R> {
         let mut updated_state = WorldDelta::new();
         let mut voxel_updater = VoxelUpdater::new(&mut self.voxels, &mut updated_state.voxels);
 
-        let tree = tree::generate(tree_config, self.voxel_helper, &mut self.rng)?;
+        let tree = tree::generate(tree_config, self.voxel_directory, &mut self.rng)?;
         tree.draw(&mut voxel_updater);
 
         Ok(())

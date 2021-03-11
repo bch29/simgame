@@ -9,6 +9,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::shaders::{CompileParams, ShaderCompiler, ShaderKind};
 
+use simgame_types::{TextureDirectory, TextureKey};
+
 pub struct ResourceLoader {
     root: PathBuf,
     artifact_root: PathBuf,
@@ -16,16 +18,6 @@ pub struct ResourceLoader {
     shader_compiler: ShaderCompiler,
     _config: ResourceConfig,
     options: ResourceOptions,
-}
-
-pub(crate) struct Textures {
-    textures: Vec<TextureData>,
-    index_map: HashMap<String, usize>, // maps texture resource name to location in array
-}
-
-pub(crate) struct TextureData {
-    pub texture: wgpu::Texture,
-    pub mip_level_count: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -76,9 +68,24 @@ pub struct Resource {
     pub kind: ResourceKind,
 }
 
-pub struct LoadedImage {
-    pub sample_generator: Box<dyn SampleGenerator>,
-    pub mip: MipType,
+pub struct TextureLoader {
+    directory: TextureDirectory,
+    images: Vec<ImageLoader>,
+}
+
+pub struct ImageLoader {
+    name: String,
+    sample_generator: SampleGeneratorBuilder,
+    mip: MipType,
+}
+
+pub(crate) struct Textures {
+    textures: Vec<TextureData>,
+}
+
+pub(crate) struct TextureData {
+    pub texture: wgpu::Texture,
+    pub mip_level_count: u32,
 }
 
 impl ResourceLoader {
@@ -139,9 +146,9 @@ impl ResourceLoader {
         })
     }
 
-    pub fn load_image(&self, name: &str) -> Result<LoadedImage> {
+    pub fn load_image(&self, name: &str) -> Result<ImageLoader> {
         let resource = self.get_resource(name)?;
-        if let Some(res) = self.load_image_impl(resource)? {
+        if let Some(res) = self.load_image_impl(resource) {
             Ok(res)
         } else {
             bail!(
@@ -152,43 +159,32 @@ impl ResourceLoader {
         }
     }
 
-    fn load_image_impl(&self, resource: &Resource) -> Result<Option<LoadedImage>> {
+    fn load_image_impl(&self, resource: &Resource) -> Option<ImageLoader> {
         match resource.kind {
             ResourceKind::Image {
                 ref relative_path,
                 mip,
             } => {
-                log::info!(
-                    "Loading texture from file {:?}",
-                    relative_path
-                );
-                let file = self.open_relative_path(relative_path.as_path())?;
-                let reader = image::io::Reader::new(file).with_guessed_format()?;
-                let image = reader.decode()?;
-                Ok(Some(LoadedImage {
-                    sample_generator: Box::new(sample_gen::ImageSampleGenerator {
-                        image: image.to_rgba8(),
-                    }),
+                let absolute_path = self.path_to_absolute(relative_path.as_path());
+                let sample_generator = SampleGeneratorBuilder::Image {
+                    relative_path: relative_path.clone(),
+                    absolute_path,
+                };
+                Some(ImageLoader {
+                    name: resource.name.clone(),
+                    sample_generator,
                     mip,
-                }))
+                })
             }
             ResourceKind::SolidColor { red, green, blue } => {
-                log::info!(
-                    "Creating solid color texture with R/G/B {}/{}/{}",
-                    red,
-                    green,
-                    blue
-                );
-                Ok(Some(LoadedImage {
-                    sample_generator: Box::new(sample_gen::SolidColorSampleGenerator {
-                        red,
-                        green,
-                        blue,
-                    }),
+                let sample_generator = SampleGeneratorBuilder::SolidColor { red, green, blue };
+                Some(ImageLoader {
+                    name: resource.name.clone(),
+                    sample_generator,
                     mip: MipType::NoMip,
-                }))
+                })
             }
-            _ => Ok(None),
+            _ => None,
         }
     }
 
@@ -266,6 +262,7 @@ impl ResourceLoader {
         }
     }
 
+    #[allow(unused)]
     fn open_relative_path(&self, relative_path: &Path) -> Result<BufReader<File>> {
         let full_path = self.path_to_absolute(relative_path);
         let file = File::open(full_path.as_path())?;
@@ -312,42 +309,48 @@ impl ResourceLoader {
         res
     }
 
-    pub fn texture_index_map(&self) -> Result<HashMap<String, usize>> {
-        let mut index_map: HashMap<String, usize> = HashMap::new();
+    pub fn texture_loader(&self) -> Result<TextureLoader> {
+        let mut texture_keys = HashMap::new();
+        let mut images = Vec::new();
         for resource in self.resources.values() {
-            if self.load_image_impl(resource)?.is_some() {
-                index_map.insert(resource.name.clone(), index_map.len());
+            if let Some(img) = self.load_image_impl(resource) {
+                texture_keys.insert(
+                    resource.name.clone(),
+                    TextureKey {
+                        index: texture_keys.len(),
+                    },
+                );
+                images.push(img);
             }
         }
-        Ok(index_map)
+        Ok(TextureLoader {
+            images,
+            directory: TextureDirectory::new(texture_keys),
+        })
+    }
+}
+
+impl TextureLoader {
+    pub fn directory(&self) -> TextureDirectory {
+        self.directory.clone()
     }
 
-    pub(crate) fn load_textures(
-        &self,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-    ) -> Result<Textures> {
+    pub(crate) fn load(&self, device: &wgpu::Device, queue: &wgpu::Queue) -> Result<Textures> {
         let mut textures: Vec<TextureData> = Vec::new();
-        let index_map = self.texture_index_map()?;
 
-        for resource in self.resources.values() {
-            if let Some(img) = self.load_image_impl(resource)? {
-                let texture = Self::make_texture(
-                    device,
-                    queue,
-                    resource.name.as_str(),
-                    textures.len(),
-                    img.sample_generator.as_ref(),
-                    img.mip,
-                )?;
-                textures.push(texture);
-            }
+        for img in &self.images {
+            let texture = Self::make_texture(
+                device,
+                queue,
+                img.name.as_str(),
+                textures.len(),
+                img.sample_generator.build()?.as_ref(),
+                img.mip,
+            )?;
+            textures.push(texture);
         }
 
-        Ok(Textures {
-            textures,
-            index_map,
-        })
+        Ok(Textures { textures })
     }
 
     fn make_texture(
@@ -471,14 +474,59 @@ impl ResourceLoader {
     }
 }
 
-pub use sample_gen::SampleGenerator;
+use sample_gen::{SampleGenerator, SampleGeneratorBuilder};
 
-pub mod sample_gen {
+mod sample_gen {
+    use std::path::PathBuf;
+
+    use anyhow::Result;
+
     pub trait SampleGenerator {
         /// Returns the buffer of samples and the number of bytes per row in the result.
         fn generate(&self, width: u32, height: u32) -> (Vec<u8>, u32);
 
         fn source_dimensions(&self) -> (u32, u32);
+    }
+
+    pub enum SampleGeneratorBuilder {
+        Image {
+            relative_path: PathBuf,
+            absolute_path: PathBuf,
+        },
+        SolidColor {
+            red: u8,
+            green: u8,
+            blue: u8,
+        },
+    }
+
+    impl SampleGeneratorBuilder {
+        pub fn build(&self) -> Result<Box<dyn SampleGenerator>> {
+            match *self {
+                SampleGeneratorBuilder::Image {
+                    ref relative_path,
+                    ref absolute_path,
+                } => {
+                    log::info!("Loading texture from file {:?}", relative_path);
+                    let file =
+                        std::io::BufReader::new(std::fs::File::open(absolute_path.as_path())?);
+                    let reader = image::io::Reader::new(file).with_guessed_format()?;
+                    let image = reader.decode()?;
+                    Ok(Box::new(ImageSampleGenerator {
+                        image: image.to_rgba8(),
+                    }))
+                }
+                SampleGeneratorBuilder::SolidColor { red, green, blue } => {
+                    log::info!(
+                        "Creating solid color texture with R/G/B {}/{}/{}",
+                        red,
+                        green,
+                        blue
+                    );
+                    Ok(Box::new(SolidColorSampleGenerator { red, green, blue }))
+                }
+            }
+        }
     }
 
     pub struct ImageSampleGenerator {
@@ -543,14 +591,12 @@ impl Textures {
         self.textures.as_slice()
     }
 
-    pub fn resource_index(&self, name: &str) -> Result<usize> {
-        self.index_map.get(name).copied().ok_or_else(|| {
-            anyhow!("Could not find texture for resource {}. Resource either does not exist or is not a texture")
-        })
-    }
-
-    pub fn from_resource(&self, name: &str) -> Result<&TextureData> {
-        Ok(&self.textures[self.resource_index(name)?])
+    pub fn from_resource(
+        &self,
+        directory: &TextureDirectory,
+        resource: &str,
+    ) -> Result<&TextureData> {
+        Ok(&self.textures[directory.texture_key(resource)?.index])
     }
 }
 

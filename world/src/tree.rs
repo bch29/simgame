@@ -3,7 +3,7 @@ use cgmath::{Deg, Matrix3, Point3, Transform, Vector3};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 
-use simgame_voxels::{primitive, Voxel, VoxelConfigHelper};
+use simgame_voxels::{primitive, Voxel, VoxelDirectory};
 
 use crate::lsystem;
 use crate::turtle::{Turtle, TurtleBrush, TurtleInterpreter, TurtleState};
@@ -47,7 +47,7 @@ pub enum Symbol {
 
 pub fn generate<R: Rng>(
     config: &TreeConfig,
-    voxels: &VoxelConfigHelper,
+    voxels: &VoxelDirectory,
     rng: &mut R,
 ) -> Result<primitive::Shape> {
     let mut system = TreeSystem::new(config, voxels)?;
@@ -64,7 +64,7 @@ pub struct TreeSystem {
 }
 
 impl TreeSystem {
-    pub fn new(config: &TreeConfig, voxels: &VoxelConfigHelper) -> Result<Self> {
+    pub fn new(config: &TreeConfig, voxels: &VoxelDirectory) -> Result<Self> {
         let l_system = config.l_system.as_l_system()?;
 
         let trunk_voxel = voxels

@@ -15,12 +15,11 @@ use winit::{
 
 pub use simgame_render::RenderParams;
 use simgame_render::{
-    resource::ResourceLoader, visible_size_to_chunks, RenderState, RenderStateInputs, Renderer,
-    RendererBuilder, ViewParams,
+    resource::{ResourceLoader, TextureLoader},
+    visible_size_to_chunks, RenderState, RenderStateInputs, Renderer, RendererBuilder, ViewParams,
 };
-use simgame_types::{entity, Entity};
+use simgame_types::{Directory, Entity};
 use simgame_util::{convert_point, convert_vec};
-use simgame_voxels::VoxelConfigHelper;
 use simgame_world::World;
 
 use settings::RenderTestParams;
@@ -30,9 +29,9 @@ pub async fn test_render(
     world: World,
     test_params: RenderTestParams,
     render_params: RenderParams<'_>,
+    directory: Directory,
     resource_loader: ResourceLoader,
-    voxel_helper: VoxelConfigHelper,
-    entity_directory: entity::Directory,
+    texture_loader: TextureLoader,
     metrics_controller: metrics_runtime::Controller,
 ) -> Result<()> {
     let event_loop = EventLoop::new();
@@ -42,9 +41,9 @@ pub async fn test_render(
         world,
         test_params,
         render_params,
+        directory,
         resource_loader,
-        voxel_helper,
-        entity_directory,
+        texture_loader,
         metrics_controller,
     }
     .build()
@@ -59,8 +58,8 @@ pub struct TestRenderBuilder<'a> {
     test_params: RenderTestParams,
     render_params: RenderParams<'a>,
     resource_loader: ResourceLoader,
-    voxel_helper: VoxelConfigHelper,
-    entity_directory: entity::Directory,
+    texture_loader: TextureLoader,
+    directory: Directory,
     metrics_controller: metrics_runtime::Controller,
 }
 
@@ -162,7 +161,8 @@ impl<'a> TestRenderBuilder<'a> {
     pub async fn build(self) -> Result<TestRender> {
         let renderer = RendererBuilder {
             resource_loader: self.resource_loader,
-            voxel_helper: &self.voxel_helper,
+            texture_loader: self.texture_loader,
+            directory: &self.directory,
         }
         .build(self.render_params.clone())
         .await?;
@@ -205,7 +205,7 @@ impl<'a> TestRenderBuilder<'a> {
             physical_win_size,
             world: &self.world,
             view_params,
-            voxel_helper: &self.voxel_helper,
+            directory: &self.directory,
             max_visible_chunks: self.test_params.max_visible_chunks,
         })?;
 
@@ -230,7 +230,7 @@ impl<'a> TestRenderBuilder<'a> {
 
         let cursor_reset_position = Point2::origin() + win_dimensions / 2.;
 
-        let entity_directory = self.entity_directory;
+        let directory = Arc::new(self.directory);
 
         let mut entities = Vec::new();
         let mut entity_locations = Vec::new();
@@ -241,33 +241,26 @@ impl<'a> TestRenderBuilder<'a> {
             let behaviors = entity
                 .behaviors
                 .iter()
-                .map(|name| {
-                    entity_directory
-                        .behavior_key(name.as_str())
-                        .ok_or_else(|| anyhow!("entity behavior not configured: {:?}", name))
-                })
-            .collect::<Result<_>>()?;
+                .map(|name| directory.entity.behavior_key(name.as_str()))
+                .collect::<Result<_>>()?;
 
             entities.push(Entity {
-                model: entity_directory
-                    .model_key(entity.model.as_str())
-                    .ok_or_else(|| {
-                        anyhow!("entity model not configured: {:?}", entity.model)
-                    })?,
-                    behaviors,
+                model: directory.entity.model_key(entity.model.as_str())?,
+                behaviors,
             });
         }
 
         let mut world = self.world;
-        world.entities.populate(entities, entity_locations.as_slice());
+        world
+            .entities
+            .populate(entities, entity_locations.as_slice());
 
         let world = Arc::new(Mutex::new(world));
 
         let world_state = {
             WorldStateBuilder {
                 world: world.clone(),
-                voxel_helper: self.voxel_helper.clone(),
-                entity_directory,
+                directory,
                 tree_config: self.test_params.tree.as_ref(),
             }
             .build()?

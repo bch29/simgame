@@ -1,10 +1,12 @@
 use std::collections::HashMap;
 
-use anyhow::Result;
-use cgmath::Matrix4;
+use anyhow::{anyhow, Result};
+use cgmath::{Matrix4, SquareMatrix};
 use serde::{Deserialize, Serialize};
 
-use crate::{World, WorldDelta};
+use simgame_util::{convert_matrix4, Bounds};
+
+use crate::{TextureDirectory, World, WorldDelta};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Entity {
@@ -19,7 +21,7 @@ pub trait Behavior {
     fn update(&self, entity: &Entity, world: &World, updates: &mut WorldDelta);
 }
 
-pub struct Directory {
+pub struct EntityDirectory {
     models: Vec<ConcreteModel>,
     behaviors: Vec<Box<dyn Behavior>>,
 
@@ -45,11 +47,20 @@ pub struct ConcreteModel {
     pub kind: config::ModelKind,
     pub face_texture_ids: Vec<u32>,
     pub transform: Matrix4<f32>,
+    pub bounds: Bounds<f64>,
+}
+
+pub struct ActiveEntityModel {
+    pub model_kind: config::ModelKind,
+    pub transform: Matrix4<f32>,
+    pub face_tex_ids: Vec<u32>,
 }
 
 pub mod config {
-    use cgmath::{Matrix4, SquareMatrix, Vector3};
+    use cgmath::{EuclideanSpace, Matrix4, Point3, Vector3};
     use serde::{Deserialize, Serialize};
+
+    use simgame_util::Bounds;
 
     #[derive(Debug, Clone, Serialize, Deserialize)]
     pub struct EntityConfig {
@@ -93,47 +104,64 @@ pub mod config {
         }
     }
 
-    impl Model {
-        pub fn transform_matrix(&self) -> Matrix4<f32> {
-            let mut result = Matrix4::identity();
-
-            for transform in &self.transforms {
-                result = transform.to_matrix() * result;
-            }
-
-            result
+    impl ModelKind {
+        pub fn bounds(&self) -> Bounds<f64> {
+            Bounds::from_center(Point3::origin(), Vector3::new(2., 2., 2.))
         }
     }
 }
 
-impl Directory {
-    pub fn new<F>(
+impl ConcreteModel {
+    fn from_config_model(
+        model: &config::Model,
+        texture_directory: &TextureDirectory,
+    ) -> Result<Self> {
+        let transform = {
+            let mut result = Matrix4::identity();
+
+            for transform in &model.transforms {
+                result = transform.to_matrix() * result;
+            }
+
+            result
+        };
+
+        let bounds = model
+            .kind
+            .bounds()
+            .transform(convert_matrix4!(transform, f64))
+            .ok_or_else(|| anyhow!("unable to transform bounds for model {:?}", model.name))?;
+
+        let face_texture_ids = model
+            .face_texture_resources
+            .iter()
+            .map(|resource| {
+                let key = texture_directory.texture_key(resource.as_str())?;
+
+                Ok(key.index as u32)
+            })
+            .collect::<Result<_>>()?;
+
+        Ok(Self {
+            name: model.name.clone(),
+            kind: model.kind.clone(),
+            face_texture_ids,
+            transform,
+            bounds,
+        })
+    }
+}
+
+impl EntityDirectory {
+    pub fn new(
         config: &EntityConfig,
         behaviors: Vec<Box<dyn Behavior>>,
-        mut lookup_resource: F,
-    ) -> Result<Self>
-    where
-        F: FnMut(&str) -> Result<u32>,
-    {
+        texture_directory: &TextureDirectory,
+    ) -> Result<Self> {
         let models: Vec<ConcreteModel> = config
             .models
             .iter()
-            .map(|model| {
-                let face_texture_ids = model
-                    .face_texture_resources
-                    .iter()
-                    .map(|resource| lookup_resource(resource.as_str()))
-                    .collect::<Result<_>>()?;
-
-                let transform = model.transform_matrix();
-
-                Ok(ConcreteModel {
-                    name: model.name.clone(),
-                    kind: model.kind.clone(),
-                    face_texture_ids,
-                    transform,
-                })
-            })
+            .map(|model| ConcreteModel::from_config_model(model, texture_directory))
             .collect::<Result<_>>()?;
 
         let model_keys: HashMap<_, _> = models
@@ -170,21 +198,30 @@ impl Directory {
         })
     }
 
-    pub fn model_key(&self, name: &str) -> Option<ModelKey> {
-        self.model_keys.get(name).copied()
+    pub fn model_key(&self, name: &str) -> Result<ModelKey> {
+        self.model_keys
+            .get(name)
+            .copied()
+            .ok_or_else(|| anyhow!("model does not exist: {:?}", name))
     }
 
-    pub fn behavior_key(&self, name: &str) -> Option<BehaviorKey> {
-        self.behavior_keys.get(name).copied()
+    pub fn behavior_key(&self, name: &str) -> Result<BehaviorKey> {
+        self.behavior_keys
+            .get(name)
+            .copied()
+            .ok_or_else(|| anyhow!("behavior does not exist: {:?}", name))
     }
 
-    pub fn model(&self, key: ModelKey) -> Option<&ConcreteModel> {
-        self.models.get(key.index as usize)
+    pub fn model(&self, key: ModelKey) -> Result<&ConcreteModel> {
+        self.models
+            .get(key.index as usize)
+            .ok_or_else(|| anyhow!("model does not exist: {:?}", key))
     }
 
-    pub fn behavior(&self, key: BehaviorKey) -> Option<&dyn Behavior> {
+    pub fn behavior(&self, key: BehaviorKey) -> Result<&dyn Behavior> {
         self.behaviors
             .get(key.index as usize)
             .map(std::ops::Deref::deref)
+            .ok_or_else(|| anyhow!("behavior does not exist: {:?}", key))
     }
 }
