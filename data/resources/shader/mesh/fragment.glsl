@@ -34,26 +34,17 @@ float spot(vec2 p) {
 }
 
 void main() {
-  /* vec4[6] colors = { */
-  /*   vec4(1.0, 0.0, 0.0, 1.0), */
-  /*   vec4(0.0, 1.0, 0.0, 1.0), */
-  /*   vec4(0.0, 0.0, 1.0, 1.0), */
-  /*   vec4(0.5, 0.5, 0.0, 1.0), */
-  /*   vec4(0.0, 0.5, 0.5, 1.0), */
-  /*   vec4(0.5, 0.0, 0.5, 1.0) */
-  /* }; */
-
-  /* vec4 texColor = colors[v_TexId % 6]; */
-
-  vec4 texColor = texture(sampler2D(t_Textures[v_TexId], s_Textures), v_TexCoord);
-
   vec4 ambient = ambientStrength * ambientColor;
+
   vec3 norm = normalize(v_Normal);
   vec3 lightDir = normalize(lightPos - v_Pos.xyz); 
   float diff = max(dot(norm, lightDir), 0.0);
   vec4 diffuse = diff * lightColor;
 
+  vec4 texColor = texture(sampler2D(t_Textures[v_TexId], s_Textures), v_TexCoord);
+
   o_Target = (ambient + diffuse) * texColor;
 }
 
 // vi: ft=c
+

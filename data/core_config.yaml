@@ -75,7 +75,7 @@ resources:
     - name: shader/voxels/fragment
       kind:
         Shader:
-          relative_path: shader/voxels/fragment.glsl
+          relative_path: shader/mesh/fragment.glsl
           kind: Fragment
     # Mesh shaders
     - name: shader/mesh/vertex
