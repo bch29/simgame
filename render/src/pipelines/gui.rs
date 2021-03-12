@@ -9,7 +9,8 @@ use simgame_types::Directory;
 use crate::buffer_util::{
     BufferSyncHelperDesc, BufferSyncable, BufferSyncedData, FillBuffer, IntoBufferSynced,
 };
-use crate::pipelines;
+use crate::pipelines::{self, GraphicsContext};
+use crate::resource::ResourceLoader;
 
 pub(crate) struct GuiRenderPipeline {
     pipeline: wgpu::RenderPipeline,
@@ -29,15 +30,38 @@ struct RenderUniforms {
     model: [[f32; 4]; 4],
 }
 
-impl GuiRenderPipeline {
-    pub fn new(directory: &Directory, ctx: &crate::GraphicsContext) -> Result<GuiRenderPipeline> {
+impl<'a> pipelines::State<'a> for GuiRenderState {
+    type Input = ();
+    type InputDelta = ();
+
+    fn update(&mut self, _input: Self::InputDelta) {}
+
+    fn update_window(&mut self, ctx: &crate::GraphicsContext, params: pipelines::Params) {
+        // self.multisampled_framebuffer =
+        //     Self::create_multisampled_framebuffer(device, swapchain, SAMPLE_COUNT);
+        //
+        let aspect_ratio = params.physical_win_size.x as f32 / params.physical_win_size.y as f32;
+
+        *self.uniforms = RenderUniforms::new(aspect_ratio);
+        self.uniforms.sync(&ctx.queue);
+    }
+}
+
+impl pipelines::Pipeline for GuiRenderPipeline {
+    type State = GuiRenderState;
+
+    fn create_pipeline(
+        ctx: &GraphicsContext,
+        directory: &Directory,
+        resource_loader: &ResourceLoader,
+    ) -> Result<GuiRenderPipeline> {
         let vert_shader = ctx
             .device
             .create_shader_module(&wgpu::ShaderModuleDescriptor {
                 label: None,
                 flags: Default::default(),
                 source: wgpu::ShaderSource::SpirV(
-                    ctx.resource_loader.load_shader("shader/gui/vertex")?.into(),
+                    resource_loader.load_shader("shader/gui/vertex")?.into(),
                 ),
             });
 
@@ -47,9 +71,7 @@ impl GuiRenderPipeline {
                 label: None,
                 flags: Default::default(),
                 source: wgpu::ShaderSource::SpirV(
-                    ctx.resource_loader
-                        .load_shader("shader/gui/fragment")?
-                        .into(),
+                    resource_loader.load_shader("shader/gui/fragment")?.into(),
                 ),
             });
 
@@ -171,27 +193,6 @@ impl GuiRenderPipeline {
             crosshair_texture,
         })
     }
-}
-
-impl<'a> pipelines::State<'a> for GuiRenderState {
-    type Input = ();
-    type InputDelta = ();
-
-    fn update(&mut self, _input: Self::InputDelta) {}
-
-    fn update_window(&mut self, ctx: &crate::GraphicsContext, params: pipelines::Params) {
-        // self.multisampled_framebuffer =
-        //     Self::create_multisampled_framebuffer(device, swapchain, SAMPLE_COUNT);
-        //
-        let aspect_ratio = params.physical_win_size.x as f32 / params.physical_win_size.y as f32;
-
-        *self.uniforms = RenderUniforms::new(aspect_ratio);
-        self.uniforms.sync(&ctx.queue);
-    }
-}
-
-impl pipelines::Pipeline for GuiRenderPipeline {
-    type State = GuiRenderState;
 
     fn create_state<'a>(
         &self,

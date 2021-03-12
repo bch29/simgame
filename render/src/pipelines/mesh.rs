@@ -4,11 +4,14 @@ use anyhow::Result;
 use cgmath::Matrix4;
 use zerocopy::{AsBytes, FromBytes};
 
+use simgame_types::Directory;
+
 use crate::buffer_util::{
     BufferSyncHelperDesc, BufferSyncable, BufferSyncedData, FillBuffer, InstancedBuffer,
     InstancedBufferDesc, IntoBufferSynced,
 };
-use crate::pipelines;
+use crate::pipelines::{self, GraphicsContext};
+use crate::resource::ResourceLoader;
 
 const INSTANCES_PER_PASS: usize = 1024;
 
@@ -64,17 +67,41 @@ struct GeometryBuffers {
     indexes: InstancedBuffer,
 }
 
-impl MeshRenderPipeline {
-    pub fn new(ctx: &crate::GraphicsContext) -> Result<MeshRenderPipeline> {
+impl<'a> pipelines::State<'a> for MeshRenderState {
+    type Input = MeshRenderInput<'a>;
+    type InputDelta = MeshRenderInputDelta<'a>;
+
+    fn update(&mut self, input: MeshRenderInputDelta<'a>) {
+        self.instances.clear();
+        self.instances
+            .extend(input.instances.iter().copied().map(|instance| {
+                let instance: MeshInstanceData = instance.into();
+                instance
+            }));
+
+        *self.uniforms = RenderUniforms::new(input.view_state);
+    }
+
+    fn update_window(&mut self, _ctx: &crate::GraphicsContext, params: pipelines::Params) {
+        self.depth_texture = params.depth_texture.create_view(&Default::default());
+    }
+}
+
+impl pipelines::Pipeline for MeshRenderPipeline {
+    type State = MeshRenderState;
+
+    fn create_pipeline(
+        ctx: &GraphicsContext,
+        _directory: &Directory,
+        resource_loader: &ResourceLoader,
+    ) -> Result<MeshRenderPipeline> {
         let vert_shader = ctx
             .device
             .create_shader_module(&wgpu::ShaderModuleDescriptor {
                 label: None,
                 flags: Default::default(),
                 source: wgpu::ShaderSource::SpirV(
-                    ctx.resource_loader
-                        .load_shader("shader/mesh/vertex")?
-                        .into(),
+                    resource_loader.load_shader("shader/mesh/vertex")?.into(),
                 ),
             });
 
@@ -84,9 +111,7 @@ impl MeshRenderPipeline {
                 label: None,
                 flags: Default::default(),
                 source: wgpu::ShaderSource::SpirV(
-                    ctx.resource_loader
-                        .load_shader("shader/mesh/fragment")?
-                        .into(),
+                    resource_loader.load_shader("shader/mesh/fragment")?.into(),
                 ),
             });
 
@@ -255,30 +280,6 @@ impl MeshRenderPipeline {
             instance_buffer,
         })
     }
-}
-
-impl<'a> pipelines::State<'a> for MeshRenderState {
-    type Input = MeshRenderInput<'a>;
-    type InputDelta = MeshRenderInputDelta<'a>;
-
-    fn update(&mut self, input: MeshRenderInputDelta<'a>) {
-        self.instances.clear();
-        self.instances
-            .extend(input.instances.iter().copied().map(|instance| {
-                let instance: MeshInstanceData = instance.into();
-                instance
-            }));
-
-        *self.uniforms = RenderUniforms::new(input.view_state);
-    }
-
-    fn update_window(&mut self, _ctx: &crate::GraphicsContext, params: pipelines::Params) {
-        self.depth_texture = params.depth_texture.create_view(&Default::default());
-    }
-}
-
-impl pipelines::Pipeline for MeshRenderPipeline {
-    type State = MeshRenderState;
 
     fn create_state<'a>(
         &self,

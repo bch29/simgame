@@ -6,6 +6,7 @@ pub mod shaders;
 mod view;
 
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::Instant;
 
 use anyhow::{anyhow, bail, Result};
@@ -22,17 +23,16 @@ use resource::{ResourceLoader, TextureLoader};
 pub use view::ViewParams;
 pub(crate) use view::ViewState;
 
-pub struct RendererBuilder<'a> {
+pub struct RendererBuilder {
     pub resource_loader: ResourceLoader,
     pub texture_loader: TextureLoader,
-    pub directory: &'a Directory,
+    pub directory: Arc<Directory>,
 }
 
 pub struct RenderStateInputs<'a, W> {
     pub window: &'a W,
     pub physical_win_size: Vector2<u32>,
     pub max_visible_chunks: usize,
-    pub directory: &'a Directory,
     pub view_params: ViewParams,
     pub world: &'a World,
 }
@@ -57,6 +57,8 @@ pub struct Renderer {
     ctx: GraphicsContext,
     pipelines: Pipelines,
     instance: wgpu::Instance,
+    resource_loader: ResourceLoader,
+    directory: Arc<Directory>,
 }
 
 pub fn visible_size_to_chunks(visible_size: Vector3<i32>) -> Vector3<i32> {
@@ -74,8 +76,9 @@ struct DeviceResult {
     queue: wgpu::Queue,
     pub multi_draw_enabled: bool,
 }
-impl<'a> RendererBuilder<'a> {
-    pub async fn build(self, params: RenderParams<'a>) -> Result<Renderer> {
+
+impl RendererBuilder {
+    pub async fn build(self, params: RenderParams<'_>) -> Result<Renderer> {
         let instance = wgpu::Instance::new(wgpu::BackendBit::PRIMARY);
 
         let adapter = instance
@@ -96,18 +99,16 @@ impl<'a> RendererBuilder<'a> {
             device: device_result.device,
             queue: device_result.queue,
             multi_draw_enabled: device_result.multi_draw_enabled,
-            resource_loader: self.resource_loader,
             textures,
         };
 
+        let directory = self.directory;
+        let resource_loader = self.resource_loader;
+
         let pipelines = {
-            let voxel = {
-                let voxel_info_manager =
-                    pipelines::voxels::VoxelInfoManager::new(&self.directory, &ctx)?;
-                pipelines::voxels::VoxelRenderPipeline::new(&ctx, voxel_info_manager)?
-            };
-            let mesh = pipelines::mesh::MeshRenderPipeline::new(&ctx)?;
-            let gui = pipelines::gui::GuiRenderPipeline::new(&self.directory, &ctx)?;
+            let voxel = Pipeline::create_pipeline(&ctx, &*directory, &resource_loader)?;
+            let mesh = Pipeline::create_pipeline(&ctx, &*directory, &resource_loader)?;
+            let gui = Pipeline::create_pipeline(&ctx, &*directory, &resource_loader)?;
             Pipelines { voxel, mesh, gui }
         };
 
@@ -115,6 +116,8 @@ impl<'a> RendererBuilder<'a> {
             ctx,
             pipelines,
             instance,
+            directory,
+            resource_loader,
         })
     }
 }
@@ -137,6 +140,7 @@ impl Renderer {
         let pipeline_params = pipelines::Params {
             physical_win_size: input.physical_win_size,
             depth_texture: &depth_texture,
+            resource_loader: &self.resource_loader,
         };
 
         let world_voxels = self.pipelines.voxel.create_state(
@@ -150,34 +154,24 @@ impl Renderer {
             },
         )?;
 
-        let meshes = {
-            let square = self.pipelines.mesh.create_state(
-                &self.ctx,
-                pipeline_params,
-                pipelines::mesh::MeshRenderInput {
-                    mesh: &crate::mesh::cube::Cube::new().mesh(),
-                    instances: &[],
-                    view_state: &view,
-                },
-            )?;
-
-            let sphere = self.pipelines.mesh.create_state(
-                &self.ctx,
-                pipeline_params,
-                pipelines::mesh::MeshRenderInput {
-                    mesh: &crate::mesh::sphere::UnitSphere { detail: 6 }.mesh(),
-                    instances: &[],
-                    view_state: &view,
-                },
-            )?;
-
-            vec![
-                (entity::config::ModelKind::Cube, square),
-                (entity::config::ModelKind::Sphere, sphere),
-            ]
+        let meshes = self
+            .directory
+            .entity
+            .all_model_kinds()
             .into_iter()
-            .collect()
-        };
+            .map(|kind| {
+                let state = self.pipelines.mesh.create_state(
+                    &self.ctx,
+                    pipeline_params,
+                    pipelines::mesh::MeshRenderInput {
+                        mesh: &crate::mesh::Mesh::from_model_kind(&kind),
+                        instances: &[],
+                        view_state: &view,
+                    },
+                )?;
+                Ok((kind, state))
+            })
+            .collect::<Result<_>>()?;
 
         let gui = self
             .pipelines
@@ -212,6 +206,7 @@ impl Renderer {
         let pipeline_params = pipelines::Params {
             physical_win_size,
             depth_texture: &depth_texture,
+            resource_loader: &self.resource_loader,
         };
         state.world_voxels.update_window(&self.ctx, pipeline_params);
         for mesh in state.meshes.values_mut() {

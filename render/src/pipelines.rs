@@ -1,6 +1,9 @@
 use anyhow::Result;
 use cgmath::Vector2;
 
+use crate::resource::ResourceLoader;
+use simgame_types::Directory;
+
 pub mod gui;
 pub mod mesh;
 pub mod voxels;
@@ -8,7 +11,6 @@ pub mod voxels;
 pub(crate) struct GraphicsContext {
     pub device: wgpu::Device,
     pub queue: wgpu::Queue,
-    pub resource_loader: crate::resource::ResourceLoader,
     pub textures: crate::resource::Textures,
     pub multi_draw_enabled: bool,
 }
@@ -22,6 +24,7 @@ pub(crate) struct FrameRenderContext {
 pub(crate) struct Params<'a> {
     pub physical_win_size: Vector2<u32>,
     pub depth_texture: &'a wgpu::Texture,
+    pub resource_loader: &'a ResourceLoader,
 }
 
 pub(crate) trait State<'a> {
@@ -33,8 +36,14 @@ pub(crate) trait State<'a> {
     fn update_window(&mut self, ctx: &GraphicsContext, params: Params);
 }
 
-pub(crate) trait Pipeline {
+pub(crate) trait Pipeline: Sized {
     type State: for<'a> State<'a>;
+
+    fn create_pipeline(
+        ctx: &GraphicsContext,
+        directory: &Directory,
+        resource_loader: &ResourceLoader,
+    ) -> Result<Self>;
 
     fn create_state<'a>(
         &self,

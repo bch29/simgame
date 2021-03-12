@@ -8,18 +8,20 @@ use anyhow::Result;
 use cgmath::{Matrix4, Point3, Vector3};
 use zerocopy::{AsBytes, FromBytes};
 
+use simgame_types::Directory;
 use simgame_util::{convert_point, Bounds};
-use simgame_voxels::{index_utils, VoxelDelta, VoxelData};
+use simgame_voxels::{index_utils, VoxelData, VoxelDelta};
 
 use crate::buffer_util::{
     BufferSyncHelperDesc, BufferSyncable, BufferSyncedData, FillBuffer, InstancedBuffer,
     InstancedBufferDesc, IntoBufferSynced,
 };
-use crate::pipelines;
+use crate::pipelines::{self, GraphicsContext};
+use crate::resource::ResourceLoader;
 use crate::ViewState;
 
 use chunk_state::ChunkState;
-pub(crate) use voxel_info::VoxelInfoManager;
+use voxel_info::VoxelInfoManager;
 
 /// Holds the static pipeline for rendering voxels. Can be used to render multiple different pieces
 /// of voxel geometry simultaneously.
@@ -103,17 +105,22 @@ struct ChunkMeta {
     _padding1: i32,
 }
 
-impl VoxelRenderPipeline {
-    pub fn new(ctx: &crate::GraphicsContext, voxel_info: VoxelInfoManager) -> Result<Self> {
+impl pipelines::Pipeline for VoxelRenderPipeline {
+    type State = VoxelRenderState;
+    fn create_pipeline(
+        ctx: &GraphicsContext,
+        directory: &Directory,
+        resource_loader: &ResourceLoader,
+    ) -> Result<Self> {
+        let voxel_info = pipelines::voxels::VoxelInfoManager::new(directory, ctx)?;
+
         let compute_shader = ctx
             .device
             .create_shader_module(&wgpu::ShaderModuleDescriptor {
                 label: None,
                 flags: wgpu::ShaderFlags::default(),
                 source: wgpu::ShaderSource::SpirV(
-                    ctx.resource_loader
-                        .load_shader("shader/voxels/compute")?
-                        .into(),
+                    resource_loader.load_shader("shader/voxels/compute")?.into(),
                 ),
             });
 
@@ -123,9 +130,7 @@ impl VoxelRenderPipeline {
                 label: None,
                 flags: wgpu::ShaderFlags::default(),
                 source: wgpu::ShaderSource::SpirV(
-                    ctx.resource_loader
-                        .load_shader("shader/voxels/vertex")?
-                        .into(),
+                    resource_loader.load_shader("shader/voxels/vertex")?.into(),
                 ),
             });
 
@@ -135,7 +140,7 @@ impl VoxelRenderPipeline {
                 label: None,
                 flags: wgpu::ShaderFlags::default(),
                 source: wgpu::ShaderSource::SpirV(
-                    ctx.resource_loader
+                    resource_loader
                         .load_shader("shader/voxels/fragment")?
                         .into(),
                 ),
@@ -401,6 +406,84 @@ impl VoxelRenderPipeline {
         })
     }
 
+    fn render_frame(
+        &self,
+        ctx: &crate::GraphicsContext,
+        load_action: crate::pipelines::LoadAction,
+        frame_render: &mut crate::FrameRenderContext,
+        state: &mut VoxelRenderState,
+    ) {
+        let ts_begin = Instant::now();
+        state.chunk_state.update_buffers(&ctx.queue);
+        let ts_update = Instant::now();
+        self.compute_pass(ctx, frame_render, state);
+        self.render_pass(ctx, load_action, frame_render, state);
+
+        metrics::timing!(
+            "render.pipelines.voxels.update_buffers",
+            ts_update.duration_since(ts_begin)
+        );
+    }
+
+    fn create_state(
+        &self,
+        ctx: &crate::GraphicsContext,
+        params: pipelines::Params,
+        input: VoxelRenderInput,
+    ) -> Result<Self::State> {
+        let geometry_buffers = self.build_geometry_buffers(ctx, input);
+
+        let mut chunk_state = ChunkState::new(
+            &ctx.device,
+            input.max_visible_chunks,
+            input.view_state.params.visible_size,
+        );
+
+        if let Some(active_view_box) = input.view_state.params.calculate_view_box() {
+            chunk_state.update_view_box(active_view_box, input.voxels);
+        }
+
+        log::info!("initializing voxels compute stage");
+        let compute_stage = self.build_compute_stage(ctx, input, &chunk_state, &geometry_buffers);
+
+        log::info!("initializing voxels render stage");
+        let render_stage =
+            self.build_render_stage(ctx, params, input, &chunk_state, &geometry_buffers);
+
+        Ok(VoxelRenderState {
+            chunk_state,
+            compute_stage,
+            render_stage,
+            geometry_buffers,
+        })
+    }
+}
+
+impl<'a> pipelines::State<'a> for VoxelRenderState {
+    type Input = VoxelRenderInput<'a>;
+    type InputDelta = VoxelRenderInputDelta<'a>;
+
+    fn update(&mut self, input: VoxelRenderInputDelta) {
+        if let Some(active_view_box) = input.view_state.params.calculate_view_box() {
+            self.compute_stage.uniforms.update_view_box(active_view_box);
+
+            self.chunk_state
+                .update_view_box(active_view_box, input.voxels);
+        } else {
+            self.chunk_state.clear_view_box();
+        }
+
+        self.chunk_state
+            .apply_chunk_diff(input.voxels, input.voxel_diff);
+        *self.render_stage.uniforms = RenderUniforms::new(input.view_state, input.model);
+    }
+
+    fn update_window(&mut self, _ctx: &crate::GraphicsContext, params: pipelines::Params) {
+        self.render_stage.depth_texture = params.depth_texture.create_view(&Default::default());
+    }
+}
+
+impl VoxelRenderPipeline {
     fn compute_pass(
         &self,
         ctx: &crate::GraphicsContext,
@@ -489,7 +572,6 @@ impl VoxelRenderPipeline {
             layout: &self.compute_bind_group_layout,
             entries: &[
                 uniforms.as_binding(0),
-                // self.voxel_info_manager.voxel_info_buf.as_binding(1),
                 chunk_state.voxel_type_binding(1),
                 chunk_state.chunk_metadata_binding(2),
                 geometry_buffers.faces.as_binding(3),
@@ -589,86 +671,6 @@ impl VoxelRenderPipeline {
             indirect,
             globals,
         }
-    }
-}
-
-impl pipelines::Pipeline for VoxelRenderPipeline {
-    type State = VoxelRenderState;
-
-    fn render_frame(
-        &self,
-        ctx: &crate::GraphicsContext,
-        load_action: crate::pipelines::LoadAction,
-        frame_render: &mut crate::FrameRenderContext,
-        state: &mut VoxelRenderState,
-    ) {
-        let ts_begin = Instant::now();
-        state.chunk_state.update_buffers(&ctx.queue);
-        let ts_update = Instant::now();
-        self.compute_pass(ctx, frame_render, state);
-        self.render_pass(ctx, load_action, frame_render, state);
-
-        metrics::timing!(
-            "render.pipelines.voxels.update_buffers",
-            ts_update.duration_since(ts_begin)
-        );
-    }
-
-    fn create_state(
-        &self,
-        ctx: &crate::GraphicsContext,
-        params: pipelines::Params,
-        input: VoxelRenderInput,
-    ) -> Result<Self::State> {
-        let geometry_buffers = self.build_geometry_buffers(ctx, input);
-
-        let mut chunk_state = ChunkState::new(
-            &ctx.device,
-            input.max_visible_chunks,
-            input.view_state.params.visible_size,
-        );
-
-        if let Some(active_view_box) = input.view_state.params.calculate_view_box() {
-            chunk_state.update_view_box(active_view_box, input.voxels);
-        }
-
-        log::info!("initializing voxels compute stage");
-        let compute_stage = self.build_compute_stage(ctx, input, &chunk_state, &geometry_buffers);
-
-        log::info!("initializing voxels render stage");
-        let render_stage =
-            self.build_render_stage(ctx, params, input, &chunk_state, &geometry_buffers);
-
-        Ok(VoxelRenderState {
-            chunk_state,
-            compute_stage,
-            render_stage,
-            geometry_buffers,
-        })
-    }
-}
-
-impl<'a> pipelines::State<'a> for VoxelRenderState {
-    type Input = VoxelRenderInput<'a>;
-    type InputDelta = VoxelRenderInputDelta<'a>;
-
-    fn update(&mut self, input: VoxelRenderInputDelta) {
-        if let Some(active_view_box) = input.view_state.params.calculate_view_box() {
-            self.compute_stage.uniforms.update_view_box(active_view_box);
-
-            self.chunk_state
-                .update_view_box(active_view_box, input.voxels);
-        } else {
-            self.chunk_state.clear_view_box();
-        }
-
-        self.chunk_state
-            .apply_chunk_diff(input.voxels, input.voxel_diff);
-        *self.render_stage.uniforms = RenderUniforms::new(input.view_state, input.model);
-    }
-
-    fn update_window(&mut self, _ctx: &crate::GraphicsContext, params: pipelines::Params) {
-        self.render_stage.depth_texture = params.depth_texture.create_view(&Default::default());
     }
 }
 

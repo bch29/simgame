@@ -7,6 +7,8 @@ pub mod sphere;
 
 use zerocopy::AsBytes;
 
+use simgame_types::entity::config::ModelKind;
+
 pub type Index = u16;
 
 #[derive(Clone, Copy, Debug, AsBytes)]
@@ -109,5 +111,12 @@ impl Mesh {
         let mut result = lhs.clone();
         result.union_from(rhs);
         result
+    }
+
+    pub fn from_model_kind(kind: &ModelKind) -> Mesh {
+        match kind {
+            ModelKind::Cube => cube::Cube::new().mesh(),
+            ModelKind::Sphere => sphere::UnitSphere { detail: 12 }.mesh(),
+        }
     }
 }

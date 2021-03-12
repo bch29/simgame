@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use anyhow::{anyhow, Result};
 use cgmath::{Matrix4, SquareMatrix};
@@ -224,5 +224,9 @@ impl EntityDirectory {
             .get(key.index as usize)
             .map(std::ops::Deref::deref)
             .ok_or_else(|| anyhow!("behavior does not exist: {:?}", key))
+    }
+
+    pub fn all_model_kinds(&self) -> HashSet<config::ModelKind> {
+        self.models.iter().map(|model| model.kind.clone()).collect()
     }
 }

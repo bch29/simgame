@@ -160,10 +160,12 @@ fn build_window(event_loop: &EventLoop<()>, settings: &settings::VideoSettings) 
 
 impl<'a> TestRenderBuilder<'a> {
     pub async fn build(self) -> Result<TestRender> {
+        let directory = Arc::new(self.directory);
+
         let renderer = RendererBuilder {
             resource_loader: self.resource_loader,
             texture_loader: self.texture_loader,
-            directory: &self.directory,
+            directory: directory.clone(),
         }
         .build(self.render_params.clone())
         .await?;
@@ -206,7 +208,6 @@ impl<'a> TestRenderBuilder<'a> {
             physical_win_size,
             world: &self.world,
             view_params,
-            directory: &self.directory,
             max_visible_chunks: self.test_params.max_visible_chunks,
         })?;
 
@@ -230,8 +231,6 @@ impl<'a> TestRenderBuilder<'a> {
         );
 
         let cursor_reset_position = Point2::origin() + win_dimensions / 2.;
-
-        let directory = Arc::new(self.directory);
 
         let mut entities = Vec::new();
         let mut entity_locations = Vec::new();
