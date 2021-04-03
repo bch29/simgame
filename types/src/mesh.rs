@@ -1,17 +1,15 @@
-#![allow(dead_code)]
-
 use cgmath::{Matrix4, Transform, Vector3, Vector4};
+use zerocopy::AsBytes;
+use serde::{Deserialize, Serialize};
+
+use crate::config::ModelKind;
 
 pub mod cube;
 pub mod sphere;
 
-use zerocopy::AsBytes;
-
-use simgame_types::entity::config::ModelKind;
-
 pub type Index = u16;
 
-#[derive(Clone, Copy, Debug, AsBytes)]
+#[derive(Clone, Copy, Debug, AsBytes, Serialize, Deserialize)]
 #[repr(C)]
 pub struct Vertex {
     pub pos: [f32; 4],
@@ -20,7 +18,7 @@ pub struct Vertex {
     pub tex_coord: [f32; 2],
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct Mesh {
     pub vertices: Vec<Vertex>,
     pub indices: Vec<Index>,
@@ -36,51 +34,6 @@ pub fn vertex(pos: [f64; 3], tex_coord: [f64; 2], face_id: u32, normal: [f64; 3]
 }
 
 impl Mesh {
-    pub fn vertex_buffer_size(&self) -> wgpu::BufferAddress {
-        (std::mem::size_of::<Vertex>() * self.vertices.len()) as u64
-    }
-
-    pub fn index_buffer_size(&self) -> wgpu::BufferAddress {
-        (std::mem::size_of::<Index>() * self.indices.len()) as u64
-    }
-
-    pub fn index_format() -> wgpu::IndexFormat {
-        wgpu::IndexFormat::Uint16
-    }
-
-    pub fn vertex_buffer_layout() -> wgpu::VertexBufferLayout<'static> {
-        wgpu::VertexBufferLayout {
-            array_stride: std::mem::size_of::<Vertex>() as wgpu::BufferAddress,
-            step_mode: wgpu::InputStepMode::Vertex,
-            attributes: &[
-                // pos
-                wgpu::VertexAttribute {
-                    format: wgpu::VertexFormat::Float4,
-                    offset: 0,
-                    shader_location: 0,
-                },
-                // normal
-                wgpu::VertexAttribute {
-                    format: wgpu::VertexFormat::Float3,
-                    offset: 4 * 4,
-                    shader_location: 1,
-                },
-                // face_id
-                wgpu::VertexAttribute {
-                    format: wgpu::VertexFormat::Uint,
-                    offset: 4 * 4 + 3 * 4,
-                    shader_location: 2,
-                },
-                // tex_coord
-                wgpu::VertexAttribute {
-                    format: wgpu::VertexFormat::Float2,
-                    offset: 4 * 4 + 4 + 3 * 4,
-                    shader_location: 3,
-                },
-            ],
-        }
-    }
-
     /// Combine another mesh into this one, resulting in a mesh that is the union of the two.
     pub fn union_from(&mut self, other: &Mesh) {
         let start_index = self.vertices.len() as Index;

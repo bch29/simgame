@@ -5,10 +5,9 @@ use anyhow::{anyhow, Result};
 use zerocopy::{AsBytes, FromBytes};
 
 use simgame_voxels::{config as voxel};
-use simgame_types::Directory;
+use simgame_types::{Directory, mesh::cube::Cube};
 
 use crate::buffer_util::{InstancedBuffer, InstancedBufferDesc};
-use crate::mesh::cube::Cube;
 
 /// Manages all GPU buffers that are static for any given set of voxel types.
 pub(crate) struct VoxelInfoManager {
@@ -109,7 +108,7 @@ impl VoxelInfoManager {
 
         for (face_tex, &index) in index_map.iter() {
             let texture_metadata = Self::get_texture_metadata(face_tex);
-            texture_metadata_buf.write(&ctx.queue, index, texture_metadata.as_bytes())
+            texture_metadata_buf.write(&ctx.queue, index as _, texture_metadata.as_bytes())
         }
 
         Ok(Self {
@@ -126,7 +125,7 @@ impl VoxelInfoManager {
     }
 
     fn get_voxel_render_info(
-        index_map: &HashMap<voxel::FaceTexture, usize>,
+        index_map: &HashMap<voxel::FaceTexture, u32>,
         voxel: &voxel::VoxelInfo,
     ) -> Result<VoxelRenderInfo> {
         let to_index = |face_tex| {

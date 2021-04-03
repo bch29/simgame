@@ -317,7 +317,7 @@ impl ResourceLoader {
                 texture_keys.insert(
                     resource.name.clone(),
                     TextureKey {
-                        index: texture_keys.len(),
+                        index: texture_keys.len() as _,
                     },
                 );
                 images.push(img);
@@ -596,7 +596,7 @@ impl Textures {
         directory: &TextureDirectory,
         resource: &str,
     ) -> Result<&TextureData> {
-        Ok(&self.textures[directory.texture_key(resource)?.index])
+        Ok(&self.textures[directory.texture_key(resource)?.index as usize])
     }
 }
 

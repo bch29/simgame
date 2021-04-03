@@ -1,5 +1,4 @@
 pub mod buffer_util;
-mod mesh;
 mod pipelines;
 pub mod resource;
 pub mod shaders;
@@ -13,9 +12,9 @@ use anyhow::{anyhow, bail, Result};
 use cgmath::{SquareMatrix, Vector2, Vector3};
 use raw_window_handle::HasRawWindowHandle;
 
-use simgame_types::{entity, ActiveEntityModel, Directory, World, WorldDelta};
+use simgame_types::{Directory, MeshKey, ModelRenderData};
 use simgame_util::{convert_vec, DivUp};
-use simgame_voxels::index_utils;
+use simgame_voxels::{index_utils, VoxelData, VoxelDelta};
 
 pub(crate) use pipelines::{FrameRenderContext, GraphicsContext};
 use pipelines::{Pipeline, State as PipelineState};
@@ -34,7 +33,7 @@ pub struct RenderStateInputs<'a, W> {
     pub physical_win_size: Vector2<u32>,
     pub max_visible_chunks: usize,
     pub view_params: ViewParams,
-    pub world: &'a World,
+    pub voxels: &'a VoxelData,
 }
 
 #[derive(Debug, Clone)]
@@ -46,7 +45,7 @@ pub struct RenderParams<'a> {
 pub struct RenderState {
     swapchain: wgpu::SwapChain,
     world_voxels: pipelines::voxels::VoxelRenderState,
-    meshes: HashMap<entity::config::ModelKind, pipelines::mesh::MeshRenderState>,
+    meshes: HashMap<MeshKey, pipelines::mesh::MeshRenderState>,
     gui: pipelines::gui::GuiRenderState,
     view: ViewState,
     surface: wgpu::Surface,
@@ -148,7 +147,7 @@ impl Renderer {
             pipeline_params,
             pipelines::voxels::VoxelRenderInput {
                 model: SquareMatrix::identity(),
-                voxels: &input.world.voxels,
+                voxels: &input.voxels,
                 max_visible_chunks: input.max_visible_chunks,
                 view_state: &view,
             },
@@ -156,20 +155,20 @@ impl Renderer {
 
         let meshes = self
             .directory
-            .entity
-            .all_model_kinds()
+            .model
+            .meshes()
             .into_iter()
-            .map(|kind| {
+            .map(|(key, mesh)| {
                 let state = self.pipelines.mesh.create_state(
                     &self.ctx,
                     pipeline_params,
                     pipelines::mesh::MeshRenderInput {
-                        mesh: &crate::mesh::Mesh::from_model_kind(&kind),
+                        mesh,
                         instances: &[],
                         view_state: &view,
                     },
                 )?;
-                Ok((kind, state))
+                Ok((key, state))
             })
             .collect::<Result<_>>()?;
 
@@ -264,34 +263,34 @@ impl Renderer {
     pub fn update(
         &self,
         state: &mut RenderState,
-        world: &World,
-        diff: &WorldDelta,
-        entities: &[ActiveEntityModel],
+        voxels: &VoxelData,
+        voxel_diff: &VoxelDelta,
+        models: &[ModelRenderData],
     ) {
         state
             .world_voxels
             .update(pipelines::voxels::VoxelRenderInputDelta {
                 model: SquareMatrix::identity(),
-                voxels: &world.voxels,
+                voxels,
                 view_state: &state.view,
-                voxel_diff: &diff.voxels,
+                voxel_diff,
             });
 
         use pipelines::mesh::MeshInstance;
 
-        let mut instances: HashMap<entity::config::ModelKind, Vec<MeshInstance>> = HashMap::new();
-        for entity in entities {
+        let mut instances: HashMap<MeshKey, Vec<MeshInstance>> = HashMap::new();
+        for model in models {
             let mut face_tex_ids = [0; 16];
-            let count_faces = entity.face_tex_ids.len().min(16);
-            face_tex_ids[..count_faces].clone_from_slice(entity.face_tex_ids);
+            let count_faces = model.face_tex_ids.len().min(16);
+            face_tex_ids[..count_faces].clone_from_slice(model.face_tex_ids);
 
             let instance = MeshInstance {
                 face_tex_ids,
-                transform: entity.transform,
+                transform: model.transform,
             };
 
             instances
-                .entry(entity.model_kind.clone())
+                .entry(model.mesh)
                 .or_insert_with(Vec::new)
                 .push(instance);
         }

@@ -1,23 +1,26 @@
 use std::sync::{Arc, Mutex};
 
 use anyhow::{anyhow, Result};
-use cgmath::{EuclideanSpace, Matrix4, Point3, Vector3};
+use cgmath::{EuclideanSpace, Matrix4, Point3, Quaternion, Vector3, Zero};
 use rand::SeedableRng;
 
-use simgame_types::{ActiveEntityModel, Directory};
-use simgame_util::ray::Ray;
-use simgame_util::{convert_point, Bounds};
-use simgame_voxels::primitive::{self, Primitive};
-use simgame_voxels::{index_utils, Voxel, VoxelRaycastHit, VoxelUpdater};
+use simgame_types::{Directory, ModelRenderData};
+use simgame_util::{convert_point, convert_vec, ray::Ray, Bounds};
+use simgame_voxels::{
+    index_utils,
+    primitive::{self, Primitive},
+    Voxel, VoxelData, VoxelDelta, VoxelRaycastHit, VoxelUpdater,
+};
 
 use crate::{
     background_object::{self, BackgroundObject},
+    component,
     tree::{TreeConfig, TreeSystem},
-    World, WorldDelta,
 };
 
 pub struct WorldStateBuilder<'a> {
-    pub world: Arc<Mutex<World>>,
+    pub voxels: Arc<Mutex<VoxelData>>,
+    pub entities: Arc<Mutex<hecs::World>>,
     pub directory: Arc<Directory>,
     pub tree_config: Option<&'a TreeConfig>,
 }
@@ -25,15 +28,18 @@ pub struct WorldStateBuilder<'a> {
 /// Keeps track of world state. Responds immediately to user input and hands off updates to the
 /// background state.
 pub struct WorldState {
+    entities: Arc<Mutex<hecs::World>>,
     connection: Option<background_object::Connection<BackgroundState>>,
 }
 
-/// Handles background updates. While locked on the world mutex, the rendering thread will be
-/// voxeled, so care should be taken not to lock it for long. Other voxeling in this object will
+/// Handles background updates. While locked on the voxel mutex, the rendering thread will be
+/// blocked, so care should be taken not to lock it for long. Other blocking in this object will
 /// not voxel the rendering thread.
 struct BackgroundState {
-    world: Arc<Mutex<World>>,
-    world_diff: WorldDelta,
+    voxels: Arc<Mutex<VoxelData>>,
+    voxel_delta: VoxelDelta,
+    #[allow(unused)]
+    entities: Arc<Mutex<hecs::World>>,
     rng: rand::rngs::StdRng,
     updating: bool,
     filled_voxels: i32,
@@ -61,17 +67,19 @@ impl<'a> WorldStateBuilder<'a> {
         };
 
         let world_state = BackgroundState {
-            world_diff: WorldDelta::new(),
+            voxels: self.voxels,
+            voxel_delta: Default::default(),
+            entities: self.entities.clone(),
             rng: SeedableRng::from_entropy(),
             updating: false,
             filled_voxels: (16 * 16 * 4) / 8,
             tree_system,
-            world: self.world,
         };
 
         let connection = background_object::Connection::new(world_state, Default::default())?;
 
         Ok(WorldState {
+            entities: self.entities,
             connection: Some(connection),
         })
     }
@@ -95,7 +103,7 @@ impl WorldState {
     pub fn on_click(
         &mut self,
         directory: &Directory,
-        world: &Mutex<World>,
+        voxels: &Mutex<VoxelData>,
         camera_pos: Point3<f64>,
         camera_facing: Vector3<f64>,
     ) -> Result<()> {
@@ -105,8 +113,8 @@ impl WorldState {
         };
 
         let raycast_hit = {
-            let world = world.lock().map_err(|_| anyhow!("world mutex poisoned"))?;
-            match world.voxels.cast_ray(&ray, &directory.voxel) {
+            let voxels = voxels.lock().map_err(|_| anyhow!("voxel mutex poisoned"))?;
+            match voxels.cast_ray(&ray, &directory.voxel) {
                 None => return Ok(()),
                 Some(raycast_hit) => raycast_hit,
             }
@@ -119,7 +127,7 @@ impl WorldState {
         self.send_action(WorldUpdateAction::ToggleUpdates)
     }
 
-    pub fn world_diff(&mut self) -> Result<&mut WorldDelta> {
+    pub fn voxel_delta(&mut self) -> Result<&mut VoxelDelta> {
         let connection = self
             .connection
             .as_mut()
@@ -135,49 +143,93 @@ impl WorldState {
         connection.send_user(action)
     }
 
-    /// Returns active entities within the given bounds, for rendering.
-    pub fn active_entities<'a>(
+    /// Returns entity models within the given bounds, for rendering.
+    pub fn model_render_data<'a>(
         &self,
         directory: &'a Directory,
-        world: &World,
-        bounds: Option<Bounds<f64>>,
-    ) -> Result<Vec<ActiveEntityModel<'a>>> {
-        let mut result = Vec::new();
+        search_bounds: Option<Bounds<f64>>,
+        result: &mut Vec<ModelRenderData<'a>>,
+    ) -> Result<()> {
+        let mut entities = self.entities.lock().unwrap();
+        let entities = entities.query_mut::<(
+            &component::Model,
+            &component::Bounds,
+            Option<&component::Position>,
+            Option<&component::Orientation>,
+        )>();
 
-        world
-            .entities
-            .bounds_tree
-            .iter::<anyhow::Error, _>(bounds, |_, bounds, &index| {
-                let location = bounds.center();
-                let entity = &world.entities.entities[index];
+        for (_entity, (model, bounds, position, orientation)) in entities {
+            let offset = position
+                .map(|position| position.point - Point3::origin())
+                .unwrap_or_else(Vector3::zero);
 
-                let model = directory.entity.model(entity.model)?;
+            if let Some(search_bounds) = search_bounds {
+                if !search_bounds.contains_bounds(bounds.translate(offset)) {
+                    continue;
+                }
+            }
 
-                let transform =
-                    Matrix4::from_translation(convert_point!(location, f32) - Point3::origin())
-                        * model.transform;
+            let mut transform = model.transform;
 
-                result.push(ActiveEntityModel {
-                    model_kind: model.kind.clone(),
-                    face_tex_ids: &model.face_texture_ids,
+            if let Some(orientation) = orientation {
+                let quat = Quaternion {
+                    v: convert_vec!(orientation.quat.v, f32),
+                    s: orientation.quat.s as f32,
+                };
+                let rotation_matrix: Matrix4<f32> = quat.into();
+
+                transform = rotation_matrix * transform;
+            }
+
+            transform = Matrix4::from_translation(convert_vec!(offset, f32)) * transform;
+
+            let model_data = directory.model.model_data(model.key)?;
+
+            result.push({
+                ModelRenderData {
+                    mesh: model_data.mesh,
+                    face_tex_ids: model_data.face_texture_ids.as_slice(),
                     transform,
-                });
-                Ok(())
-            })?;
+                }
+            })
+        }
 
-        Ok(result)
+        Ok(())
+    }
+}
+
+impl BackgroundState {
+    fn bounce_system(&self, elapsed: f64, entities: &mut hecs::World) {
+        let entities = entities.query_mut::<(&mut component::Bounce, &mut component::Position)>();
+
+        for (_entity, (bounce, position)) in entities {
+            bounce.progress += elapsed * 2.0;
+            if bounce.progress >= 1.0 {
+                bounce.progress -= 2.0;
+            }
+
+            position.point += Vector3 {
+                x: 0.0,
+                y: 0.0,
+                z: 10.0 * bounce.progress * elapsed,
+            }
+        }
     }
 }
 
 impl BackgroundState {
     /// Moves the world forward by one tick.
     #[allow(clippy::unnecessary_wraps)]
-    fn tick(&mut self, _elapsed: f64) -> Result<()> {
+    fn tick(&mut self, elapsed: f64) -> Result<()> {
+        let mut entities = self.entities.lock().unwrap();
+
+        self.bounce_system(elapsed, &mut *entities);
+
         if !self.updating {
             return Ok(());
         }
 
-        // let mut updater = VoxelUpdater::new(&mut self.world.voxels, &mut self.world_diff.voxels);
+        // let mut updater = VoxelUpdater::new(&mut self.world.voxels, &mut self.voxel_delta.voxels);
         // shape.draw(&mut updater);
 
         self.updating = false;
@@ -198,19 +250,19 @@ impl BackgroundState {
         let mut count_filled = 0;
 
         {
-            let mut world = self
-                .world
+            let mut voxels = self
+                .voxels
                 .lock()
-                .map_err(|_| anyhow!("world mutex poisoned"))?;
+                .map_err(|_| anyhow!("voxel mutex poisoned"))?;
             for p in bounds.iter_points() {
                 if (p.x + p.y + p.z) % step == 0 {
-                    world.voxels.set_voxel(p, Voxel::from_u16(1));
+                    voxels.set_voxel(p, Voxel::from_u16(1));
                     count_filled += 1;
                 } else {
-                    world.voxels.set_voxel(p, Voxel::from_u16(0));
+                    voxels.set_voxel(p, Voxel::from_u16(0));
                 }
                 let (chunk_pos, _) = index_utils::to_chunk_pos(p);
-                self.world_diff.voxels.record_chunk_update(chunk_pos);
+                self.voxel_delta.record_chunk_update(chunk_pos);
             }
         }
 
@@ -250,11 +302,11 @@ impl BackgroundState {
         for (fill_voxel, primitive) in shape.iter_transformed_primitives(draw_transform) {
             // lock the mutex inside the loop so that the rendering thread isn't voxeled while we
             // update
-            let mut world = self
-                .world
+            let mut voxels = self
+                .voxels
                 .lock()
-                .map_err(|_| anyhow!("world mutex poisoned"))?;
-            let mut updater = VoxelUpdater::new(&mut world.voxels, &mut self.world_diff.voxels);
+                .map_err(|_| anyhow!("voxel mutex poisoned"))?;
+            let mut updater = VoxelUpdater::new(&mut voxels, &mut self.voxel_delta);
             primitive.draw(&mut updater, fill_voxel);
         }
         Ok(())
@@ -270,7 +322,7 @@ impl BackgroundState {
 impl BackgroundObject for BackgroundState {
     type UserAction = WorldUpdateAction;
     type TickAction = Tick;
-    type Response = WorldDelta;
+    type Response = VoxelDelta;
 
     fn receive_user(&mut self, action: WorldUpdateAction) -> Result<()> {
         match action {
@@ -285,23 +337,23 @@ impl BackgroundObject for BackgroundState {
         self.tick(elapsed)
     }
 
-    fn produce_response(&mut self) -> Result<Option<WorldDelta>> {
-        if self.world_diff.is_empty() {
+    fn produce_response(&mut self) -> Result<Option<VoxelDelta>> {
+        if self.voxel_delta.is_empty() {
             return Ok(None);
         }
-        let mut diff = WorldDelta::new();
-        std::mem::swap(&mut self.world_diff, &mut diff);
-        Ok(Some(diff))
+        let mut delta = VoxelDelta::default();
+        std::mem::swap(&mut self.voxel_delta, &mut delta);
+        Ok(Some(delta))
     }
 }
 
-impl background_object::Cumulative for WorldDelta {
+impl background_object::Cumulative for VoxelDelta {
     fn empty() -> Self {
-        WorldDelta::new()
+        VoxelDelta::default()
     }
 
-    fn append(&mut self, other: Self) -> Result<()> {
-        self.update_from(other);
+    fn append(&mut self, mut other: Self) -> Result<()> {
+        self.update_from(&mut other);
         Ok(())
     }
 }

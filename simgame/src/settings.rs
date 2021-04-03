@@ -1,7 +1,7 @@
 use cgmath::{Point3, Vector2, Vector3};
 use serde::{Deserialize, Serialize};
 
-use simgame_types::EntityConfig;
+use simgame_types::config::EntityConfig;
 use simgame_render::resource::ResourceConfig;
 use simgame_voxels::VoxelConfig;
 use simgame_world::tree::TreeConfig;
@@ -56,7 +56,6 @@ pub struct VideoSettings {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RenderTestEntity {
     pub model: String,
-    pub behaviors: Vec<String>,
     pub location: Point3<f64>,
 }
 

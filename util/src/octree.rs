@@ -63,6 +63,12 @@ enum Node<T> {
     Leaf(T),
 }
 
+impl<T> Default for Octree<T> {
+    fn default() -> Self {
+        Self::new(0)
+    }
+}
+
 impl<T> Octree<T> {
     /// Creates a new octree with the given height. It will have space for `2^height` distinct
     /// points.

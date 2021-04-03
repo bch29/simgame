@@ -18,33 +18,18 @@ use simgame_render::{
     resource::{ResourceLoader, TextureLoader},
     visible_size_to_chunks, RenderState, RenderStateInputs, Renderer, RendererBuilder, ViewParams,
 };
-use simgame_types::{Directory, Entity};
+use simgame_types::{Directory, VoxelData};
 use simgame_util::{convert_point, convert_vec};
-use simgame_world::World;
 
 use settings::RenderTestParams;
-use simgame_world::{WorldState, WorldStateBuilder};
+use simgame_world::{component, WorldState, WorldStateBuilder};
 
-pub async fn test_render(
-    world: World,
-    test_params: RenderTestParams,
-    render_params: RenderParams<'_>,
-    directory: Directory,
-    resource_loader: ResourceLoader,
-    texture_loader: TextureLoader,
-    metrics_controller: metrics_runtime::Controller,
-) -> Result<()> {
+pub async fn run_game(args: GameArgs<'_>) -> Result<()> {
     let event_loop = EventLoop::new();
 
-    let game = TestRenderBuilder {
+    let game = GameBuilder {
         event_loop: &event_loop,
-        world,
-        test_params,
-        render_params,
-        directory,
-        resource_loader,
-        texture_loader,
-        metrics_controller,
+        args,
     }
     .build()
     .await?;
@@ -52,20 +37,25 @@ pub async fn test_render(
     Ok(())
 }
 
-pub struct TestRenderBuilder<'a> {
-    event_loop: &'a EventLoop<()>,
-    world: World,
-    test_params: RenderTestParams,
-    render_params: RenderParams<'a>,
-    resource_loader: ResourceLoader,
-    texture_loader: TextureLoader,
-    directory: Directory,
-    metrics_controller: metrics_runtime::Controller,
+pub struct GameArgs<'a> {
+    pub voxels: VoxelData,
+    pub entities: hecs::World,
+    pub test_params: RenderTestParams,
+    pub render_params: RenderParams<'a>,
+    pub resource_loader: ResourceLoader,
+    pub texture_loader: TextureLoader,
+    pub directory: Directory,
+    pub metrics_controller: metrics_runtime::Controller,
 }
 
-pub struct TestRender {
+pub struct GameBuilder<'a> {
+    event_loop: &'a EventLoop<()>,
+    args: GameArgs<'a>,
+}
+
+pub struct Game {
     directory: Arc<Directory>,
-    world: Arc<Mutex<World>>,
+    voxels: Arc<Mutex<VoxelData>>,
     world_state: WorldState,
     win_dimensions: Vector2<f64>,
     window: Window,
@@ -93,7 +83,7 @@ struct EventTracker {
 }
 
 struct TimeTracker {
-    params: TimingParams,
+    args: TimingParams,
 
     render_event: EventTracker,
     log_event: EventTracker,
@@ -158,19 +148,19 @@ fn build_window(event_loop: &EventLoop<()>, settings: &settings::VideoSettings) 
     Ok(builder.build(event_loop)?)
 }
 
-impl<'a> TestRenderBuilder<'a> {
-    pub async fn build(self) -> Result<TestRender> {
-        let directory = Arc::new(self.directory);
+impl<'a> GameBuilder<'a> {
+    pub async fn build(self) -> Result<Game> {
+        let directory = Arc::new(self.args.directory);
 
         let renderer = RendererBuilder {
-            resource_loader: self.resource_loader,
-            texture_loader: self.texture_loader,
+            resource_loader: self.args.resource_loader,
+            texture_loader: self.args.texture_loader,
             directory: directory.clone(),
         }
-        .build(self.render_params.clone())
+        .build(self.args.render_params.clone())
         .await?;
 
-        let window = build_window(self.event_loop, &self.test_params.video_settings)?;
+        let window = build_window(self.event_loop, &self.args.test_params.video_settings)?;
 
         let physical_win_size = window.inner_size();
         let physical_win_size: (u32, u32) = physical_win_size.into();
@@ -180,38 +170,38 @@ impl<'a> TestRenderBuilder<'a> {
         let win_dimensions = Vector2::new(logical_win_size.width, logical_win_size.height);
 
         let visible_size = controls::restrict_visible_size(
-            self.test_params.max_visible_chunks,
-            self.test_params.initial_visible_size,
+            self.args.test_params.max_visible_chunks,
+            self.args.test_params.initial_visible_size,
         );
 
-        if visible_size != self.test_params.initial_visible_size {
+        if visible_size != self.args.test_params.initial_visible_size {
             let new_visible_chunks = visible_size_to_chunks(visible_size);
             log::warn!(
                 "Initial visible size of {:?} would exceed max_visible_chunks setting of {}. Decreasing to {:?}. This will use {} out of {} chunks.",
-                self.test_params.initial_visible_size,
-                self.test_params.max_visible_chunks,
+                self.args.test_params.initial_visible_size,
+                self.args.test_params.max_visible_chunks,
                 visible_size,
                 new_visible_chunks.x * new_visible_chunks.y * new_visible_chunks.z,
-                self.test_params.max_visible_chunks
+                self.args.test_params.max_visible_chunks
                 );
         }
 
         let view_params = ViewParams {
-            camera_pos: self.test_params.initial_camera_pos,
-            z_level: self.test_params.initial_z_level,
+            camera_pos: self.args.test_params.initial_camera_pos,
+            z_level: self.args.test_params.initial_z_level,
             visible_size,
-            look_at_dir: self.test_params.look_at_dir,
+            look_at_dir: self.args.test_params.look_at_dir,
         };
 
         let render_state = renderer.create_state(RenderStateInputs {
             window: &window,
             physical_win_size,
-            world: &self.world,
+            voxels: &self.args.voxels,
             view_params,
-            max_visible_chunks: self.test_params.max_visible_chunks,
+            max_visible_chunks: self.args.test_params.max_visible_chunks,
         })?;
 
-        let control_state = controls::ControlState::new(&self.test_params);
+        let control_state = controls::ControlState::new(&self.args.test_params);
 
         use metrics_core::Builder;
         let metrics_observer = metrics_runtime::observers::YamlBuilder::new().build();
@@ -219,56 +209,61 @@ impl<'a> TestRenderBuilder<'a> {
         let time_tracker = TimeTracker::new(
             TimingParams {
                 log_interval: Some(Duration::from_secs(5)),
-                tick_size: Duration::from_millis(self.test_params.game_step_millis),
+                tick_size: Duration::from_millis(self.args.test_params.game_step_millis),
                 render_interval: self
+                    .args
                     .test_params
                     .fixed_refresh_rate
                     .map(|rate| Duration::from_millis(1000 / rate)),
             },
             metrics_observer,
-            self.metrics_controller,
+            self.args.metrics_controller,
             Instant::now(),
         );
 
         let cursor_reset_position = Point2::origin() + win_dimensions / 2.;
 
-        let mut entities = Vec::new();
-        let mut entity_locations = Vec::new();
+        let voxels = Arc::new(Mutex::new(self.args.voxels));
 
-        for entity in self.test_params.entities {
-            entity_locations.push(entity.location);
+        let entities = {
+            let mut entities = self.args.entities;
 
-            let behaviors = entity
-                .behaviors
-                .iter()
-                .map(|name| directory.entity.behavior_key(name.as_str()))
-                .collect::<Result<_>>()?;
+            for entity in self.args.test_params.entities {
+                let model_key = directory.model.model_key(entity.model.as_str())?;
+                let model_data = directory.model.model_data(model_key)?;
 
-            entities.push(Entity {
-                model: directory.entity.model_key(entity.model.as_str())?,
-                behaviors,
-            });
-        }
+                let bounds: component::Bounds = model_data.bounds;
+                let position = component::Position {
+                    point: entity.location,
+                };
+                let model = component::Model {
+                    key: model_key,
+                    transform: model_data.transform,
+                };
 
-        let mut world = self.world;
-        world
-            .entities
-            .populate(entities, entity_locations.as_slice());
+                let bounce = component::Bounce {
+                    progress: -1.0,
+                };
 
-        let world = Arc::new(Mutex::new(world));
-
-        let world_state = {
-            WorldStateBuilder {
-                world: world.clone(),
-                directory: directory.clone(),
-                tree_config: self.test_params.tree.as_ref(),
+                entities.spawn(
+                    (bounds, position, model, bounce)
+                );
             }
-            .build()?
+
+            Arc::new(Mutex::new(entities))
         };
 
-        Ok(TestRender {
+        let world_state = WorldStateBuilder {
+            voxels: voxels.clone(),
+            entities,
+            directory: directory.clone(),
+            tree_config: self.args.test_params.tree.as_ref(),
+        }
+        .build()?;
+
+        Ok(Game {
             directory,
-            world,
+            voxels,
             world_state,
             win_dimensions,
             window,
@@ -284,7 +279,7 @@ impl<'a> TestRenderBuilder<'a> {
     }
 }
 
-impl TestRender {
+impl Game {
     pub fn run(mut self, event_loop: EventLoop<()>) {
         event_loop.run(move |event, window_target, control_flow| {
             match self.handle_event(event, window_target, control_flow) {
@@ -342,7 +337,7 @@ impl TestRender {
                 } => {
                     self.world_state.on_click(
                         &*self.directory,
-                        &self.world,
+                        &self.voxels,
                         convert_point!(self.view_params.effective_camera_pos(), f64),
                         convert_vec!(self.view_params.look_at_dir, f64),
                     )?;
@@ -414,17 +409,19 @@ impl TestRender {
             .set_world_view(&mut self.render_state, self.view_params);
 
         {
-            let world = self.world.lock().unwrap();
-            let entities = self.world_state.active_entities(&*self.directory, &*world, None)?;
-            let world_diff = self.world_state.world_diff()?;
+            let voxels = self.voxels.lock().unwrap();
+            let mut entities = Vec::new();
+            self.world_state
+                .model_render_data(&*self.directory, None, &mut entities)?;
+            let voxel_delta = self.world_state.voxel_delta()?;
 
             self.renderer.update(
                 &mut self.render_state,
-                &*world,
-                world_diff,
+                &*voxels,
+                voxel_delta,
                 entities.as_slice(),
             );
-            world_diff.clear();
+            voxel_delta.clear();
         }
 
         self.renderer.render_frame(&mut self.render_state)?;
@@ -476,7 +473,7 @@ impl EventTracker {
 
 impl TimeTracker {
     pub fn new(
-        params: TimingParams,
+        args: TimingParams,
         metrics_observer: MetricsObserver,
         metrics_controller: metrics_runtime::Controller,
         now: Instant,
@@ -492,7 +489,7 @@ impl TimeTracker {
                 prev_event: None,
             },
             total_ticks: 0,
-            params,
+            args,
             metrics_controller,
             metrics_observer,
         }
@@ -501,7 +498,7 @@ impl TimeTracker {
     /// Advance the TimeTracker forward to a new instant. Returns an iterator over each tick since
     /// the previous call to tick().
     pub fn tick(&mut self, now: Instant) -> impl Iterator<Item = (Instant, Duration)> {
-        if let Some(log_interval) = self.params.log_interval {
+        if let Some(log_interval) = self.args.log_interval {
             if self.log_event.check_ready(now, log_interval) {
                 log::info!("{}", self.drain_metrics());
             }
@@ -509,11 +506,11 @@ impl TimeTracker {
 
         let old_total_ticks = self.total_ticks;
         self.total_ticks = (now.duration_since(self.start_time).as_secs_f64()
-            / self.params.tick_size.as_secs_f64())
+            / self.args.tick_size.as_secs_f64())
         .floor() as i64;
 
         let start_time = self.start_time;
-        let tick_size = self.params.tick_size;
+        let tick_size = self.args.tick_size;
         (old_total_ticks..self.total_ticks).map(move |tick_ix| {
             let tick_time = start_time + tick_size * (tick_ix as u32);
             let elapsed = tick_size;
@@ -523,7 +520,7 @@ impl TimeTracker {
 
     pub fn check_render(&mut self, now: Instant) -> bool {
         let render_interval = self
-            .params
+            .args
             .render_interval
             .unwrap_or_else(|| Duration::from_secs(0));
         self.render_event.check_ready(now, render_interval)

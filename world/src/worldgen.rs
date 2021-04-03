@@ -7,9 +7,9 @@ use rand::Rng;
 use serde::{Deserialize, Serialize};
 
 use simgame_util::Bounds;
-use simgame_voxels::{Voxel, VoxelDirectory, VoxelData, VoxelUpdater};
+use simgame_voxels::{Voxel, VoxelData, VoxelDelta, VoxelDirectory, VoxelUpdater};
 
-use crate::{tree, WorldDelta};
+use crate::tree;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GenerateWorldConfig {
@@ -173,8 +173,8 @@ impl<'a, R> WorldGenerator<'a, R> {
             None => return Ok(()),
         };
 
-        let mut updated_state = WorldDelta::new();
-        let mut voxel_updater = VoxelUpdater::new(&mut self.voxels, &mut updated_state.voxels);
+        let mut delta = VoxelDelta::default();
+        let mut voxel_updater = VoxelUpdater::new(&mut self.voxels, &mut delta);
 
         let tree = tree::generate(tree_config, self.voxel_directory, &mut self.rng)?;
         tree.draw(&mut voxel_updater);

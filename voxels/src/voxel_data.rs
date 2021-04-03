@@ -13,7 +13,7 @@ use crate::config::VoxelDirectory;
 use crate::core::{voxels_to_u16_mut, Chunk, Voxel, VoxelRaycastHit};
 use crate::index_utils;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct VoxelData {
     /// Storage for chunks.
     chunks: Octree<Chunk>,
@@ -442,6 +442,7 @@ mod tests {
         );
     }
 
+    #[allow(clippy::many_single_char_names)]
     fn point_range<Points>(points: Points) -> Option<(Point3<i64>, Point3<i64>)>
     where
         Points: IntoIterator<Item = Point3<i64>>,

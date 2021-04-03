@@ -6,7 +6,7 @@ use crate::index_utils;
 use crate::voxel_data::VoxelData;
 use crate::{Chunk, Voxel};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct VoxelDelta {
     pub modified_chunks: HashSet<Point3<i64>>,
 }
@@ -32,8 +32,8 @@ impl VoxelDelta {
         self.modified_chunks.insert(chunk_pos);
     }
 
-    pub fn update_from(&mut self, other: VoxelDelta) {
-        for chunk in other.modified_chunks.into_iter() {
+    pub fn update_from(&mut self, other: &mut VoxelDelta) {
+        for chunk in other.modified_chunks.drain() {
             self.modified_chunks.insert(chunk);
         }
     }

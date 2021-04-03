@@ -4,7 +4,10 @@ use anyhow::Result;
 use cgmath::Matrix4;
 use zerocopy::{AsBytes, FromBytes};
 
-use simgame_types::Directory;
+use simgame_types::{
+    mesh::{self, Mesh},
+    Directory,
+};
 
 use crate::buffer_util::{
     BufferSyncHelperDesc, BufferSyncable, BufferSyncedData, FillBuffer, InstancedBuffer,
@@ -31,7 +34,7 @@ pub(crate) struct MeshRenderState {
 }
 
 pub(crate) struct MeshRenderInput<'a> {
-    pub mesh: &'a crate::mesh::Mesh,
+    pub mesh: &'a Mesh,
     pub instances: &'a [MeshInstance],
     pub view_state: &'a crate::ViewState,
 }
@@ -219,7 +222,7 @@ impl pipelines::Pipeline for MeshRenderPipeline {
                 vertex: wgpu::VertexState {
                     module: &vert_shader,
                     entry_point: "main",
-                    buffers: &[crate::mesh::Mesh::vertex_buffer_layout()],
+                    buffers: &[mesh_vertex_buffer_layout()],
                 },
                 fragment: Some(wgpu::FragmentState {
                     module: &frag_shader,
@@ -297,8 +300,7 @@ impl pipelines::Pipeline for MeshRenderPipeline {
                 &ctx.device,
                 InstancedBufferDesc {
                     label: "mesh vertices",
-                    instance_len: std::mem::size_of::<crate::mesh::Vertex>()
-                        * input.mesh.vertices.len(),
+                    instance_len: mesh_vertex_buffer_size(&input.mesh),
                     n_instances: 1,
                     usage: wgpu::BufferUsage::COPY_DST | wgpu::BufferUsage::VERTEX,
                 },
@@ -309,8 +311,7 @@ impl pipelines::Pipeline for MeshRenderPipeline {
                 &ctx.device,
                 InstancedBufferDesc {
                     label: "mesh indexes",
-                    instance_len: std::mem::size_of::<crate::mesh::Index>()
-                        * input.mesh.indices.len(),
+                    instance_len: mesh_index_buffer_size(&input.mesh),
                     n_instances: 1,
                     usage: wgpu::BufferUsage::COPY_DST | wgpu::BufferUsage::INDEX,
                 },
@@ -374,7 +375,7 @@ impl pipelines::Pipeline for MeshRenderPipeline {
 
         for instance_chunk in state.instances.chunks(INSTANCES_PER_PASS) {
             let n_indexes = state.geometry_buffers.indexes.size() as u32
-                / std::mem::size_of::<crate::mesh::Index>() as u32;
+                / std::mem::size_of::<mesh::Index>() as u32;
 
             self.instance_buffer
                 .write(&ctx.queue, 0, instance_chunk.as_bytes());
@@ -408,7 +409,7 @@ impl pipelines::Pipeline for MeshRenderPipeline {
             rpass.set_vertex_buffer(0, state.geometry_buffers.vertices.buffer().slice(..));
             rpass.set_index_buffer(
                 state.geometry_buffers.indexes.buffer().slice(..),
-                crate::mesh::Mesh::index_format(),
+                mesh_index_format(),
             );
 
             rpass.draw_indexed(0..n_indexes, 0, 0..instance_chunk.len() as u32);
@@ -454,5 +455,50 @@ impl From<MeshInstance> for MeshInstanceData {
             model_matrix: data.transform.into(),
             face_tex_ids: data.face_tex_ids,
         }
+    }
+}
+
+fn mesh_vertex_buffer_size(mesh: &Mesh) -> usize {
+    std::mem::size_of::<mesh::Vertex>() * mesh.vertices.len()
+}
+
+fn mesh_index_buffer_size(mesh: &Mesh) -> usize {
+    std::mem::size_of::<mesh::Index>() * mesh.indices.len()
+}
+
+fn mesh_index_format() -> wgpu::IndexFormat {
+    wgpu::IndexFormat::Uint16
+}
+
+fn mesh_vertex_buffer_layout() -> wgpu::VertexBufferLayout<'static> {
+    wgpu::VertexBufferLayout {
+        array_stride: std::mem::size_of::<mesh::Vertex>() as wgpu::BufferAddress,
+        step_mode: wgpu::InputStepMode::Vertex,
+        attributes: &[
+            // pos
+            wgpu::VertexAttribute {
+                format: wgpu::VertexFormat::Float4,
+                offset: 0,
+                shader_location: 0,
+            },
+            // normal
+            wgpu::VertexAttribute {
+                format: wgpu::VertexFormat::Float3,
+                offset: 4 * 4,
+                shader_location: 1,
+            },
+            // face_id
+            wgpu::VertexAttribute {
+                format: wgpu::VertexFormat::Uint,
+                offset: 4 * 4 + 3 * 4,
+                shader_location: 2,
+            },
+            // tex_coord
+            wgpu::VertexAttribute {
+                format: wgpu::VertexFormat::Float2,
+                offset: 4 * 4 + 4 + 3 * 4,
+                shader_location: 3,
+            },
+        ],
     }
 }

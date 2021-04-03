@@ -28,6 +28,7 @@ directories = "3.0"
 lz4 = "1.23"
 metrics = "0.12"
 metrics-core = "0.5"
+hecs = "0.5"
 
 [dependencies.metrics-runtime]
 version = "0.13"

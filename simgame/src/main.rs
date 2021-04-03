@@ -7,8 +7,8 @@ use structopt::StructOpt;
 
 use simgame::files::FileContext;
 use simgame_render::resource::{self, ResourceLoader};
-use simgame_types::{Directory, EntityDirectory, VoxelDirectory};
-use simgame_world::{worldgen, World};
+use simgame_types::{Directory, ModelDirectory, VoxelDirectory};
+use simgame_world::worldgen;
 
 #[derive(Debug, StructOpt)]
 struct Opts {
@@ -112,9 +112,7 @@ async fn run_render_world(ctx: &FileContext, options: &RenderWorldOpts) -> Resul
     };
     log::info!("Loaded world: {:?}", voxels.debug_summary());
 
-    let world = World::new(voxels);
-
-    let params = simgame::RenderParams {
+    let render_params = simgame::RenderParams {
         trace_path: options.graphics_trace_path.as_deref(),
     };
 
@@ -123,23 +121,26 @@ async fn run_render_world(ctx: &FileContext, options: &RenderWorldOpts) -> Resul
     let directory = {
         let voxel = VoxelDirectory::new(&ctx.core_settings.voxel_config)?;
         let texture = texture_loader.directory();
-        let entity = EntityDirectory::new(&ctx.core_settings.entity_config, Vec::new(), &texture)?;
+        let model = ModelDirectory::new(&ctx.core_settings.entity_config.models, &texture)?;
         Directory {
             voxel,
-            entity,
+            model,
             texture,
         }
     };
 
-    simgame::test_render(
-        world,
-        settings.render_test_params,
-        params,
+    let entities = hecs::World::new();
+
+    simgame::run_game(simgame::GameArgs {
+        voxels,
+        test_params: settings.render_test_params,
+        entities,
+        render_params,
         directory,
         resource_loader,
         texture_loader,
-        ctx.metrics_controller.clone(),
-    )
+        metrics_controller: ctx.metrics_controller.clone(),
+    })
     .await
 }
 
