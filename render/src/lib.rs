@@ -266,23 +266,26 @@ impl Renderer {
         voxels: &VoxelData,
         voxel_diff: &VoxelDelta,
         models: &[ModelRenderData],
-    ) {
-        state
-            .world_voxels
-            .update(pipelines::voxels::VoxelRenderInputDelta {
+    ) -> Result<()> {
+        state.world_voxels.update(
+            &self.ctx,
+            pipelines::voxels::VoxelRenderInputDelta {
                 model: SquareMatrix::identity(),
                 voxels,
                 view_state: &state.view,
                 voxel_diff,
-            });
+            },
+        );
 
         use pipelines::mesh::MeshInstance;
 
         let mut instances: HashMap<MeshKey, Vec<MeshInstance>> = HashMap::new();
         for model in models {
+            let model_data = self.directory.model.model_data(model.model)?;
+
             let mut face_tex_ids = [0; 16];
-            let count_faces = model.face_tex_ids.len().min(16);
-            face_tex_ids[..count_faces].clone_from_slice(model.face_tex_ids);
+            let count_faces = model_data.face_texture_ids.len().min(16);
+            face_tex_ids[..count_faces].clone_from_slice(model_data.face_texture_ids.as_slice());
 
             let instance = MeshInstance {
                 face_tex_ids,
@@ -290,20 +293,25 @@ impl Renderer {
             };
 
             instances
-                .entry(model.mesh)
+                .entry(model_data.mesh)
                 .or_insert_with(Vec::new)
                 .push(instance);
         }
 
-        for (kind, mesh) in &mut state.meshes {
-            if let Some(instances) = instances.get(kind) {
-                mesh.update(pipelines::mesh::MeshRenderInputDelta {
-                    instances,
-                    view_state: &state.view,
-                });
+        for (key, mesh) in &mut state.meshes {
+            if let Some(instances) = instances.get(key) {
+                mesh.update(
+                    &self.ctx,
+                    pipelines::mesh::MeshRenderInputDelta {
+                        instances,
+                        view_state: &state.view,
+                    },
+                );
             }
         }
-        state.gui.update(());
+        state.gui.update(&self.ctx, ());
+
+        Ok(())
     }
 }
 

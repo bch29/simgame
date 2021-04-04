@@ -34,7 +34,7 @@ impl<'a> pipelines::State<'a> for GuiRenderState {
     type Input = ();
     type InputDelta = ();
 
-    fn update(&mut self, _input: Self::InputDelta) {}
+    fn update(&mut self, _ctx: &crate::GraphicsContext, _input: Self::InputDelta) {}
 
     fn update_window(&mut self, ctx: &crate::GraphicsContext, params: pipelines::Params) {
         // self.multisampled_framebuffer =

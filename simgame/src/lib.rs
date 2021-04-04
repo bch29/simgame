@@ -241,16 +241,12 @@ impl<'a> GameBuilder<'a> {
                     transform: model_data.transform,
                 };
 
-                let bounce = component::Bounce {
-                    progress: -1.0,
-                };
+                let bounce = component::Bounce { progress: -1.0 };
 
-                entities.spawn(
-                    (bounds, position, model, bounce)
-                );
+                entities.spawn((bounds, position, model, bounce));
             }
 
-            Arc::new(Mutex::new(entities))
+            entities
         };
 
         let world_state = WorldStateBuilder {
@@ -409,19 +405,18 @@ impl Game {
             .set_world_view(&mut self.render_state, self.view_params);
 
         {
-            let voxels = self.voxels.lock().unwrap();
+            let mut voxel_delta = Default::default();
             let mut entities = Vec::new();
-            self.world_state
-                .model_render_data(&*self.directory, None, &mut entities)?;
-            let voxel_delta = self.world_state.voxel_delta()?;
+            self.world_state.voxel_delta(&mut voxel_delta)?;
+            self.world_state.model_render_data(&mut entities)?;
 
+            let voxels = self.voxels.lock().unwrap();
             self.renderer.update(
                 &mut self.render_state,
                 &*voxels,
-                voxel_delta,
+                &voxel_delta,
                 entities.as_slice(),
-            );
-            voxel_delta.clear();
+            )?;
         }
 
         self.renderer.render_frame(&mut self.render_state)?;

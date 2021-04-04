@@ -50,11 +50,13 @@ pub struct ModelData {
     pub bounds: Bounds<f64>,
 }
 
-pub struct ModelRenderData<'a> {
-    pub mesh: MeshKey,
-    pub face_tex_ids: &'a [u32],
+#[derive(Debug, Clone)]
+pub struct ModelRenderData {
+    pub model: ModelKey,
     pub transform: Matrix4<f32>,
 }
+
+// pub struct Model
 
 impl ModelDirectory {
     pub fn new(

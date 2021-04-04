@@ -23,14 +23,18 @@ pub(crate) struct MeshRenderPipeline {
     bind_group_layout: wgpu::BindGroupLayout,
     texture_arr_views: Vec<wgpu::TextureView>,
     sampler: wgpu::Sampler,
-    instance_buffer: InstancedBuffer,
 }
 
 pub(crate) struct MeshRenderState {
     depth_texture: wgpu::TextureView,
     uniforms: BufferSyncedData<RenderUniforms, RenderUniforms>,
     geometry_buffers: GeometryBuffers,
-    instances: Vec<MeshInstanceData>,
+    instances: Vec<InstanceChunk>,
+}
+
+struct InstanceChunk {
+    buffer: InstancedBuffer,
+    len: usize,
 }
 
 pub(crate) struct MeshRenderInput<'a> {
@@ -74,15 +78,9 @@ impl<'a> pipelines::State<'a> for MeshRenderState {
     type Input = MeshRenderInput<'a>;
     type InputDelta = MeshRenderInputDelta<'a>;
 
-    fn update(&mut self, input: MeshRenderInputDelta<'a>) {
-        self.instances.clear();
-        self.instances
-            .extend(input.instances.iter().copied().map(|instance| {
-                let instance: MeshInstanceData = instance.into();
-                instance
-            }));
-
+    fn update(&mut self, ctx: &crate::GraphicsContext, input: MeshRenderInputDelta<'a>) {
         *self.uniforms = RenderUniforms::new(input.view_state);
+        update_instance_buffers(ctx, input.instances, &mut self.instances);
     }
 
     fn update_window(&mut self, _ctx: &crate::GraphicsContext, params: pipelines::Params) {
@@ -265,22 +263,11 @@ impl pipelines::Pipeline for MeshRenderPipeline {
                 },
             });
 
-        let instance_buffer = InstancedBuffer::new(
-            &ctx.device,
-            InstancedBufferDesc {
-                label: "mesh instances",
-                instance_len: std::mem::size_of::<MeshInstanceData>() * INSTANCES_PER_PASS,
-                n_instances: 1,
-                usage: wgpu::BufferUsage::COPY_DST | wgpu::BufferUsage::STORAGE,
-            },
-        );
-
         Ok(MeshRenderPipeline {
             pipeline,
             bind_group_layout,
             texture_arr_views,
             sampler,
-            instance_buffer,
         })
     }
 
@@ -321,11 +308,17 @@ impl pipelines::Pipeline for MeshRenderPipeline {
             GeometryBuffers { vertices, indexes }
         };
 
+        let instances = {
+            let mut res = Vec::new();
+            update_instance_buffers(ctx, input.instances, &mut res);
+            res
+        };
+
         Ok(MeshRenderState {
             uniforms,
             geometry_buffers,
             depth_texture,
-            instances: input.instances.iter().copied().map(Into::into).collect(),
+            instances,
         })
     }
 
@@ -338,47 +331,44 @@ impl pipelines::Pipeline for MeshRenderPipeline {
     ) {
         state.uniforms.sync(&ctx.queue);
 
-        let bind_group = ctx.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("gui render"),
-            layout: &self.bind_group_layout,
-            entries: &[
-                // uniforms
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::Buffer {
-                        buffer: state.uniforms.buffer(),
-                        offset: 0,
-                        size: None,
-                    },
-                },
-                // instances
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::Buffer {
-                        buffer: self.instance_buffer.buffer(),
-                        offset: 0,
-                        size: None,
-                    },
-                },
-                wgpu::BindGroupEntry {
-                    binding: 6,
-                    resource: wgpu::BindingResource::TextureViewArray(
-                        self.texture_arr_views.iter().collect::<Vec<_>>().as_slice(),
-                    ),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 7,
-                    resource: wgpu::BindingResource::Sampler(&self.sampler),
-                },
-            ],
-        });
-
-        for instance_chunk in state.instances.chunks(INSTANCES_PER_PASS) {
+        for chunk in &state.instances {
             let n_indexes = state.geometry_buffers.indexes.size() as u32
                 / std::mem::size_of::<mesh::Index>() as u32;
 
-            self.instance_buffer
-                .write(&ctx.queue, 0, instance_chunk.as_bytes());
+            let bind_group = ctx.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("gui render"),
+                layout: &self.bind_group_layout,
+                entries: &[
+                    // uniforms
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::Buffer {
+                            buffer: state.uniforms.buffer(),
+                            offset: 0,
+                            size: None,
+                        },
+                    },
+                    // instances
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Buffer {
+                            buffer: chunk.buffer.buffer(),
+                            offset: 0,
+                            size: None,
+                        },
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 6,
+                        resource: wgpu::BindingResource::TextureViewArray(
+                            self.texture_arr_views.iter().collect::<Vec<_>>().as_slice(),
+                        ),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 7,
+                        resource: wgpu::BindingResource::Sampler(&self.sampler),
+                    },
+                ],
+            });
 
             let mut rpass = frame_render
                 .encoder
@@ -412,10 +402,45 @@ impl pipelines::Pipeline for MeshRenderPipeline {
                 mesh_index_format(),
             );
 
-            rpass.draw_indexed(0..n_indexes, 0, 0..instance_chunk.len() as u32);
+            rpass.draw_indexed(0..n_indexes, 0, 0..chunk.len as u32);
 
             // Never clear the frame after the first render pass
             load_action = pipelines::LoadAction::Load;
+        }
+    }
+}
+
+fn update_instance_buffers(
+    ctx: &crate::GraphicsContext,
+    input: &[MeshInstance],
+    result: &mut Vec<InstanceChunk>,
+) {
+    let chunks = input.chunks(INSTANCES_PER_PASS);
+    while result.len() > chunks.len() {
+        result.pop();
+    }
+
+    while result.len() < chunks.len() {
+        let buffer = InstancedBuffer::new(
+            &ctx.device,
+            InstancedBufferDesc {
+                label: "mesh instances",
+                instance_len: std::mem::size_of::<MeshInstanceData>(),
+                n_instances: INSTANCES_PER_PASS,
+                usage: wgpu::BufferUsage::COPY_DST | wgpu::BufferUsage::STORAGE,
+            },
+        );
+
+        result.push(InstanceChunk { buffer, len: 0 });
+    }
+
+    for (chunk, input_chunk) in result.iter_mut().zip(chunks) {
+        chunk.len = input_chunk.len();
+        for (instance_ix, &instance) in input_chunk.iter().enumerate() {
+            let instance: MeshInstanceData = instance.into();
+            chunk
+                .buffer
+                .write(&ctx.queue, instance_ix, instance.as_bytes());
         }
     }
 }

@@ -31,7 +31,7 @@ pub(crate) trait State<'a> {
     type Input;
     type InputDelta;
 
-    fn update(&mut self, input: Self::InputDelta);
+    fn update(&mut self, ctx: &GraphicsContext, input: Self::InputDelta);
 
     fn update_window(&mut self, ctx: &GraphicsContext, params: Params);
 }

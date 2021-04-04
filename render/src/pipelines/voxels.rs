@@ -463,7 +463,7 @@ impl<'a> pipelines::State<'a> for VoxelRenderState {
     type Input = VoxelRenderInput<'a>;
     type InputDelta = VoxelRenderInputDelta<'a>;
 
-    fn update(&mut self, input: VoxelRenderInputDelta) {
+    fn update(&mut self, _ctx: &crate::GraphicsContext, input: VoxelRenderInputDelta) {
         if let Some(active_view_box) = input.view_state.params.calculate_view_box() {
             self.compute_stage.uniforms.update_view_box(active_view_box);
 
