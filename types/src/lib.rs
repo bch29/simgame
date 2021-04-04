@@ -15,3 +15,23 @@ pub struct Directory {
     pub texture: TextureDirectory,
     pub model: ModelDirectory,
 }
+
+/// Implemented by behavior components.
+#[typetag::serde]
+pub trait Behavior: std::fmt::Debug {
+    fn insert(&self, entity: &mut hecs::EntityBuilder);
+}
+
+#[macro_export]
+macro_rules! impl_behavior {
+    { $(impl Behavior for $ty:ty;)* } =>
+    {
+        $(
+        #[typetag::serde]
+        impl $crate::Behavior for $ty {
+            fn insert(&self, entity: &mut hecs::EntityBuilder) {
+                entity.add(self.clone());
+            }
+        })*
+    }
+}

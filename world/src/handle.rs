@@ -1,77 +1,27 @@
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 
 use anyhow::{anyhow, Result};
 use cgmath::{Point3, Vector3};
-use rand::SeedableRng;
 
 use simgame_types::{Directory, ModelRenderData};
-use simgame_util::ray::Ray;
-use simgame_voxels::{VoxelData, VoxelDelta, VoxelRaycastHit};
+use simgame_util::{background_object, ray::Ray};
+use simgame_voxels::{VoxelData, VoxelDelta};
 
-use crate::{
-    background_object,
-    tree::{TreeConfig, TreeSystem},
-};
-
-mod background;
-
-pub struct WorldStateBuilder<'a> {
-    pub voxels: Arc<Mutex<VoxelData>>,
-    pub entities: hecs::World,
-    pub directory: Arc<Directory>,
-    pub tree_config: Option<&'a TreeConfig>,
-}
+use crate::state::{Tick, WorldState, WorldUpdateAction};
 
 /// Keeps track of world state. Responds immediately to user input and hands off updates to the
 /// background state.
-pub struct WorldState {
-    connection: Option<background_object::Connection<background::BackgroundState>>,
+pub struct WorldStateHandle {
+    connection: Option<background_object::Connection<WorldState>>,
 }
 
-#[derive(Debug, Clone, Default)]
-struct WorldResponse {
-    voxel_delta: VoxelDelta,
-    models: Vec<ModelRenderData>,
-}
-
-#[derive(Debug, Clone)]
-struct Tick {
-    pub elapsed: f64,
-}
-
-#[derive(Debug, Clone)]
-enum WorldUpdateAction {
-    SpawnTree { raycast_hit: VoxelRaycastHit },
-    ModifyFilledVoxels { delta: i32 },
-    ToggleUpdates,
-}
-
-impl<'a> WorldStateBuilder<'a> {
-    pub fn build(self) -> Result<WorldState> {
-        let tree_system = match self.tree_config {
-            Some(tree_config) => Some(TreeSystem::new(tree_config, &self.directory.voxel)?),
-            None => None,
-        };
-
-        let world_state = background::BackgroundState {
-            voxels: self.voxels,
-            response: Default::default(),
-            entities: self.entities,
-            rng: SeedableRng::from_entropy(),
-            updating: false,
-            filled_voxels: (16 * 16 * 4) / 8,
-            tree_system,
-        };
-
-        let connection = background_object::Connection::new(world_state, Default::default())?;
-
-        Ok(WorldState {
+impl WorldStateHandle {
+    pub(super) fn new(connection: background_object::Connection<WorldState>) -> Self {
+        Self {
             connection: Some(connection),
-        })
+        }
     }
-}
 
-impl WorldState {
     /// Moves the world forward by one tick.
     pub fn tick(&mut self, elapsed: f64) -> Result<()> {
         let connection = self
@@ -143,29 +93,5 @@ impl WorldState {
         let models = &mut connection.current_response()?.models;
         result.extend(models.drain(..));
         Ok(())
-    }
-}
-
-impl background_object::Cumulative for WorldResponse {
-    fn empty() -> Self {
-        Self::default()
-    }
-
-    fn append(&mut self, mut other: Self) -> Result<()> {
-        // voxel data gets accumulated
-        self.voxel_delta.update_from(&mut other.voxel_delta);
-
-        // models to render get overwritten
-        if !other.models.is_empty() {
-            self.models.clear();
-            self.models.extend(other.models.into_iter());
-        }
-        Ok(())
-    }
-}
-
-impl WorldResponse {
-    fn is_empty(&self) -> bool {
-        self.voxel_delta.is_empty() && self.models.is_empty()
     }
 }

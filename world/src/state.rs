@@ -1,24 +1,44 @@
+use std::default::Default;
 use std::sync::{Arc, Mutex};
 
 use anyhow::{anyhow, Result};
 use cgmath::{EuclideanSpace, Matrix4, Point3, Quaternion, Vector3, Zero};
 
 use simgame_types::ModelRenderData;
-use simgame_util::{convert_point, convert_vec, Bounds};
+use simgame_util::{
+    background_object::{BackgroundObject, Cumulative},
+    convert_point, convert_vec, Bounds,
+};
 use simgame_voxels::{
     index_utils,
     primitive::{self, Primitive},
-    Voxel, VoxelData, VoxelRaycastHit, VoxelUpdater,
+    Voxel, VoxelData, VoxelDelta, VoxelRaycastHit, VoxelUpdater,
 };
 
-use crate::{background_object::BackgroundObject, component, tree::TreeSystem};
+use crate::{component, behavior, tree::TreeSystem};
 
-use super::{Tick, WorldResponse, WorldUpdateAction};
+#[derive(Debug, Clone, Default)]
+pub(super) struct WorldResponse {
+    pub voxel_delta: VoxelDelta,
+    pub models: Vec<ModelRenderData>,
+}
+
+#[derive(Debug, Clone)]
+pub(super) struct Tick {
+    pub elapsed: f64,
+}
+
+#[derive(Debug, Clone)]
+pub(super) enum WorldUpdateAction {
+    SpawnTree { raycast_hit: VoxelRaycastHit },
+    ModifyFilledVoxels { delta: i32 },
+    ToggleUpdates,
+}
 
 /// Handles background updates. While locked on the voxel mutex, the rendering thread will be
 /// blocked, so care should be taken not to lock it for long. Other blocking in this object will
 /// not block the rendering thread.
-pub(super) struct BackgroundState {
+pub(super) struct WorldState {
     pub voxels: Arc<Mutex<VoxelData>>,
     pub response: WorldResponse,
     #[allow(unused)]
@@ -30,7 +50,7 @@ pub(super) struct BackgroundState {
     pub tree_system: Option<TreeSystem>,
 }
 
-impl BackgroundState {
+impl WorldState {
     /// Moves the world forward by one tick.
     #[allow(clippy::unnecessary_wraps)]
     fn tick(&mut self, elapsed: f64) -> Result<()> {
@@ -133,7 +153,7 @@ impl BackgroundState {
     fn run_bounce(&mut self, elapsed: f64) {
         let entities = self
             .entities
-            .query_mut::<(&mut component::Bounce, &mut component::Position)>();
+            .query_mut::<(&mut behavior::Bounce, &mut component::Position)>();
 
         for (_entity, (bounce, position)) in entities {
             bounce.progress += elapsed * 2.0;
@@ -185,7 +205,7 @@ impl BackgroundState {
     }
 }
 
-impl BackgroundObject for BackgroundState {
+impl BackgroundObject for WorldState {
     type UserAction = WorldUpdateAction;
     type TickAction = Tick;
     type Response = WorldResponse;
@@ -210,5 +230,29 @@ impl BackgroundObject for BackgroundState {
         let mut response = WorldResponse::default();
         std::mem::swap(&mut self.response, &mut response);
         Ok(Some(response))
+    }
+}
+
+impl Cumulative for WorldResponse {
+    fn empty() -> Self {
+        Self::default()
+    }
+
+    fn append(&mut self, mut other: Self) -> Result<()> {
+        // voxel data gets accumulated
+        self.voxel_delta.update_from(&mut other.voxel_delta);
+
+        // models to render get overwritten
+        if !other.models.is_empty() {
+            self.models.clear();
+            self.models.extend(other.models.into_iter());
+        }
+        Ok(())
+    }
+}
+
+impl WorldResponse {
+    fn is_empty(&self) -> bool {
+        self.voxel_delta.is_empty() && self.models.is_empty()
     }
 }

@@ -9,6 +9,8 @@ simgame_voxels = { path = "../voxels" }
 simgame_util = { path = "../util" }
 cgmath = { version = "0.18", features = ["serde"] }
 serde = { version = "1.0", features = ["derive"] }
+typetag = "0.1.7"
 anyhow = "1.0"
 log = "0.4"
 zerocopy = "0.3"
+hecs = "0.5"

@@ -1,4 +1,4 @@
-use cgmath::{Matrix4, Point3, Quaternion};
+use cgmath::{Matrix4, Point3, Quaternion, Vector3};
 use serde::{Deserialize, Serialize};
 
 use simgame_types::ModelKey;
@@ -27,6 +27,4 @@ pub struct Model {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Bounce {
-    pub progress: f64,
-}
+pub struct Velocity(Vector3<f64>);

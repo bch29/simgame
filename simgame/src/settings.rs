@@ -1,19 +1,19 @@
 use cgmath::{Point3, Vector2, Vector3};
 use serde::{Deserialize, Serialize};
 
-use simgame_types::config::EntityConfig;
+use simgame_types::{config::EntityConfig, Behavior};
 use simgame_render::resource::ResourceConfig;
 use simgame_voxels::VoxelConfig;
 use simgame_world::tree::TreeConfig;
 
 /// Settings specific to this particular game.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Default, Serialize, Deserialize)]
 pub struct Settings {
     pub render_test_params: RenderTestParams,
 }
 
 /// Settings specific to the game engine.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct CoreSettings {
     pub game_name: String,
     pub path_name: String,
@@ -24,7 +24,7 @@ pub struct CoreSettings {
     pub resources: ResourceConfig,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct RenderTestParams {
     pub game_step_millis: u64,
     pub fixed_refresh_rate: Option<u64>,
@@ -37,6 +37,7 @@ pub struct RenderTestParams {
 
     pub tree: Option<TreeConfig>,
 
+    pub entity_archetypes: Vec<EntityArchetype>,
     pub entities: Vec<RenderTestEntity>,
 }
 
@@ -53,10 +54,19 @@ pub struct VideoSettings {
     pub video_mode: VideoMode,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct RenderTestEntity {
-    pub model: String,
+    pub archetype: String,
     pub location: Point3<f64>,
+    pub behaviors: Option<Vec<Box<dyn Behavior>>>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct EntityArchetype {
+    pub name: String,
+    pub clone_from: Option<String>,
+    pub model: Option<String>,
+    pub behaviors: Option<Vec<Box<dyn Behavior>>>,
 }
 
 impl Default for RenderTestParams {
@@ -74,6 +84,7 @@ impl Default for RenderTestParams {
                 video_mode: VideoMode::Windowed,
             },
             tree: None,
+            entity_archetypes: Vec::new(),
             entities: Vec::new(),
         }
     }

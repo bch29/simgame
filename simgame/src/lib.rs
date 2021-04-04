@@ -22,7 +22,7 @@ use simgame_types::{Directory, VoxelData};
 use simgame_util::{convert_point, convert_vec};
 
 use settings::RenderTestParams;
-use simgame_world::{component, WorldState, WorldStateBuilder};
+use simgame_world::{component, WorldStateBuilder, WorldStateHandle};
 
 pub async fn run_game(args: GameArgs<'_>) -> Result<()> {
     let event_loop = EventLoop::new();
@@ -56,7 +56,7 @@ pub struct GameBuilder<'a> {
 pub struct Game {
     directory: Arc<Directory>,
     voxels: Arc<Mutex<VoxelData>>,
-    world_state: WorldState,
+    world_state: WorldStateHandle,
     win_dimensions: Vector2<f64>,
     window: Window,
     control_state: controls::ControlState,
@@ -228,22 +228,31 @@ impl<'a> GameBuilder<'a> {
         let entities = {
             let mut entities = self.args.entities;
 
-            for entity in self.args.test_params.entities {
-                let model_key = directory.model.model_key(entity.model.as_str())?;
+            let mut builder = hecs::EntityBuilder::new();
+
+            let resolved = archetype::resolve(
+                self.args.test_params.entity_archetypes.as_slice(),
+                self.args.test_params.entities.as_slice(),
+            )?;
+
+            for entity in resolved {
+                let model_key = directory.model.model_key(entity.model)?;
                 let model_data = directory.model.model_data(model_key)?;
 
-                let bounds: component::Bounds = model_data.bounds;
-                let position = component::Position {
+                builder.add(model_data.bounds);
+                builder.add(component::Position {
                     point: entity.location,
-                };
-                let model = component::Model {
+                });
+                builder.add(component::Model {
                     key: model_key,
                     transform: model_data.transform,
-                };
+                });
 
-                let bounce = component::Bounce { progress: -1.0 };
+                for behavior in &entity.behaviors {
+                    behavior.insert(&mut builder);
+                }
 
-                entities.spawn((bounds, position, model, bounce));
+                entities.spawn(builder.build());
             }
 
             entities
@@ -272,6 +281,136 @@ impl<'a> GameBuilder<'a> {
             has_cursor_control: false,
             focused: false,
         })
+    }
+}
+
+mod archetype {
+    use std::collections::HashMap;
+
+    use anyhow::{anyhow, bail, Result};
+    use cgmath::Point3;
+
+    use simgame_types::Behavior;
+
+    use crate::settings;
+
+    pub struct ResolvedEntity<'a> {
+        pub model: &'a str,
+        pub location: Point3<f64>,
+        pub behaviors: Vec<&'a dyn Behavior>,
+    }
+
+    #[derive(Clone, Debug)]
+    struct ResolvedArchetype<'a> {
+        name: &'a str,
+        model: &'a str,
+        behaviors: Vec<&'a dyn Behavior>,
+    }
+
+    impl<'a> ResolvedArchetype<'a> {
+        fn from_config_pure(archetype: &'a settings::EntityArchetype) -> Result<Self> {
+            let name = archetype.name.as_str();
+            let model = archetype
+                .model
+                .as_ref()
+                .ok_or_else(|| anyhow!("missing model in archetype {:?}", name))?
+                .as_str();
+            let behaviors = archetype
+                .behaviors
+                .iter()
+                .flat_map(|behaviors| behaviors.iter().map(|b| &**b))
+                .collect();
+
+            Ok(Self {
+                name,
+                model,
+                behaviors,
+            })
+        }
+
+        fn from_config_cloning(
+            archetype: &'a settings::EntityArchetype,
+            base: ResolvedArchetype<'a>,
+        ) -> Self {
+            let mut result = base;
+            result.name = archetype.name.as_str();
+
+            if let Some(model) = &archetype.model {
+                result.model = model.as_str();
+            }
+
+            if let Some(behaviors) = &archetype.behaviors {
+                result.behaviors.extend(behaviors.iter().map(|b| &**b));
+            }
+
+            result
+        }
+
+        fn try_from_config(
+            archetype: &'a settings::EntityArchetype,
+            existing: &HashMap<String, ResolvedArchetype<'a>>,
+        ) -> Result<Option<Self>> {
+            let result = match &archetype.clone_from {
+                Some(clone_from) => match existing.get(clone_from).cloned() {
+                    Some(base) => Self::from_config_cloning(archetype, base),
+                    None => return Ok(None),
+                },
+                None => Self::from_config_pure(archetype)?,
+            };
+
+            if existing.contains_key(result.name) {
+                bail!("duplicate archetype name {:?}", result.name);
+            }
+
+            Ok(Some(result))
+        }
+    }
+
+    pub fn resolve<'a>(
+        archetypes: &'a [settings::EntityArchetype],
+        entities: &'a [settings::RenderTestEntity],
+    ) -> Result<Vec<ResolvedEntity<'a>>> {
+        let mut resolved_archetypes: HashMap<String, ResolvedArchetype> = HashMap::new();
+        let mut remaining_archetypes: Vec<&'a settings::EntityArchetype> =
+            archetypes.iter().collect();
+
+        while !remaining_archetypes.is_empty() {
+            let previous_len = remaining_archetypes.len();
+            for archetype in remaining_archetypes.drain(..).collect::<Vec<_>>() {
+                match ResolvedArchetype::try_from_config(archetype, &resolved_archetypes)? {
+                    Some(result) => {
+                        resolved_archetypes.insert(archetype.name.to_owned(), result);
+                    }
+                    None => {
+                        remaining_archetypes.push(archetype);
+                    }
+                };
+            }
+
+            if remaining_archetypes.len() == previous_len {
+                bail!("cycle or missing archetype in clone_from");
+            }
+        }
+
+        entities
+            .iter()
+            .map(|entity| {
+                let archetype = resolved_archetypes
+                    .get(&entity.archetype)
+                    .ok_or_else(|| anyhow!("archetype {:?} not configured", entity.archetype))?;
+
+                let mut behaviors: Vec<&'a dyn Behavior> = archetype.behaviors.clone();
+                if let Some(extra_behaviors) = &entity.behaviors {
+                    behaviors.extend(extra_behaviors.iter().map(|b| &**b));
+                }
+
+                Ok(ResolvedEntity {
+                    model: archetype.model,
+                    location: entity.location,
+                    behaviors,
+                })
+            })
+            .collect()
     }
 }
 

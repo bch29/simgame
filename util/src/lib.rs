@@ -3,6 +3,7 @@ pub mod float_octree;
 pub mod octree;
 pub mod ray;
 pub mod stable_map;
+pub mod background_object;
 
 use cgmath::{Point3, Vector3};
 

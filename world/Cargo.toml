@@ -17,3 +17,4 @@ log = "0.4"
 crossbeam = "0.7"
 metrics = "0.12"
 hecs = { version = "0.5", features = ["column-serialize"] }
+typetag = "0.1.7"
