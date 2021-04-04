@@ -23,3 +23,9 @@ pub struct Model {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Velocity(pub Vector3<f64>);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Ground {
+    OnGround,
+    NotOnGround
+}

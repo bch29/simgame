@@ -2,14 +2,14 @@ use std::default::Default;
 use std::sync::{Arc, Mutex};
 
 use anyhow::{anyhow, Result};
-use cgmath::{EuclideanSpace, Matrix4, Point3, Quaternion, Vector3, Zero};
+use cgmath::{EuclideanSpace, InnerSpace, Matrix4, Point3, Quaternion, Vector3, Zero};
 use rand::SeedableRng;
 
 use simgame_types::{Directory, ModelRenderData};
 use simgame_util::{
     background_object::{BackgroundObject, Cumulative},
     convert_point, convert_vec,
-    ray::Ray,
+    ray::{Intersection, Ray},
     Bounds,
 };
 use simgame_voxels::{
@@ -158,12 +158,14 @@ impl WorldState {
     /// Moves the world forward by one tick.
     #[allow(clippy::unnecessary_wraps)]
     fn tick(&mut self, elapsed: f64) -> Result<()> {
-        // motion-affecting
-        self.run_bounce(elapsed);
+        // update velocity
+        self.run_friction(elapsed);
         self.run_fall(elapsed);
+        self.run_accelerate(elapsed);
+        self.run_impulse(elapsed);
 
-        // position-affecting
-        self.run_motion(elapsed);
+        // update position
+        Motion::run(self, elapsed);
 
         // rendering
         self.run_render_mesh(elapsed);
@@ -178,66 +180,11 @@ impl WorldState {
         Ok(())
     }
 
-    fn run_bounce(&mut self, elapsed: f64) {
-        let entities = self
-            .entities
-            .query_mut::<(&mut behavior::Bounce, &mut component::Velocity)>();
-
-        for (_entity, (bounce, velocity)) in entities {
-            bounce.progress += elapsed;
-            if bounce.progress >= 1.0 {
-                bounce.progress -= 1.0;
-                velocity.0 += Vector3 {
-                    x: 0.0,
-                    y: 0.0,
-                    z: 25.0,
-                };
-            }
-        }
-    }
-
-    fn run_motion(&mut self, elapsed: f64) {
-        let entities = self.entities.query_mut::<(
-            &mut component::Position,
-            &mut component::Velocity,
-            Option<&component::Bounds>,
-        )>();
-
-        let voxels = self.voxels.lock().expect("unable to lock voxel data");
-
-        for (_entity, (component::Position(position), component::Velocity(velocity), _bounds)) in
-            entities
-        {
-            let mut offset = elapsed * *velocity;
-
-            // very simple handling of collision with voxels: if a ray cast from the entity's
-            // current position in the direction of its motion intersects a voxel, ensure the
-            // entity's origin does not move past the point of intersection and set its velocity to
-            // 0 if it would
-            {
-                let ray = Ray {
-                    origin: *position,
-                    dir: offset,
-                };
-
-                if let Some(raycast_hit) = voxels.cast_ray(&ray, &self.directory.voxel) {
-                    let t = raycast_hit.intersection.t;
-                    if t <= 1.0 {
-                        offset = (t - 0.001) * elapsed * *velocity;
-                        *velocity = Zero::zero();
-                    }
-                }
-            }
-
-            *position += offset;
-        }
-    }
-
     fn run_fall(&mut self, elapsed: f64) {
         let gravity_vec = Vector3 {
             x: 0.0,
             y: 0.0,
-            z: -50.0,
+            z: -20.0,
         };
 
         let entities = self
@@ -246,6 +193,48 @@ impl WorldState {
 
         for (_entity, (component::Velocity(velocity), behavior::Fall)) in entities {
             *velocity += elapsed * gravity_vec;
+        }
+    }
+
+    fn run_accelerate(&mut self, elapsed: f64) {
+        let entities = self
+            .entities
+            .query_mut::<(&mut component::Velocity, &behavior::Accelerate)>();
+
+        for (_entity, (component::Velocity(velocity), behavior::Accelerate(accel))) in entities {
+            *velocity += elapsed * *accel;
+        }
+    }
+
+    fn run_impulse(&mut self, _elapsed: f64) {
+        let entities = self
+            .entities
+            .query_mut::<(&mut component::Velocity, &mut behavior::Impulse)>();
+
+        for (_entity, (component::Velocity(velocity), behavior::Impulse(impulse))) in entities {
+            *velocity += *impulse;
+            *impulse = Zero::zero();
+        }
+    }
+
+    fn run_friction(&mut self, elapsed: f64) {
+        let epsilon = 0.01 * elapsed;
+
+        let entities = self.entities.query_mut::<(
+            &mut component::Velocity,
+            Option<&component::Ground>,
+            &behavior::Friction,
+        )>();
+
+        for (_entity, (component::Velocity(velocity), ground_state, friction)) in entities {
+            let coeff = match ground_state {
+                Some(component::Ground::OnGround) => friction.ground,
+                _ => friction.air,
+            };
+            *velocity += elapsed * coeff * -*velocity;
+            if velocity.magnitude() <= epsilon {
+                *velocity = Zero::zero();
+            }
         }
     }
 
@@ -281,6 +270,144 @@ impl WorldState {
                     transform,
                 }
             })
+        }
+    }
+}
+
+/// Encapsulates motion computation for a single entity.
+struct Motion<'a> {
+    entity: hecs::Entity,
+    position: &'a mut Point3<f64>,
+    velocity: &'a mut Vector3<f64>,
+    ground: Option<&'a mut component::Ground>,
+    bounds: Option<&'a component::Bounds>,
+    bounce: Option<&'a behavior::Bounce>,
+}
+
+impl<'a> Motion<'a> {
+    fn run(world: &mut WorldState, elapsed: f64) {
+        let entities = world.entities.query_mut::<(
+            &mut component::Position,
+            &mut component::Velocity,
+            Option<&mut component::Ground>,
+            Option<&component::Bounds>,
+            Option<&behavior::Bounce>,
+        )>();
+
+        let voxels = world.voxels.lock().expect("unable to lock voxel data");
+
+        for (
+            entity,
+            (component::Position(position), component::Velocity(velocity), ground, bounds, bounce),
+        ) in entities
+        {
+            let mut motion = Motion {
+                entity,
+                position,
+                velocity,
+                ground,
+                bounds,
+                bounce,
+            };
+            motion.run_entity(&*voxels, &*world.directory, elapsed);
+        }
+    }
+
+    fn run_entity(&mut self, voxels: &VoxelData, directory: &Directory, elapsed: f64) {
+        let vel = *self.velocity;
+
+        let approx_radius = if let Some(component::Bounds(bounds)) = self.bounds {
+            (bounds.size() / 2.0).magnitude()
+        } else {
+            0.0
+        };
+
+        // approximate bounds as a sphere for collision
+        let collision_offset = approx_radius * vel.normalize();
+
+        // collision with voxels
+        let ray = Ray {
+            origin: *self.position + collision_offset - 0.01 * vel.normalize(),
+            dir: elapsed * vel,
+        };
+
+        match voxels.cast_ray(&ray, &directory.voxel) {
+            Some(hit) if hit.intersection.t <= 1.0 => {
+                self.handle_collision(elapsed, hit.intersection)
+            }
+            _ => *self.position += elapsed * vel,
+        }
+
+        let new_ground = self.handle_rest(elapsed, voxels, directory, approx_radius);
+
+        if let Some(ground) = self.ground.as_deref_mut() {
+            if new_ground != *ground {
+                log::info!(
+                    "Entity {:?} change rest state to {:?}",
+                    self.entity,
+                    new_ground
+                );
+            }
+            *ground = new_ground;
+        }
+    }
+
+    fn handle_collision(&mut self, elapsed: f64, hit: Intersection<f64>) {
+        let bounce_coeff = self.bounce.copied().map(|b| b.coeff).unwrap_or(0.0);
+        let vel = *self.velocity;
+
+        let t = hit.t;
+        let impulse_size = -(1.0 + bounce_coeff) * hit.normal.dot(vel);
+        let vel_after_collision = vel + impulse_size * hit.normal;
+
+        // interpolate motion based on how far from the surface the entity is
+        *self.position += elapsed * (t * vel + (1.0 - t) * vel_after_collision);
+        *self.velocity = vel_after_collision;
+    }
+
+    fn handle_rest(
+        &mut self,
+        elapsed: f64,
+        voxels: &VoxelData,
+        directory: &Directory,
+        radius: f64,
+    ) -> component::Ground {
+        let epsilon = 0.01 * elapsed;
+
+        let up_vec = Vector3 {
+            x: 0.0,
+            y: 0.0,
+            z: 1.0,
+        };
+
+        let down_vec = -up_vec;
+        let top_point = *self.position + radius * up_vec;
+
+        let ray = Ray {
+            origin: top_point,
+            dir: down_vec,
+        };
+
+        let hit = match voxels.cast_ray(&ray, &directory.voxel) {
+            Some(hit) if hit.intersection.t <= 2.0 * radius + epsilon => hit.intersection,
+            _ => return component::Ground::NotOnGround,
+        };
+
+        let ground_pos = ray.origin + hit.t * ray.dir;
+
+        if self.velocity.dot(up_vec) <= epsilon {
+            // hit the ground and at rest
+
+            self.velocity.z = 0.0;
+            *self.position = ground_pos + radius * up_vec;
+            component::Ground::OnGround
+        } else {
+            // hit the ground but not at rest
+
+            if hit.t <= 2.0 * radius {
+                *self.position = ground_pos + radius * up_vec;
+            }
+            component::Ground::NotOnGround
         }
     }
 }

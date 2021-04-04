@@ -243,6 +243,7 @@ impl<'a> GameBuilder<'a> {
                 builder.add(component::Position(entity.location));
                 builder.add(component::Orientation(One::one()));
                 builder.add(component::Velocity(Zero::zero()));
+                builder.add(component::Ground::NotOnGround);
                 builder.add(component::Model {
                     key: model_key,
                     transform: model_data.transform,

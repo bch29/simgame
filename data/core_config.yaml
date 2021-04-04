@@ -161,7 +161,7 @@ entity_config:
         - tex/entity/dwarf/head_back
         - tex/entity/dwarf/head_front
       transforms:
-        - NonuniformScale: { x: 8, y: 8, z: 5 }
+        - NonuniformScale: { x: 8, y: 8, z: 8 }
     - name: goblin
       kind: Cube
       face_texture_resources:
@@ -172,4 +172,4 @@ entity_config:
         - tex/entity/goblin/head_back
         - tex/entity/goblin/head_front
       transforms:
-        - NonuniformScale: { x: 8, y: 8, z: 6 }
+        - NonuniformScale: { x: 8, y: 8, z: 8 }

@@ -49,6 +49,6 @@ impl Transform {
 
 impl ModelKind {
     pub fn bounds(&self) -> Bounds<f64> {
-        Bounds::from_center(Point3::origin(), Vector3::new(2., 2., 2.))
+        Bounds::from_center(Point3::origin(), Vector3::new(0.5, 0.5, 0.5))
     }
 }

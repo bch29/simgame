@@ -56,8 +56,6 @@ pub struct ModelRenderData {
     pub transform: Matrix4<f32>,
 }
 
-// pub struct Model
-
 impl ModelDirectory {
     pub fn new(
         cfg_models: &[config::Model],

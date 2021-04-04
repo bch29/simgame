@@ -70,9 +70,9 @@ impl<T: BaseNum> Bounds<T> {
     }
 
     #[inline]
-    pub fn from_center(center: Point3<T>, size: Vector3<T>) -> Self {
-        let origin = center - size / (T::one() + T::one());
-        Self::new(origin, size)
+    pub fn from_center(center: Point3<T>, half_size: Vector3<T>) -> Self {
+        let origin = center - half_size;
+        Self::new(origin, half_size + half_size)
     }
 
     /// Returns the smallest bounds object containing all of the given points. If the input is
@@ -386,8 +386,8 @@ impl<T: BaseNum> Bounds<T> {
         }
     }
 
-    /// Returns a bounds object such after transforming any point in the original bounds, the
-    /// transformed point lies inside the new bounds.
+    /// Returns the smallest bounds object such that after transforming any point in the original
+    /// bounds, the transformed point lies inside the new bounds.
     #[inline]
     pub fn transform(self, transform: Matrix4<T>) -> Option<Self> 
         where T: cgmath::BaseFloat
