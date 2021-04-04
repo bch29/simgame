@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Result};
-use cgmath::{EuclideanSpace, Point2, Vector2};
+use cgmath::{EuclideanSpace, One, Point2, Vector2, Zero};
 use winit::{
     event::{self, Event},
     event_loop::{ControlFlow, EventLoop, EventLoopWindowTarget},
@@ -239,10 +239,10 @@ impl<'a> GameBuilder<'a> {
                 let model_key = directory.model.model_key(entity.model)?;
                 let model_data = directory.model.model_data(model_key)?;
 
-                builder.add(model_data.bounds);
-                builder.add(component::Position {
-                    point: entity.location,
-                });
+                builder.add(component::Bounds(model_data.bounds));
+                builder.add(component::Position(entity.location));
+                builder.add(component::Orientation(One::one()));
+                builder.add(component::Velocity(Zero::zero()));
                 builder.add(component::Model {
                     key: model_key,
                     transform: model_data.transform,

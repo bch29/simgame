@@ -1,3 +1,4 @@
+mod behavior;
 pub mod component;
 mod handle;
 pub mod lsystem;
@@ -5,12 +6,10 @@ mod state;
 pub mod tree;
 pub mod turtle;
 pub mod worldgen;
-mod behavior;
 
 use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
-use rand::SeedableRng;
 
 use simgame_types::Directory;
 use simgame_util::background_object;
@@ -34,16 +33,8 @@ impl<'a> WorldStateBuilder<'a> {
             None => None,
         };
 
-        let world_state = state::WorldState {
-            voxels: self.voxels,
-            response: Default::default(),
-            entities: self.entities,
-            rng: SeedableRng::from_entropy(),
-            updating: false,
-            filled_voxels: (16 * 16 * 4) / 8,
-            tree_system,
-        };
-
+        let world_state =
+            state::WorldState::new(self.directory, self.voxels, self.entities, tree_system);
         let connection = background_object::Connection::new(world_state, Default::default())?;
 
         Ok(WorldStateHandle::new(connection))

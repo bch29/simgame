@@ -3,11 +3,14 @@ use std::sync::{Arc, Mutex};
 
 use anyhow::{anyhow, Result};
 use cgmath::{EuclideanSpace, Matrix4, Point3, Quaternion, Vector3, Zero};
+use rand::SeedableRng;
 
-use simgame_types::ModelRenderData;
+use simgame_types::{Directory, ModelRenderData};
 use simgame_util::{
     background_object::{BackgroundObject, Cumulative},
-    convert_point, convert_vec, Bounds,
+    convert_point, convert_vec,
+    ray::Ray,
+    Bounds,
 };
 use simgame_voxels::{
     index_utils,
@@ -15,7 +18,7 @@ use simgame_voxels::{
     Voxel, VoxelData, VoxelDelta, VoxelRaycastHit, VoxelUpdater,
 };
 
-use crate::{component, behavior, tree::TreeSystem};
+use crate::{behavior, component, tree::TreeSystem};
 
 #[derive(Debug, Clone, Default)]
 pub(super) struct WorldResponse {
@@ -39,33 +42,35 @@ pub(super) enum WorldUpdateAction {
 /// blocked, so care should be taken not to lock it for long. Other blocking in this object will
 /// not block the rendering thread.
 pub(super) struct WorldState {
-    pub voxels: Arc<Mutex<VoxelData>>,
-    pub response: WorldResponse,
-    #[allow(unused)]
-    pub entities: hecs::World,
-    pub rng: rand::rngs::StdRng,
-    pub updating: bool,
-    pub filled_voxels: i32,
+    directory: Arc<Directory>,
+    voxels: Arc<Mutex<VoxelData>>,
+    entities: hecs::World,
 
-    pub tree_system: Option<TreeSystem>,
+    rng: rand::rngs::StdRng,
+    updating: bool,
+    filled_voxels: i32,
+    response: WorldResponse,
+
+    tree_system: Option<TreeSystem>,
 }
 
 impl WorldState {
-    /// Moves the world forward by one tick.
-    #[allow(clippy::unnecessary_wraps)]
-    fn tick(&mut self, elapsed: f64) -> Result<()> {
-        self.run_bounce(elapsed);
-        self.run_render(elapsed);
-
-        if !self.updating {
-            return Ok(());
+    pub fn new(
+        directory: Arc<Directory>,
+        voxels: Arc<Mutex<VoxelData>>,
+        entities: hecs::World,
+        tree_system: Option<TreeSystem>,
+    ) -> Self {
+        Self {
+            directory,
+            voxels,
+            response: Default::default(),
+            entities,
+            rng: SeedableRng::from_entropy(),
+            updating: false,
+            filled_voxels: (16 * 16 * 4) / 8,
+            tree_system,
         }
-
-        // let mut updater = VoxelUpdater::new(&mut self.world.voxels, &mut self.voxel_delta.voxels);
-        // shape.draw(&mut updater);
-
-        self.updating = false;
-        Ok(())
     }
 
     fn modify_filled_voxels(&mut self, delta: i32) -> Result<()> {
@@ -150,26 +155,101 @@ impl WorldState {
         Ok(())
     }
 
+    /// Moves the world forward by one tick.
+    #[allow(clippy::unnecessary_wraps)]
+    fn tick(&mut self, elapsed: f64) -> Result<()> {
+        // motion-affecting
+        self.run_bounce(elapsed);
+        self.run_fall(elapsed);
+
+        // position-affecting
+        self.run_motion(elapsed);
+
+        // rendering
+        self.run_render_mesh(elapsed);
+
+        if self.updating {
+            // let mut updater = VoxelUpdater::new(&mut self.world.voxels, &mut self.voxel_delta.voxels);
+            // shape.draw(&mut updater);
+
+            self.updating = false;
+        }
+
+        Ok(())
+    }
+
     fn run_bounce(&mut self, elapsed: f64) {
         let entities = self
             .entities
-            .query_mut::<(&mut behavior::Bounce, &mut component::Position)>();
+            .query_mut::<(&mut behavior::Bounce, &mut component::Velocity)>();
 
-        for (_entity, (bounce, position)) in entities {
-            bounce.progress += elapsed * 2.0;
+        for (_entity, (bounce, velocity)) in entities {
+            bounce.progress += elapsed;
             if bounce.progress >= 1.0 {
-                bounce.progress -= 2.0;
-            }
-
-            position.point += Vector3 {
-                x: 0.0,
-                y: 0.0,
-                z: 10.0 * bounce.progress * elapsed,
+                bounce.progress -= 1.0;
+                velocity.0 += Vector3 {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 25.0,
+                };
             }
         }
     }
 
-    fn run_render(&mut self, _elapsed: f64) {
+    fn run_motion(&mut self, elapsed: f64) {
+        let entities = self.entities.query_mut::<(
+            &mut component::Position,
+            &mut component::Velocity,
+            Option<&component::Bounds>,
+        )>();
+
+        let voxels = self.voxels.lock().expect("unable to lock voxel data");
+
+        for (_entity, (component::Position(position), component::Velocity(velocity), _bounds)) in
+            entities
+        {
+            let mut offset = elapsed * *velocity;
+
+            // very simple handling of collision with voxels: if a ray cast from the entity's
+            // current position in the direction of its motion intersects a voxel, ensure the
+            // entity's origin does not move past the point of intersection and set its velocity to
+            // 0 if it would
+            {
+                let ray = Ray {
+                    origin: *position,
+                    dir: offset,
+                };
+
+                if let Some(raycast_hit) = voxels.cast_ray(&ray, &self.directory.voxel) {
+                    let t = raycast_hit.intersection.t;
+                    if t <= 1.0 {
+                        offset = (t - 0.001) * elapsed * *velocity;
+                        *velocity = Zero::zero();
+                    }
+                }
+            }
+
+            *position += offset;
+        }
+    }
+
+    fn run_fall(&mut self, elapsed: f64) {
+        let gravity_vec = Vector3 {
+            x: 0.0,
+            y: 0.0,
+            z: -50.0,
+        };
+
+        let entities = self
+            .entities
+            .query_mut::<(&mut component::Velocity, &behavior::Fall)>();
+
+        for (_entity, (component::Velocity(velocity), behavior::Fall)) in entities {
+            *velocity += elapsed * gravity_vec;
+        }
+    }
+
+    fn run_render_mesh(&mut self, _elapsed: f64) {
         let entities = self.entities.query_mut::<(
             &component::Model,
             Option<&component::Position>,
@@ -178,15 +258,15 @@ impl WorldState {
 
         for (_entity, (model, position, orientation)) in entities {
             let offset = position
-                .map(|position| position.point - Point3::origin())
+                .map(|position| position.0 - Point3::origin())
                 .unwrap_or_else(Vector3::zero);
 
             let mut transform = model.transform;
 
-            if let Some(orientation) = orientation {
+            if let Some(component::Orientation(quat)) = orientation {
                 let quat = Quaternion {
-                    v: convert_vec!(orientation.quat.v, f32),
-                    s: orientation.quat.s as f32,
+                    v: convert_vec!(quat.v, f32),
+                    s: quat.s as f32,
                 };
                 let rotation_matrix: Matrix4<f32> = quat.into();
 
