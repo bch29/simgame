@@ -7,7 +7,7 @@
 
 const uint CHUNK_SIZE_XY = CHUNK_SIZE_X * CHUNK_SIZE_Y;
 const uint CHUNK_SIZE_XYZ = CHUNK_SIZE_XY * CHUNK_SIZE_Z;
-const uint MAX_UINT = 4294967295;
+const uint MAX_UINT = 0xFFFFFFFF;
 
 const float scale = 1.0;
 const float half_scale = scale / 2.;
@@ -67,6 +67,7 @@ struct VoxelInfo {
   ivec4 addr;
   uint visibleFaceCount;
   bool[6] visibleFaces;
+  int voxelType;
 };
 
 layout(set = 0, binding = 0) readonly buffer Locals {
@@ -115,7 +116,7 @@ uint encodeVoxelIndex(uvec4 pos)
   return pos.x + pos.y * CHUNK_SIZE_X + pos.z * CHUNK_SIZE_XY + pos.w * CHUNK_SIZE_XYZ;
 }
 
-uint encodeFacePair(ivec4 voxelAddr, int faceId0, int faceId1) {
+uint encodeFacePair(int voxelType, ivec4 voxelAddr, int faceId0, int faceId1) {
   // leave out chunk id as because that comes from base instance
   uint voxelIndex = encodeVoxelIndex(uvec4(voxelAddr.xyz, 0));
 
@@ -133,7 +134,10 @@ uint encodeFacePair(ivec4 voxelAddr, int faceId0, int faceId1) {
     faceBit1 = (1 << faceId1);
 
   uint enabledFaces = faceBit0 | faceBit1;
-  return (enabledFaces << 26) + voxelIndex;
+
+  return ((voxelType & 0xFFFF) << 16)
+    | (enabledFaces << 10)
+    | (voxelIndex & 0x3FF);
 }
 
 /*
@@ -217,9 +221,9 @@ VoxelInfo getVoxelInfo(ivec4 voxelAddr) {
   VoxelInfo res;
   res.addr = voxelAddr;
   res.visibleFaceCount = 0;
-  int voxelType = getVoxelType(voxelAddr);
+  res.voxelType = getVoxelType(voxelAddr);
 
-  if (!isVoxelVisible(voxelAddr, voxelType))
+  if (!isVoxelVisible(voxelAddr, res.voxelType))
     return res;
 
   for (uint faceIx = 0; faceIx < 6; faceIx++) {
@@ -254,8 +258,9 @@ void pushFaces(in VoxelInfo info, uint startChunkIx_g, uint pairIx_l) {
       continue;
     }
 
-    c_OutputFacePairs[startChunkIx_g + pairIx_l] =
-      encodeFacePair(info.addr, prevFaceId, faceId);
+    uint outputIx = startChunkIx_g + pairIx_l;
+    c_OutputFacePairs[outputIx] =
+      encodeFacePair(info.voxelType, info.addr, prevFaceId, faceId);
 
     prevFaceId = -1;
     pairIx_l += 1;
@@ -263,8 +268,9 @@ void pushFaces(in VoxelInfo info, uint startChunkIx_g, uint pairIx_l) {
 
   // push an extra partial pair if there were an odd number of visible faces
   if (prevFaceId != -1) {
-    c_OutputFacePairs[startChunkIx_g + pairIx_l] =
-      encodeFacePair(info.addr, prevFaceId, -1);
+    uint outputIx = startChunkIx_g + pairIx_l;
+    c_OutputFacePairs[outputIx] =
+      encodeFacePair(info.voxelType, info.addr, prevFaceId, -1);
   }
 }
 

@@ -60,10 +60,6 @@ layout(set = 0, binding = 1) readonly buffer VoxelRenderInfoBuf {
   VoxelRenderInfo[] b_VoxelRenderInfo;
 };
 
-layout(set = 0, binding = 2) readonly buffer VoxelTypes {
-  int[] b_VoxelTypes;
-};
-
 layout(set = 0, binding = 3) readonly buffer ChunkMetadataArr {
   ChunkMetadata[] b_ChunkMetadata;
 };
@@ -90,15 +86,6 @@ ivec4 decodeVoxelIndex(uint index)
   uint voxel_x = voxel_xy % CHUNK_SIZE_X;
 
   return ivec4(voxel_x, voxel_y, voxel_z, chunkIndex);
-}
-
-int voxelTypeAtIndex(uint index)
-{
-  // Voxel types is really an array of 16-bit uints but glsl treats it as an array of 32-bit
-  // uints. This function assumes little-endian.
-  int res = b_VoxelTypes[index / 2];
-  uint shift = 16 * (index % 2);
-  return (res >> shift) & 0xFFFF;
 }
 
 mat4 translation_matrix(vec3 offset) {
@@ -169,19 +156,34 @@ vec2 getTexOrigin(vec2 periodicity, vec3 voxelPos, vec3 faceNormal) {
   return mod(planeOffset + uvOffset, periodicity) / periodicity;
 }
 
+void decodeFacePairData(
+    in uint data,
+    out int voxelType,
+    out uint enabledFaces,
+    out uint voxelIndex) {
+  voxelType = int(data >> 16);
+  enabledFaces = (data & 0xFFFF) >> 10;
+  voxelIndex = data & 0x3FF;
+}
+
 // Based on shader inputs, decode and look up actual attributes for the vertex that we are to
 // produce.  If this function returns false then the vertex should be dropped.
 bool decodeAttributes(out Attributes attrs) {
+  int voxelType;
+  uint enabledFaces;
+  uint indexInChunk;
+  decodeFacePairData(b_FacePairs[gl_InstanceIndex], voxelType, enabledFaces, indexInChunk);
+
   // gl_VertexID encodes chunk index and index of vertex within face pair
   uint chunkIndex = gl_VertexIndex / 12;
 
+  // there are 12 vertices per pair of faces on the cube 
+  // 12 = 2 faces * 2 triangles * 3 triangle vertices
   uint pairVertexId = gl_VertexIndex % 12;
 
-  uint pairData = b_FacePairs[gl_InstanceIndex];
-
-  uint enabledFaces = pairData >> 26;
   uint pairBit = (pairVertexId / 6) & 1; // 0 for first face in pair, 1 for second
 
+  // there are 6 vertices in each face
   uint faceVertexId = (pairVertexId - 6 * pairBit) % 6;
 
   // If pairBit is 0, faceId is the position of the first set bit in enabledFaces, 
@@ -207,22 +209,21 @@ bool decodeAttributes(out Attributes attrs) {
     return false;
 
   // look up voxel/chunk data
-  uint voxelIndexMask = (1 << 26) - 1;
-  uint voxelIndex = chunkIndex * CHUNK_SIZE_XYZ + (pairData & voxelIndexMask);
+  uint voxelIndex = chunkIndex * CHUNK_SIZE_XYZ + indexInChunk;
   ivec4 voxelAddr = decodeVoxelIndex(voxelIndex);
 
   attrs.voxelAddr = voxelAddr;
   attrs.chunkOffset = vec3(b_ChunkMetadata[chunkIndex].offset.xyz);
-  attrs.voxelType = voxelTypeAtIndex(voxelIndex);
+  attrs.voxelType = voxelType;
 
   // look up mesh data
-  CubeFace face = b_VoxelRenderInfo[attrs.voxelType].cube[faceId];
+  CubeFace face = b_VoxelRenderInfo[voxelType].cube[faceId];
   uint faceVertexIndex = face.indices[faceVertexId];
   attrs.normal = face.normal;
   attrs.pos = face.vertexLocs[faceVertexIndex];
   vec2 faceTexCoord = face.vertexTexCoords[faceVertexIndex];
 
-  attrs.texId = b_VoxelRenderInfo[attrs.voxelType].faceTexIds[faceId];
+  attrs.texId = b_VoxelRenderInfo[voxelType].faceTexIds[faceId];
   vec2 periodicity = vec2(
       float(b_VoxelTextureMetadata[attrs.texId].x_periodicity),
       float(b_VoxelTextureMetadata[attrs.texId].y_periodicity));

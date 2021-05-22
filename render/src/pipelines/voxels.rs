@@ -265,17 +265,6 @@ impl pipelines::Pipeline for VoxelRenderPipeline {
                                 min_binding_size: None,
                             },
                         },
-                        // Voxel types
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 2,
-                            visibility: wgpu::ShaderStage::VERTEX,
-                            count: None,
-                            ty: wgpu::BindingType::Buffer {
-                                has_dynamic_offset: false,
-                                ty: wgpu::BufferBindingType::Storage { read_only: true },
-                                min_binding_size: None,
-                            },
-                        },
                         // Chunk metadata
                         wgpu::BindGroupLayoutEntry {
                             binding: 3,
@@ -607,7 +596,6 @@ impl VoxelRenderPipeline {
             entries: &[
                 uniforms.as_binding(0),
                 self.voxel_info.voxel_info_buf.as_binding(1),
-                chunk_state.voxel_type_binding(2),
                 chunk_state.chunk_metadata_binding(3),
                 geometry_buffers.faces.as_binding(4),
                 self.voxel_info.texture_metadata_buf.as_binding(5),
