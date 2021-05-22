@@ -1,11 +1,14 @@
 use std::collections::{HashMap, HashSet};
 
 use cgmath::{ElementWise, EuclideanSpace, Point3, Vector3};
+use zerocopy::{AsBytes, FromBytes};
 
 use simgame_util::{convert_point, convert_vec, stable_map::StableMap, Bounds};
 use simgame_voxels::{index_utils, Chunk, VoxelData, VoxelDelta};
 
-use crate::buffer_util::{BufferSyncHelper, BufferSyncHelperDesc};
+use crate::buffer_util::{
+    BufferSyncHelper, BufferSyncHelperDesc, InstancedBuffer, InstancedBufferDesc,
+};
 
 type ActiveChunks = StableMap<Point3<i32>, Chunk>;
 
@@ -15,6 +18,7 @@ pub struct ChunkState {
     active_chunks: ActiveChunks,
     meta_tracker: ChunkMetaTracker,
 
+    compute_commands_buf: InstancedBuffer,
     chunk_metadata_helper: BufferSyncHelper<ChunkMeta>,
     chunk_metadata_buf: wgpu::Buffer,
     voxel_type_helper: BufferSyncHelper<u16>,
@@ -28,6 +32,13 @@ struct ChunkMetaTracker {
     new_metas: HashMap<usize, ChunkMeta>,
 }
 
+#[repr(C)]
+#[derive(Debug, Clone, Copy, AsBytes, FromBytes, Default, PartialEq)]
+struct ComputeCommand {
+    chunk_meta_index: u32,
+    vertex_data_start: u32,
+}
+
 struct EndlessVec<T> {
     data: Vec<T>,
 }
@@ -35,6 +46,7 @@ struct EndlessVec<T> {
 impl ChunkState {
     pub fn new(
         device: &wgpu::Device,
+        queue: &wgpu::Queue,
         max_visible_chunks: usize,
         visible_size: Vector3<i32>,
     ) -> Self {
@@ -61,9 +73,38 @@ impl ChunkState {
             usage: wgpu::BufferUsage::STORAGE | wgpu::BufferUsage::COPY_DST,
         });
 
+        let compute_commands_buf = {
+            let result = InstancedBuffer::new(
+                device,
+                InstancedBufferDesc {
+                    label: "voxel compute commands",
+                    instance_len: std::mem::size_of::<ComputeCommand>(),
+                    n_instances: max_visible_chunks,
+                    usage: wgpu::BufferUsage::STORAGE | wgpu::BufferUsage::COPY_DST,
+                },
+            );
+
+            let mut fill_buffer =
+                result
+                    .sync_helper()
+                    .begin_fill_buffer(queue, result.buffer(), 0);
+
+            for i in 0..max_visible_chunks {
+                let command = ComputeCommand {
+                    chunk_meta_index: i as u32,
+                    vertex_data_start: 3 * index_utils::chunk_size_total() as u32 * i as u32,
+                };
+                fill_buffer.advance(command.as_bytes());
+            }
+
+            fill_buffer.finish();
+            result
+        };
+
         ChunkState {
             meta_tracker: ChunkMetaTracker::with_capacity(active_chunks.capacity()),
             active_chunks,
+            compute_commands_buf,
             voxel_type_buf: voxel_type_helper.make_buffer(device),
             voxel_type_helper,
             chunk_metadata_buf: chunk_metadata_helper.make_buffer(device),
@@ -172,9 +213,8 @@ impl ChunkState {
         }
     }
 
-    pub fn update_buffers(&mut self, queue: &wgpu::Queue) -> bool {
-        let mut any_updates = false;
-
+    // Returns the number of compute work groups that need to be run
+    pub fn update_buffers(&mut self, queue: &wgpu::Queue) -> u32 {
         let mut fill_voxel_types =
             self.voxel_type_helper
                 .begin_fill_buffer(queue, &self.voxel_type_buf, 0);
@@ -185,34 +225,34 @@ impl ChunkState {
 
         self.meta_tracker.reset();
 
-        let diff = self.active_chunks.take_diff();
-        let active_chunks = diff.inner();
+        {
+            let diff = self.active_chunks.take_diff();
+            let active_chunks = diff.inner();
 
-        // Copy chunk data to GPU buffers for only the chunks that have changed since last time
-        // buffers were updated.
-        for (index, opt_point) in diff.changed_entries().into_iter() {
-            any_updates = true;
+            // Copy chunk data to GPU buffers for only the chunks that have changed since last time
+            // buffers were updated.
+            for (index, opt_point) in diff.changed_entries().into_iter() {
+                if let Some((&point, chunk)) = opt_point {
+                    self.meta_tracker.modify(point, index, active_chunks);
 
-            if let Some((&point, chunk)) = opt_point {
-                self.meta_tracker.modify(point, index, active_chunks);
-
-                let chunk_data = simgame_voxels::voxels_to_u16(&chunk.voxels);
-                fill_voxel_types.seek(index * index_utils::chunk_size_total() as usize);
-                fill_voxel_types.advance(chunk_data);
-            } else {
-                self.meta_tracker.remove(index)
+                    let chunk_data = simgame_voxels::voxels_to_u16(&chunk.voxels);
+                    fill_voxel_types.seek(index * index_utils::chunk_size_total() as usize);
+                    fill_voxel_types.advance(chunk_data);
+                } else {
+                    self.meta_tracker.remove(index)
+                }
             }
+
+            for (index, meta) in self.meta_tracker.update(&active_chunks) {
+                fill_chunk_metadatas.seek(index);
+                fill_chunk_metadatas.advance(&[meta]);
+            }
+
+            fill_voxel_types.finish();
+            fill_chunk_metadatas.finish();
         }
 
-        for (index, meta) in self.meta_tracker.update(&active_chunks) {
-            fill_chunk_metadatas.seek(index);
-            fill_chunk_metadatas.advance(&[meta]);
-        }
-
-        fill_voxel_types.finish();
-        fill_chunk_metadatas.finish();
-
-        any_updates
+        self.count_chunks() as u32
     }
 
     pub fn voxel_type_binding(&self, index: u32) -> wgpu::BindGroupEntry {
@@ -223,6 +263,10 @@ impl ChunkState {
     pub fn chunk_metadata_binding(&self, index: u32) -> wgpu::BindGroupEntry {
         self.chunk_metadata_helper
             .as_binding(index, &self.chunk_metadata_buf, 0)
+    }
+
+    pub fn compute_commands_binding(&self, index: u32) -> wgpu::BindGroupEntry {
+        self.compute_commands_buf.as_binding(index)
     }
 
     #[allow(dead_code)]

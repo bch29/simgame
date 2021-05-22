@@ -324,7 +324,7 @@ async fn request_device(
                 features: wgpu::Features::MULTI_DRAW_INDIRECT | required_features,
                 limits: wgpu::Limits {
                     max_bind_groups: 6,
-                    max_storage_buffers_per_shader_stage: 6,
+                    max_storage_buffers_per_shader_stage: 7,
                     max_storage_textures_per_shader_stage: 6,
                     max_sampled_textures_per_shader_stage: 1024, // TODO: use proper texture arrays then reduce this limit
                     max_storage_buffer_binding_size: 1024 * 1024 * 1024,

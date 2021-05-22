@@ -70,6 +70,11 @@ struct VoxelInfo {
   int voxelType;
 };
 
+struct ComputeCommand {
+  uint chunkMetaIndex;
+  uint vertexDataStart;
+};
+
 layout(set = 0, binding = 0) readonly buffer Locals {
   vec4 u_VisibleBoxOrigin;
   vec4 u_VisibleBoxLimit;
@@ -94,6 +99,10 @@ layout(set = 0, binding = 4) buffer IndirectCommands {
 layout(set = 0, binding = 5) buffer FaceCounts {
   uint g_TotalFaceCount;
   /* uint g_WorkGroupsDone; */
+};
+
+layout(set = 0, binding = 6) buffer ComputeCommands {
+  ComputeCommand[] b_ComputeCommands;
 };
 
 // keeps track of the number of faces produced by this work group so far
@@ -215,11 +224,11 @@ bool isVoxelVisible(ivec4 voxelAddr, int voxelType)
   return activeChunk && voxelType != 0 && inVisibleSlice;
 }
 
-VoxelInfo getVoxelInfo(ivec4 voxelAddr) {
+VoxelInfo getVoxelInfo(ivec4 voxelAddr, uint chunkDataIndex) {
   VoxelInfo res;
   res.addr = voxelAddr;
   res.visibleFaceCount = 0;
-  res.voxelType = getVoxelType(voxelAddr);
+  res.voxelType = getVoxelType(ivec4(voxelAddr.xyz, chunkDataIndex));
 
   if (!isVoxelVisible(voxelAddr, res.voxelType))
     return res;
@@ -273,9 +282,12 @@ void pushFaces(in VoxelInfo info, uint startChunkIx_g, uint pairIx_l) {
 }
 
 void main() {
-  // gl_LocalInvocationID is voxel pos within chunk, gl_WorkGroupID.x is chunk index
-  ivec4 voxelAddr = ivec4(gl_LocalInvocationID, gl_WorkGroupID.x);
-  VoxelInfo info = getVoxelInfo(voxelAddr);
+  uint chunkDataIndex = gl_WorkGroupID.x;
+  ComputeCommand computeCommand = b_ComputeCommands[chunkDataIndex];
+
+  // gl_LocalInvocationID is voxel pos within chunk
+  ivec4 voxelAddr = ivec4(gl_LocalInvocationID, computeCommand.chunkMetaIndex);
+  VoxelInfo info = getVoxelInfo(voxelAddr, chunkDataIndex);
   // round up because e.g. 5 faces need 2 full pairs and an incomplete pair
   uint visiblePairCount = (1 + info.visibleFaceCount) / 2;
 
@@ -284,10 +296,8 @@ void main() {
   memoryBarrierShared();
   uint pairIx_l = atomicAdd(s_LocalOutputCount, visiblePairCount);
 
-  uint startChunkIx_g = 3 * CHUNK_SIZE_XYZ * info.addr.w;
-
   if (visiblePairCount != 0)
-    pushFaces(info, startChunkIx_g, pairIx_l);
+    pushFaces(info, computeCommand.vertexDataStart, pairIx_l);
 
   barrier(); // wait for s_LocalOutputCount to get its final value
   memoryBarrierShared();
@@ -296,7 +306,7 @@ void main() {
   command.count = 12; // 12 vertices per pair of faces
   command.instanceCount = s_LocalOutputCount;
   command.first = 12 * info.addr.w; // (gl_VertexID / 12) encodes chunk index in vertex shader
-  command.baseInstance = startChunkIx_g;
+  command.baseInstance = computeCommand.vertexDataStart;
   c_IndirectCommands[info.addr.w] = command;
 
   // ensure buffer writes are flushed

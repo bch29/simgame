@@ -111,6 +111,15 @@ struct ChunkMeta {
     _padding1: i32,
 }
 
+#[repr(C)]
+#[derive(Debug, Clone, Copy, AsBytes, FromBytes, Default, PartialEq)]
+struct IndirectCommand {
+    count: u32,         // number of vertices per instance
+    instance_count: u32, // number of instances to draw
+    first: u32,         // index of first vertex
+    base_instance: u32,  // index of first instance
+}
+
 impl pipelines::Pipeline for VoxelRenderPipeline {
     type State = VoxelRenderState;
     fn create_pipeline(
@@ -220,6 +229,17 @@ impl pipelines::Pipeline for VoxelRenderPipeline {
                             ty: wgpu::BindingType::Buffer {
                                 has_dynamic_offset: false,
                                 ty: wgpu::BufferBindingType::Storage { read_only: false },
+                                min_binding_size: None,
+                            },
+                        },
+                        // Compute commands
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 6,
+                            visibility: wgpu::ShaderStage::COMPUTE,
+                            count: None,
+                            ty: wgpu::BindingType::Buffer {
+                                has_dynamic_offset: false,
+                                ty: wgpu::BufferBindingType::Storage { read_only: true },
                                 min_binding_size: None,
                             },
                         },
@@ -412,9 +432,9 @@ impl pipelines::Pipeline for VoxelRenderPipeline {
         state: &mut VoxelRenderState,
     ) {
         let ts_begin = Instant::now();
-        state.chunk_state.update_buffers(&ctx.queue);
+        let count_work_groups = state.chunk_state.update_buffers(&ctx.queue);
         let ts_update = Instant::now();
-        self.compute_pass(ctx, frame_render, state);
+        self.compute_pass(ctx, frame_render, state, count_work_groups);
         self.render_pass(ctx, load_action, frame_render, state);
 
         metrics::timing!(
@@ -433,6 +453,7 @@ impl pipelines::Pipeline for VoxelRenderPipeline {
 
         let mut chunk_state = ChunkState::new(
             &ctx.device,
+            &ctx.queue,
             input.max_visible_chunks,
             input.view_state.params.visible_size,
         );
@@ -485,6 +506,7 @@ impl VoxelRenderPipeline {
         ctx: &crate::GraphicsContext,
         frame_render: &mut crate::FrameRenderContext,
         state: &VoxelRenderState,
+        count_work_groups: u32,
     ) {
         let bufs = &state.geometry_buffers;
 
@@ -498,7 +520,7 @@ impl VoxelRenderPipeline {
 
         cpass.set_pipeline(&self.compute_pipeline);
         cpass.set_bind_group(0, &state.compute_stage.bind_group, &[]);
-        cpass.dispatch(state.chunk_state.count_chunks() as u32, 1, 1);
+        cpass.dispatch(count_work_groups, 1, 1);
     }
 
     fn render_pass(
@@ -573,6 +595,7 @@ impl VoxelRenderPipeline {
                 geometry_buffers.faces.as_binding(3),
                 geometry_buffers.indirect.as_binding(4),
                 geometry_buffers.globals.as_binding(5),
+                chunk_state.compute_commands_binding(6),
             ],
         });
 
@@ -649,7 +672,7 @@ impl VoxelRenderPipeline {
             &ctx.device,
             InstancedBufferDesc {
                 label: "voxel indirect",
-                instance_len: 4 * 4,
+                instance_len: std::mem::size_of::<IndirectCommand>(),
                 n_instances: input.max_visible_chunks,
                 usage: wgpu::BufferUsage::STORAGE | wgpu::BufferUsage::INDIRECT,
             },
