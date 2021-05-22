@@ -122,8 +122,8 @@ async fn run_render_world(ctx: &FileContext, options: &RenderWorldOpts) -> Resul
         let model = ModelDirectory::new(&ctx.core_settings.entity_config.models, &texture)?;
         Directory {
             voxel,
-            model,
             texture,
+            model,
         }
     };
 

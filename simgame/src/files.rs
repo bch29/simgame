@@ -51,9 +51,9 @@ impl FileContext {
 
         Ok(FileContext {
             core_settings,
-            data_root,
             save_root,
             settings_root,
+            data_root,
 
             metrics_controller,
         })

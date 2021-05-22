@@ -220,7 +220,7 @@ impl Renderer {
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
 
-        let mut render = FrameRenderContext { encoder, frame };
+        let mut render = FrameRenderContext { frame, encoder };
 
         self.pipelines.voxel.render_frame(
             &self.ctx,

@@ -320,9 +320,9 @@ impl pipelines::Pipeline for MeshRenderPipeline {
         };
 
         Ok(MeshRenderState {
+            depth_texture,
             uniforms,
             geometry_buffers,
-            depth_texture,
             instances,
         })
     }
