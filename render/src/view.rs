@@ -17,7 +17,7 @@ pub struct ViewState {
 
 impl ViewParams {
     /// Calculates the box containing voxels that will be rendered according to current view.
-    pub fn calculate_view_box(&self) -> Option<Bounds<i32>> {
+    pub fn calculate_view_box(&self) -> Bounds<i32> {
         let visible_distance = Vector2 {
             x: self.visible_size.x as f32,
             y: self.visible_size.y as f32,
@@ -33,10 +33,10 @@ impl ViewParams {
         let size = convert_vec!(self.visible_size, f32);
         let float_bounds = Bounds::new(center - 0.5 * size, size);
 
-        Some(Bounds::new(
+        Bounds::new(
             convert_point!(float_bounds.origin(), i32),
             convert_vec!(float_bounds.size(), i32),
-        ))
+        )
     }
 
     pub fn effective_camera_pos(&self) -> Point3<f32> {

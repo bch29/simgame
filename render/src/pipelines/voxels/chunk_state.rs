@@ -99,18 +99,6 @@ impl ChunkState {
         }
     }
 
-    pub fn clear_view_box(&mut self) -> bool {
-        if self.active_view_box.is_none() {
-            return false;
-        }
-
-        // no chunks in view; clear all
-        self.active_view_box = None;
-        self.active_chunks.clear();
-
-        true
-    }
-
     pub fn update_view_box(&mut self, active_view_box: Bounds<i32>, voxels: &VoxelData) -> bool {
         let old_view_box = self.active_view_box;
         self.active_view_box = Some(active_view_box);

@@ -54,6 +54,8 @@ layout(set = 0, binding = 0) uniform Locals {
   mat4 u_View;
   mat4 u_Model;
   vec4 u_CameraPos;
+  vec4 u_VisibleBoxOrigin;
+  vec4 u_VisibleBoxLimit;
 };
 
 layout(set = 0, binding = 1) readonly buffer VoxelRenderInfoBuf {
@@ -215,6 +217,15 @@ bool decodeAttributes(out Attributes attrs) {
   attrs.voxelAddr = voxelAddr;
   attrs.chunkOffset = vec3(b_ChunkMetadata[chunkIndex].offset.xyz);
   attrs.voxelType = voxelType;
+
+  // check the voxel is within the visible box
+  ivec3 voxelPos = voxelAddr.xyz + b_ChunkMetadata[chunkIndex].offset.xyz;
+  bool inVisibleBox = 
+    voxelPos.x >= u_VisibleBoxOrigin.x && voxelPos.x <= u_VisibleBoxLimit.x
+    && voxelPos.y >= u_VisibleBoxOrigin.y && voxelPos.y < u_VisibleBoxLimit.y
+    && voxelPos.z >= u_VisibleBoxOrigin.z && voxelPos.z < u_VisibleBoxLimit.z;
+  if (!inVisibleBox)
+    return false;
 
   // look up mesh data
   CubeFace face = b_VoxelRenderInfo[voxelType].cube[faceId];

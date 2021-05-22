@@ -207,14 +207,12 @@ bool isVoxelVisible(ivec4 voxelAddr, int voxelType)
 {
   ivec3 voxelPos = voxelAddr.xyz + b_ChunkMetadata[voxelAddr.w].offset.xyz;
 
-  bool inVisibleBox = 
-    voxelPos.x >= u_VisibleBoxOrigin.x && voxelPos.x <= u_VisibleBoxLimit.x
-    && voxelPos.y >= u_VisibleBoxOrigin.y && voxelPos.y < u_VisibleBoxLimit.y
-    && voxelPos.z >= u_VisibleBoxOrigin.z && voxelPos.z < u_VisibleBoxLimit.z;
+  bool inVisibleSlice = 
+    voxelPos.z >= u_VisibleBoxOrigin.z && voxelPos.z < u_VisibleBoxLimit.z;
 
   bool activeChunk = b_ChunkMetadata[voxelAddr.w].isActive;
 
-  return activeChunk && voxelType != 0 && inVisibleBox;
+  return activeChunk && voxelType != 0 && inVisibleSlice;
 }
 
 VoxelInfo getVoxelInfo(ivec4 voxelAddr) {

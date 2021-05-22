@@ -4,7 +4,7 @@ mod voxel_info;
 use std::{convert::TryInto, time::Instant};
 
 use anyhow::Result;
-use cgmath::{Matrix4, Point3, Vector3};
+use cgmath::Matrix4;
 use zerocopy::{AsBytes, FromBytes};
 
 use simgame_types::Directory;
@@ -79,6 +79,11 @@ struct RenderUniforms {
     view: [[f32; 4]; 4],
     model: [[f32; 4]; 4],
     camera_pos: [f32; 3],
+    _padding0: f32,
+    visible_box_origin: [f32; 3],
+    _padding1: f32,
+    visible_box_limit: [f32; 3],
+    _padding2: f32,
 }
 
 #[repr(C)]
@@ -432,9 +437,8 @@ impl pipelines::Pipeline for VoxelRenderPipeline {
             input.view_state.params.visible_size,
         );
 
-        if let Some(active_view_box) = input.view_state.params.calculate_view_box() {
-            chunk_state.update_view_box(active_view_box, input.voxels);
-        }
+        let active_view_box = input.view_state.params.calculate_view_box();
+        chunk_state.update_view_box(active_view_box, input.voxels);
 
         log::info!("initializing voxels compute stage");
         let compute_stage = self.build_compute_stage(ctx, input, &chunk_state, &geometry_buffers);
@@ -457,18 +461,17 @@ impl<'a> pipelines::State<'a> for VoxelRenderState {
     type InputDelta = VoxelRenderInputDelta<'a>;
 
     fn update(&mut self, _ctx: &crate::GraphicsContext, input: VoxelRenderInputDelta) {
-        if let Some(active_view_box) = input.view_state.params.calculate_view_box() {
-            self.compute_stage.uniforms.update_view_box(active_view_box);
+        let active_view_box = input.view_state.params.calculate_view_box();
+        self.compute_stage.uniforms.update_view_box(active_view_box);
 
-            self.chunk_state
-                .update_view_box(active_view_box, input.voxels);
-        } else {
-            self.chunk_state.clear_view_box();
-        }
+        self.chunk_state
+            .update_view_box(active_view_box, input.voxels);
 
         self.chunk_state
             .apply_chunk_diff(input.voxels, input.voxel_diff);
-        *self.render_stage.uniforms = RenderUniforms::new(input.view_state, input.model);
+
+        *self.render_stage.uniforms =
+            RenderUniforms::new(input.view_state, input.model, active_view_box);
     }
 
     fn update_window(&mut self, _ctx: &crate::GraphicsContext, params: pipelines::Params) {
@@ -587,8 +590,12 @@ impl VoxelRenderPipeline {
         chunk_state: &ChunkState,
         geometry_buffers: &GeometryBuffers,
     ) -> RenderStage {
-        let uniforms =
-            RenderUniforms::new(&input.view_state, input.model).into_buffer_synced(&ctx.device);
+        let uniforms = RenderUniforms::new(
+            &input.view_state,
+            input.model,
+            input.view_state.params.calculate_view_box(),
+        )
+        .into_buffer_synced(&ctx.device);
 
         let bind_group = ctx.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: None,
@@ -667,12 +674,17 @@ impl VoxelRenderPipeline {
 }
 
 impl RenderUniforms {
-    fn new(view_state: &ViewState, model: Matrix4<f32>) -> Self {
+    fn new(view_state: &ViewState, model: Matrix4<f32>, view_box: Bounds<i32>) -> Self {
         Self {
             proj: view_state.proj().into(),
             model: model.into(),
             view: view_state.view().into(),
             camera_pos: view_state.camera_pos().into(),
+            _padding0: 0.0,
+            visible_box_origin: convert_point!(view_box.origin(), f32).into(),
+            _padding1: 0.0,
+            visible_box_limit: convert_point!(view_box.limit(), f32).into(),
+            _padding2: 0.0,
         }
     }
 }
@@ -697,12 +709,7 @@ impl IntoBufferSynced for RenderUniforms {
 }
 
 impl ComputeUniforms {
-    fn new(view_box: Option<Bounds<i32>>) -> Self {
-        let view_box = match view_box {
-            Some(x) => x,
-            None => Bounds::new(Point3::new(0, 0, 0), Vector3::new(0, 0, 0)),
-        };
-
+    fn new(view_box: Bounds<i32>) -> Self {
         Self {
             visible_box_origin: convert_point!(view_box.origin(), f32).into(),
             _padding0: 0f32,
