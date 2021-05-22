@@ -96,11 +96,6 @@ layout(set = 0, binding = 4) buffer IndirectCommands {
   IndirectCommand[] c_IndirectCommands;
 };
 
-layout(set = 0, binding = 5) buffer FaceCounts {
-  uint g_TotalFaceCount;
-  /* uint g_WorkGroupsDone; */
-};
-
 layout(set = 0, binding = 6) buffer ComputeCommands {
   ComputeCommand[] b_ComputeCommands;
 };
@@ -177,9 +172,7 @@ ivec4 neighborVoxelAddr(ivec4 voxelAddr, vec3 direction)
 
   bool isOutside = outsideDir != ivec3(0, 0, 0);
 
-  int neighborChunkIndex =
-    int(isOutside) * b_ChunkMetadata[voxelAddr.w].neighborIndices[outsideDirIndex]
-    + int(!isOutside) * voxelAddr.w;
+  int neighborChunkIndex = int(isOutside) * -1 + int(!isOutside) * voxelAddr.w;
 
   posInChunk -= ivec3(CHUNK_SIZE_X, CHUNK_SIZE_Y, CHUNK_SIZE_Z) * outsideDir;
 

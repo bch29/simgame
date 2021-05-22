@@ -98,7 +98,6 @@ struct ComputeUniforms {
 struct GeometryBuffers {
     faces: InstancedBuffer,
     indirect: InstancedBuffer,
-    globals: InstancedBuffer,
 }
 
 #[repr(C)]
@@ -213,17 +212,6 @@ impl pipelines::Pipeline for VoxelRenderPipeline {
                         // Output indirect buffer
                         wgpu::BindGroupLayoutEntry {
                             binding: 4,
-                            visibility: wgpu::ShaderStage::COMPUTE,
-                            count: None,
-                            ty: wgpu::BindingType::Buffer {
-                                has_dynamic_offset: false,
-                                ty: wgpu::BufferBindingType::Storage { read_only: false },
-                                min_binding_size: None,
-                            },
-                        },
-                        // Globals within a compute invocation
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 5,
                             visibility: wgpu::ShaderStage::COMPUTE,
                             count: None,
                             ty: wgpu::BindingType::Buffer {
@@ -434,7 +422,9 @@ impl pipelines::Pipeline for VoxelRenderPipeline {
         let ts_begin = Instant::now();
         let count_work_groups = state.chunk_state.update_buffers(&ctx.queue);
         let ts_update = Instant::now();
-        self.compute_pass(ctx, frame_render, state, count_work_groups);
+        if count_work_groups != 0 {
+            self.compute_pass(ctx, frame_render, state, count_work_groups);
+        }
         self.render_pass(ctx, load_action, frame_render, state);
 
         metrics::timing!(
@@ -453,7 +443,6 @@ impl pipelines::Pipeline for VoxelRenderPipeline {
 
         let mut chunk_state = ChunkState::new(
             &ctx.device,
-            &ctx.queue,
             input.max_visible_chunks,
             input.view_state.params.visible_size,
         );
@@ -508,15 +497,13 @@ impl VoxelRenderPipeline {
         state: &VoxelRenderState,
         count_work_groups: u32,
     ) {
-        let bufs = &state.geometry_buffers;
-
         state.compute_stage.uniforms.sync(&ctx.queue);
-        // reset compute shader globals to 0
-        bufs.globals.clear(&ctx.queue);
 
         let mut cpass = frame_render
             .encoder
             .begin_compute_pass(&wgpu::ComputePassDescriptor { label: None });
+
+        log::info!("Dispatching {} work groups", count_work_groups);
 
         cpass.set_pipeline(&self.compute_pipeline);
         cpass.set_bind_group(0, &state.compute_stage.bind_group, &[]);
@@ -594,7 +581,6 @@ impl VoxelRenderPipeline {
                 chunk_state.chunk_metadata_binding(2),
                 geometry_buffers.faces.as_binding(3),
                 geometry_buffers.indirect.as_binding(4),
-                geometry_buffers.globals.as_binding(5),
                 chunk_state.compute_commands_binding(6),
             ],
         });
@@ -678,20 +664,9 @@ impl VoxelRenderPipeline {
             },
         );
 
-        let globals = InstancedBuffer::new(
-            &ctx.device,
-            InstancedBufferDesc {
-                label: "compute globals",
-                instance_len: 8,
-                n_instances: 1,
-                usage: wgpu::BufferUsage::STORAGE | wgpu::BufferUsage::COPY_DST,
-            },
-        );
-
         GeometryBuffers {
             faces,
             indirect,
-            globals,
         }
     }
 }

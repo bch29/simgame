@@ -214,7 +214,9 @@ impl Renderer {
     }
 
     pub fn render_frame(&self, state: &mut RenderState) -> Result<()> {
+        let ts_begin = Instant::now();
         let frame = state.swapchain.get_current_frame()?;
+        let ts_frame = Instant::now();
         let encoder = self
             .ctx
             .device
@@ -243,13 +245,15 @@ impl Renderer {
             &mut state.gui,
         );
 
-        let ts_begin = Instant::now();
+        let ts_render = Instant::now();
         self.ctx
             .queue
             .submit(std::iter::once(render.encoder.finish()));
         let ts_submit = Instant::now();
 
-        metrics::timing!("render.submit", ts_submit.duration_since(ts_begin));
+        metrics::timing!("render.swapchain", ts_frame.duration_since(ts_begin));
+        metrics::timing!("render.render", ts_render.duration_since(ts_frame));
+        metrics::timing!("render.submit", ts_submit.duration_since(ts_render));
 
         Ok(())
     }
