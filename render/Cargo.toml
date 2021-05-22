@@ -25,5 +25,5 @@ metrics = "0.12"
 
 [dependencies.wgpu]
 package = "wgpu"
-version = "0.7"
+version = "0.8"
 features = ["trace"]

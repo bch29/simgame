@@ -1,11 +1,10 @@
-use std::collections::HashMap;
-use std::convert::TryInto;
+use std::{collections::HashMap, convert::TryInto};
 
 use anyhow::{anyhow, Result};
 use zerocopy::{AsBytes, FromBytes};
 
-use simgame_voxels::{config as voxel};
-use simgame_types::{Directory, mesh::cube::Cube};
+use simgame_types::{mesh::cube::Cube, Directory};
+use simgame_voxels::config as voxel;
 
 use crate::buffer_util::{InstancedBuffer, InstancedBufferDesc};
 
@@ -43,7 +42,8 @@ impl VoxelInfoManager {
             .map(|face_tex| {
                 let index = directory
                     .texture
-                    .texture_key(face_tex.resource.as_str())?.index;
+                    .texture_key(face_tex.resource.as_str())?
+                    .index;
                 Ok((face_tex, index))
             })
             .collect::<Result<HashMap<_, _>>>()?;
@@ -59,7 +59,7 @@ impl VoxelInfoManager {
                     dimension: Some(wgpu::TextureViewDimension::D2),
                     aspect: wgpu::TextureAspect::All,
                     base_mip_level: 0,
-                    level_count: Some(
+                    mip_level_count: Some(
                         data.mip_level_count
                             .try_into()
                             .expect("mip level count cannot be 0"),

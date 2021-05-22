@@ -24,7 +24,6 @@ pub(crate) struct FrameRenderContext {
 pub(crate) struct Params<'a> {
     pub physical_win_size: Vector2<u32>,
     pub depth_texture: &'a wgpu::Texture,
-    pub resource_loader: &'a ResourceLoader,
 }
 
 pub(crate) trait State<'a> {

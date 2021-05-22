@@ -9,12 +9,14 @@ use simgame_types::{
     Directory,
 };
 
-use crate::buffer_util::{
-    BufferSyncHelperDesc, BufferSyncable, BufferSyncedData, FillBuffer, InstancedBuffer,
-    InstancedBufferDesc, IntoBufferSynced,
+use crate::{
+    buffer_util::{
+        BufferSyncHelperDesc, BufferSyncable, BufferSyncedData, FillBuffer, InstancedBuffer,
+        InstancedBufferDesc, IntoBufferSynced,
+    },
+    pipelines::{self, GraphicsContext},
+    resource::ResourceLoader,
 };
-use crate::pipelines::{self, GraphicsContext};
-use crate::resource::ResourceLoader;
 
 const INSTANCES_PER_PASS: usize = 1024;
 
@@ -127,7 +129,7 @@ impl pipelines::Pipeline for MeshRenderPipeline {
                     dimension: Some(wgpu::TextureViewDimension::D2),
                     aspect: wgpu::TextureAspect::All,
                     base_mip_level: 0,
-                    level_count: Some(
+                    mip_level_count: Some(
                         data.mip_level_count
                             .try_into()
                             .expect("mip level count cannot be 0"),
@@ -227,17 +229,21 @@ impl pipelines::Pipeline for MeshRenderPipeline {
                     entry_point: "main",
                     targets: &[wgpu::ColorTargetState {
                         format: wgpu::TextureFormat::Bgra8UnormSrgb,
-                        color_blend: wgpu::BlendState::REPLACE,
-                        alpha_blend: wgpu::BlendState::REPLACE,
+                        blend: Some(wgpu::BlendState {
+                            color: wgpu::BlendComponent::REPLACE,
+                            alpha: wgpu::BlendComponent::REPLACE,
+                        }),
                         write_mask: wgpu::ColorWrite::ALL,
                     }],
                 }),
                 primitive: wgpu::PrimitiveState {
                     topology: wgpu::PrimitiveTopology::TriangleList,
                     front_face: wgpu::FrontFace::Ccw,
-                    cull_mode: wgpu::CullMode::Back,
+                    cull_mode: Some(wgpu::Face::Back),
                     strip_index_format: None,
                     polygon_mode: wgpu::PolygonMode::Fill,
+                    clamp_depth: false,
+                    conservative: false,
                 },
                 depth_stencil: Some(wgpu::DepthStencilState {
                     format: wgpu::TextureFormat::Depth32Float,
@@ -254,7 +260,6 @@ impl pipelines::Pipeline for MeshRenderPipeline {
                         slope_scale: 0.0,
                         clamp: 0.0,
                     },
-                    clamp_depth: false,
                 }),
                 multisample: wgpu::MultisampleState {
                     count: 1,
@@ -342,20 +347,20 @@ impl pipelines::Pipeline for MeshRenderPipeline {
                     // uniforms
                     wgpu::BindGroupEntry {
                         binding: 0,
-                        resource: wgpu::BindingResource::Buffer {
+                        resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
                             buffer: state.uniforms.buffer(),
                             offset: 0,
                             size: None,
-                        },
+                        }),
                     },
                     // instances
                     wgpu::BindGroupEntry {
                         binding: 1,
-                        resource: wgpu::BindingResource::Buffer {
+                        resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
                             buffer: chunk.buffer.buffer(),
                             offset: 0,
                             size: None,
-                        },
+                        }),
                     },
                     wgpu::BindGroupEntry {
                         binding: 6,
@@ -374,24 +379,22 @@ impl pipelines::Pipeline for MeshRenderPipeline {
                 .encoder
                 .begin_render_pass(&wgpu::RenderPassDescriptor {
                     label: None,
-                    color_attachments: &[wgpu::RenderPassColorAttachmentDescriptor {
-                        attachment: &frame_render.frame.output.view,
+                    color_attachments: &[wgpu::RenderPassColorAttachment {
+                        view: &frame_render.frame.output.view,
                         resolve_target: None,
                         ops: wgpu::Operations {
                             load: load_action.into_load_op(wgpu::Color::BLACK),
                             store: true,
                         },
                     }],
-                    depth_stencil_attachment: Some(
-                        wgpu::RenderPassDepthStencilAttachmentDescriptor {
-                            attachment: &state.depth_texture,
-                            depth_ops: Some(wgpu::Operations {
-                                load: load_action.into_load_op(1.0),
-                                store: true,
-                            }),
-                            stencil_ops: None,
-                        },
-                    ),
+                    depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                        view: &state.depth_texture,
+                        depth_ops: Some(wgpu::Operations {
+                            load: load_action.into_load_op(1.0),
+                            store: true,
+                        }),
+                        stencil_ops: None,
+                    }),
                 });
 
             rpass.set_pipeline(&self.pipeline);
@@ -502,25 +505,25 @@ fn mesh_vertex_buffer_layout() -> wgpu::VertexBufferLayout<'static> {
         attributes: &[
             // pos
             wgpu::VertexAttribute {
-                format: wgpu::VertexFormat::Float4,
+                format: wgpu::VertexFormat::Float32x4,
                 offset: 0,
                 shader_location: 0,
             },
             // normal
             wgpu::VertexAttribute {
-                format: wgpu::VertexFormat::Float3,
+                format: wgpu::VertexFormat::Float32x3,
                 offset: 4 * 4,
                 shader_location: 1,
             },
             // face_id
             wgpu::VertexAttribute {
-                format: wgpu::VertexFormat::Uint,
+                format: wgpu::VertexFormat::Uint32,
                 offset: 4 * 4 + 3 * 4,
                 shader_location: 2,
             },
             // tex_coord
             wgpu::VertexAttribute {
-                format: wgpu::VertexFormat::Float2,
+                format: wgpu::VertexFormat::Float32x2,
                 offset: 4 * 4 + 4 + 3 * 4,
                 shader_location: 3,
             },

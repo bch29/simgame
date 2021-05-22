@@ -4,9 +4,7 @@ pub mod resource;
 pub mod shaders;
 mod view;
 
-use std::collections::HashMap;
-use std::sync::Arc;
-use std::time::Instant;
+use std::{collections::HashMap, sync::Arc, time::Instant};
 
 use anyhow::{anyhow, bail, Result};
 use cgmath::{SquareMatrix, Vector2, Vector3};
@@ -56,7 +54,6 @@ pub struct Renderer {
     ctx: GraphicsContext,
     pipelines: Pipelines,
     instance: wgpu::Instance,
-    resource_loader: ResourceLoader,
     directory: Arc<Directory>,
 }
 
@@ -116,7 +113,6 @@ impl RendererBuilder {
             pipelines,
             instance,
             directory,
-            resource_loader,
         })
     }
 }
@@ -139,7 +135,6 @@ impl Renderer {
         let pipeline_params = pipelines::Params {
             physical_win_size: input.physical_win_size,
             depth_texture: &depth_texture,
-            resource_loader: &self.resource_loader,
         };
 
         let world_voxels = self.pipelines.voxel.create_state(
@@ -205,7 +200,6 @@ impl Renderer {
         let pipeline_params = pipelines::Params {
             physical_win_size,
             depth_texture: &depth_texture,
-            resource_loader: &self.resource_loader,
         };
         state.world_voxels.update_window(&self.ctx, pipeline_params);
         for mesh in state.meshes.values_mut() {
@@ -333,6 +327,7 @@ async fn request_device(
                     max_storage_buffers_per_shader_stage: 6,
                     max_storage_textures_per_shader_stage: 6,
                     max_sampled_textures_per_shader_stage: 1024, // TODO: use proper texture arrays then reduce this limit
+                    max_storage_buffer_binding_size: 1024 * 1024 * 1024,
                     ..Default::default()
                 },
             },
@@ -370,7 +365,7 @@ fn make_depth_texture(device: &wgpu::Device, size: Vector2<u32>) -> wgpu::Textur
         size: wgpu::Extent3d {
             width: size.x,
             height: size.y,
-            depth: 1,
+            depth_or_array_layers: 1,
         },
         mip_level_count: 1,
         sample_count: 1,

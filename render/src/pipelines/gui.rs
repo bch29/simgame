@@ -6,11 +6,13 @@ use zerocopy::{AsBytes, FromBytes};
 
 use simgame_types::Directory;
 
-use crate::buffer_util::{
-    BufferSyncHelperDesc, BufferSyncable, BufferSyncedData, FillBuffer, IntoBufferSynced,
+use crate::{
+    buffer_util::{
+        BufferSyncHelperDesc, BufferSyncable, BufferSyncedData, FillBuffer, IntoBufferSynced,
+    },
+    pipelines::{self, GraphicsContext},
+    resource::ResourceLoader,
 };
-use crate::pipelines::{self, GraphicsContext};
-use crate::resource::ResourceLoader;
 
 pub(crate) struct GuiRenderPipeline {
     pipeline: wgpu::RenderPipeline,
@@ -154,25 +156,29 @@ impl pipelines::Pipeline for GuiRenderPipeline {
                     entry_point: "main",
                     targets: &[wgpu::ColorTargetState {
                         format: wgpu::TextureFormat::Bgra8UnormSrgb,
-                        color_blend: wgpu::BlendState {
-                            src_factor: wgpu::BlendFactor::SrcAlpha,
-                            dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
-                            operation: wgpu::BlendOperation::Add,
-                        },
-                        alpha_blend: wgpu::BlendState {
-                            src_factor: wgpu::BlendFactor::One,
-                            dst_factor: wgpu::BlendFactor::One,
-                            operation: wgpu::BlendOperation::Max,
-                        },
+                        blend: Some(wgpu::BlendState {
+                            color: wgpu::BlendComponent {
+                                src_factor: wgpu::BlendFactor::SrcAlpha,
+                                dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+                                operation: wgpu::BlendOperation::Add,
+                            },
+                            alpha: wgpu::BlendComponent {
+                                src_factor: wgpu::BlendFactor::One,
+                                dst_factor: wgpu::BlendFactor::One,
+                                operation: wgpu::BlendOperation::Max,
+                            },
+                        }),
                         write_mask: wgpu::ColorWrite::ALL,
                     }],
                 }),
                 primitive: wgpu::PrimitiveState {
                     topology: wgpu::PrimitiveTopology::TriangleStrip,
                     front_face: wgpu::FrontFace::Cw,
-                    cull_mode: wgpu::CullMode::None,
+                    cull_mode: None,
                     strip_index_format: Some(wgpu::IndexFormat::Uint16),
                     polygon_mode: wgpu::PolygonMode::Fill,
+                    clamp_depth: false,
+                    conservative: false,
                 },
                 depth_stencil: None,
                 multisample: wgpu::MultisampleState {
@@ -222,11 +228,11 @@ impl pipelines::Pipeline for GuiRenderPipeline {
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: wgpu::BindingResource::Buffer {
+                    resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
                         buffer: state.uniforms.buffer(),
                         offset: 0,
                         size: None,
-                    },
+                    }),
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
@@ -243,8 +249,8 @@ impl pipelines::Pipeline for GuiRenderPipeline {
             .encoder
             .begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: None,
-                color_attachments: &[wgpu::RenderPassColorAttachmentDescriptor {
-                    attachment: &frame_render.frame.output.view,
+                color_attachments: &[wgpu::RenderPassColorAttachment {
+                    view: &frame_render.frame.output.view,
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: load_action.into_load_op(wgpu::Color::BLACK),
@@ -271,7 +277,7 @@ impl GuiRenderState {
         let multisampled_texture_extent = wgpu::Extent3d {
             width: sc_desc.width,
             height: sc_desc.height,
-            depth: 1,
+            depth_or_array_layers: 1,
         };
         let multisampled_frame_descriptor = &wgpu::TextureDescriptor {
             size: multisampled_texture_extent,

@@ -1,7 +1,9 @@
-use std::collections::{HashMap, HashSet};
-use std::fs::File;
-use std::io::{BufReader, Read};
-use std::path::{Path, PathBuf};
+use std::{
+    collections::{HashMap, HashSet},
+    fs::File,
+    io::{BufReader, Read},
+    path::{Path, PathBuf},
+};
 
 use anyhow::{anyhow, bail, Result};
 use byteorder::{ReadBytesExt, WriteBytesExt};
@@ -372,7 +374,7 @@ impl TextureLoader {
                     size: wgpu::Extent3d {
                         width,
                         height,
-                        depth: 1,
+                        depth_or_array_layers: 1,
                     },
                     mip_level_count: 1,
                     sample_count: 1,
@@ -380,26 +382,26 @@ impl TextureLoader {
                     format: wgpu::TextureFormat::Rgba8UnormSrgb,
                     usage: wgpu::TextureUsage::COPY_DST | wgpu::TextureUsage::SAMPLED,
                 });
-                let copy_view = wgpu::TextureCopyView {
+                let copy_view = wgpu::ImageCopyTexture {
                     texture: &texture,
                     mip_level: 0,
                     origin: wgpu::Origin3d { x: 0, y: 0, z: 0 },
                 };
 
-                let (samples, bytes_per_row) = sample_generator.generate(width, height);
+                let (samples, bytes_per_row) = sample_generator.generate(width, height)?;
 
                 queue.write_texture(
                     copy_view,
                     samples.as_slice(),
-                    wgpu::TextureDataLayout {
+                    wgpu::ImageDataLayout {
                         offset: 0,
-                        bytes_per_row,
-                        rows_per_image: 0,
+                        bytes_per_row: Some(bytes_per_row),
+                        rows_per_image: None,
                     },
                     wgpu::Extent3d {
                         width,
                         height,
-                        depth: 1,
+                        depth_or_array_layers: 1,
                     },
                 );
 
@@ -427,7 +429,7 @@ impl TextureLoader {
                     size: wgpu::Extent3d {
                         width,
                         height,
-                        depth: 1,
+                        depth_or_array_layers: 1,
                     },
                     mip_level_count,
                     sample_count: 1,
@@ -440,27 +442,27 @@ impl TextureLoader {
                 for mip_level in 0..mip_level_count {
                     let (mip_width, mip_height) = (width >> mip_level, height >> mip_level);
 
-                    let copy_view = wgpu::TextureCopyView {
+                    let copy_view = wgpu::ImageCopyTexture {
                         texture: &texture,
                         mip_level,
                         origin: wgpu::Origin3d { x: 0, y: 0, z: 0 },
                     };
 
                     let (samples, bytes_per_row) =
-                        sample_generator.generate(mip_width, mip_height);
+                        sample_generator.generate(mip_width, mip_height)?;
 
                     queue.write_texture(
                         copy_view,
                         samples.as_slice(),
-                        wgpu::TextureDataLayout {
+                        wgpu::ImageDataLayout {
                             offset: 0,
-                            bytes_per_row,
-                            rows_per_image: 0,
+                            bytes_per_row: Some(bytes_per_row),
+                            rows_per_image: None,
                         },
                         wgpu::Extent3d {
                             width: mip_width,
                             height: mip_height,
-                            depth: 1,
+                            depth_or_array_layers: 1,
                         },
                     );
                 }
@@ -477,13 +479,13 @@ impl TextureLoader {
 use sample_gen::{SampleGenerator, SampleGeneratorBuilder};
 
 mod sample_gen {
-    use std::path::PathBuf;
+    use std::{convert::TryInto, num::NonZeroU32, path::PathBuf};
 
-    use anyhow::Result;
+    use anyhow::{Context, Result};
 
     pub trait SampleGenerator {
         /// Returns the buffer of samples and the number of bytes per row in the result.
-        fn generate(&self, width: u32, height: u32) -> (Vec<u8>, u32);
+        fn generate(&self, width: u32, height: u32) -> Result<(Vec<u8>, NonZeroU32)>;
 
         fn source_dimensions(&self) -> (u32, u32);
     }
@@ -540,7 +542,7 @@ mod sample_gen {
     }
 
     impl SampleGenerator for ImageSampleGenerator {
-        fn generate(&self, width: u32, height: u32) -> (Vec<u8>, u32) {
+        fn generate(&self, width: u32, height: u32) -> Result<(Vec<u8>, NonZeroU32)> {
             let (img_width, img_height) = self.image.dimensions();
 
             let resized;
@@ -557,8 +559,10 @@ mod sample_gen {
             };
 
             let samples = image.as_flat_samples();
-            let bytes_per_row = samples.layout.height_stride as u32;
-            (samples.as_slice().to_vec(), bytes_per_row)
+            let bytes_per_row: NonZeroU32 = (samples.layout.height_stride as u32)
+                .try_into()
+                .context("image height stride is 0")?;
+            Ok((samples.as_slice().to_vec(), bytes_per_row))
         }
 
         fn source_dimensions(&self) -> (u32, u32) {
@@ -567,7 +571,7 @@ mod sample_gen {
     }
 
     impl SampleGenerator for SolidColorSampleGenerator {
-        fn generate(&self, width: u32, height: u32) -> (Vec<u8>, u32) {
+        fn generate(&self, width: u32, height: u32) -> Result<(Vec<u8>, NonZeroU32)> {
             let mut buf = Vec::with_capacity(width as usize * height as usize * 4);
             for _row_ix in 0..height {
                 for _col_ix in 0..width {
@@ -577,7 +581,7 @@ mod sample_gen {
                     buf.push(255); // alpha
                 }
             }
-            (buf, 4 * width)
+            Ok((buf, (4 * width).try_into()?))
         }
 
         fn source_dimensions(&self) -> (u32, u32) {

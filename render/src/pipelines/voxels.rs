@@ -1,8 +1,7 @@
 mod chunk_state;
 mod voxel_info;
 
-use std::convert::TryInto;
-use std::time::Instant;
+use std::{convert::TryInto, time::Instant};
 
 use anyhow::Result;
 use cgmath::{Matrix4, Point3, Vector3};
@@ -12,13 +11,15 @@ use simgame_types::Directory;
 use simgame_util::{convert_point, Bounds};
 use simgame_voxels::{index_utils, VoxelData, VoxelDelta};
 
-use crate::buffer_util::{
-    BufferSyncHelperDesc, BufferSyncable, BufferSyncedData, FillBuffer, InstancedBuffer,
-    InstancedBufferDesc, IntoBufferSynced,
+use crate::{
+    buffer_util::{
+        BufferSyncHelperDesc, BufferSyncable, BufferSyncedData, FillBuffer, InstancedBuffer,
+        InstancedBufferDesc, IntoBufferSynced,
+    },
+    pipelines::{self, GraphicsContext},
+    resource::ResourceLoader,
+    ViewState,
 };
-use crate::pipelines::{self, GraphicsContext};
-use crate::resource::ResourceLoader;
-use crate::ViewState;
 
 use chunk_state::ChunkState;
 use voxel_info::VoxelInfoManager;
@@ -359,17 +360,21 @@ impl pipelines::Pipeline for VoxelRenderPipeline {
                     entry_point: "main",
                     targets: &[wgpu::ColorTargetState {
                         format: wgpu::TextureFormat::Bgra8UnormSrgb,
-                        color_blend: wgpu::BlendState::REPLACE,
-                        alpha_blend: wgpu::BlendState::REPLACE,
+                        blend: Some(wgpu::BlendState {
+                            color: wgpu::BlendComponent::REPLACE,
+                            alpha: wgpu::BlendComponent::REPLACE,
+                        }),
                         write_mask: wgpu::ColorWrite::ALL,
                     }],
                 }),
                 primitive: wgpu::PrimitiveState {
                     topology: wgpu::PrimitiveTopology::TriangleList,
                     front_face: wgpu::FrontFace::Ccw,
-                    cull_mode: wgpu::CullMode::Back,
+                    cull_mode: Some(wgpu::Face::Back),
                     strip_index_format: None,
                     polygon_mode: wgpu::PolygonMode::Fill,
+                    clamp_depth: false,
+                    conservative: false,
                 },
                 depth_stencil: Some(wgpu::DepthStencilState {
                     format: wgpu::TextureFormat::Depth32Float,
@@ -386,7 +391,6 @@ impl pipelines::Pipeline for VoxelRenderPipeline {
                         slope_scale: 0.0,
                         clamp: 0.0,
                     },
-                    clamp_depth: false,
                 }),
                 multisample: wgpu::MultisampleState {
                     count: 1,
@@ -518,16 +522,16 @@ impl VoxelRenderPipeline {
             .encoder
             .begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: None,
-                color_attachments: &[wgpu::RenderPassColorAttachmentDescriptor {
-                    attachment: &frame_render.frame.output.view,
+                color_attachments: &[wgpu::RenderPassColorAttachment {
+                    view: &frame_render.frame.output.view,
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: load_action.into_load_op(wgpu::Color::BLACK),
                         store: true,
                     },
                 }],
-                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachmentDescriptor {
-                    attachment: &state.render_stage.depth_texture,
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &state.render_stage.depth_texture,
                     depth_ops: Some(wgpu::Operations {
                         load: load_action.into_load_op(1.0),
                         store: true,
