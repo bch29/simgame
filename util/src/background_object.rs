@@ -1,8 +1,10 @@
 //! Implement `BackgroundObject` to allow an object to live on a background thread, where it can
 //! receive actions from the main thread and send responses back.
 
-use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::{
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 use anyhow::{anyhow, Result};
 use crossbeam::{atomic::AtomicCell, channel};

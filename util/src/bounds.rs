@@ -3,8 +3,10 @@ use cgmath::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::ray::{ConvexIntersection, Intersection, Quad, Ray};
-use crate::{DivDown, DivUp, OrdFloat};
+use crate::{
+    ray::{ConvexIntersection, Intersection, Quad, Ray},
+    DivDown, DivUp, OrdFloat,
+};
 
 /// Represents a half-open cuboid of points: the origin is inclusive and the limit is exclusive.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize, Serialize)]
@@ -389,8 +391,9 @@ impl<T: BaseNum> Bounds<T> {
     /// Returns the smallest bounds object such that after transforming any point in the original
     /// bounds, the transformed point lies inside the new bounds.
     #[inline]
-    pub fn transform(self, transform: Matrix4<T>) -> Option<Self> 
-        where T: cgmath::BaseFloat
+    pub fn transform(self, transform: Matrix4<T>) -> Option<Self>
+    where
+        T: cgmath::BaseFloat,
     {
         Self::from_points(
             self.corners()

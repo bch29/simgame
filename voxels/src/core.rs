@@ -3,12 +3,13 @@ use std::slice;
 use cgmath::{EuclideanSpace, Point3, Vector3};
 use serde::{Deserialize, Serialize};
 
-use simgame_util::convert_bounds;
-use simgame_util::ray::{Intersection, Ray};
-use simgame_util::Bounds;
+use simgame_util::{
+    convert_bounds,
+    ray::{Intersection, Ray},
+    Bounds,
+};
 
-use crate::config::VoxelDirectory;
-use crate::index_utils;
+use crate::{config::VoxelDirectory, index_utils};
 
 /// Represents the value of a single voxel in the world. The wrapped value is an index into the
 /// VoxelConfig's list of VoxelInfo.

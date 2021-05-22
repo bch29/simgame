@@ -1,5 +1,7 @@
-use std::collections::{hash_map, HashMap, VecDeque};
-use std::hash::Hash;
+use std::{
+    collections::{hash_map, HashMap, VecDeque},
+    hash::Hash,
+};
 
 /// A fixed size key-value map that implements stable indices and supports a diff operation which
 /// iterates over the keys that have changed since the last diff. Guarantees no allocation for any

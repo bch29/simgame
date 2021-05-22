@@ -1,6 +1,4 @@
-use std::collections::HashSet;
-use std::env;
-use std::path::PathBuf;
+use std::{collections::HashSet, env, path::PathBuf};
 
 use anyhow::{anyhow, Result};
 use structopt::StructOpt;

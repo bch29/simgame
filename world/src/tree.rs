@@ -5,8 +5,10 @@ use serde::{Deserialize, Serialize};
 
 use simgame_voxels::{primitive, Voxel, VoxelDirectory};
 
-use crate::lsystem;
-use crate::turtle::{Turtle, TurtleBrush, TurtleInterpreter, TurtleState};
+use crate::{
+    lsystem,
+    turtle::{Turtle, TurtleBrush, TurtleInterpreter, TurtleState},
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TreeSystemConfig {

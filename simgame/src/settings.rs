@@ -1,8 +1,8 @@
 use cgmath::{Point3, Vector2, Vector3};
 use serde::{Deserialize, Serialize};
 
-use simgame_types::{config::EntityConfig, Behavior};
 use simgame_render::resource::ResourceConfig;
+use simgame_types::{config::EntityConfig, Behavior};
 use simgame_voxels::VoxelConfig;
 use simgame_world::tree::TreeConfig;
 

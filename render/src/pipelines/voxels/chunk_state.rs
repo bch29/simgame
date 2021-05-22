@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use cgmath::{ElementWise, EuclideanSpace, Point3, Vector3};
 
 use simgame_util::{convert_point, convert_vec, stable_map::StableMap, Bounds};
-use simgame_voxels::{index_utils, Chunk, VoxelDelta, VoxelData};
+use simgame_voxels::{index_utils, Chunk, VoxelData, VoxelDelta};
 
 use crate::buffer_util::{BufferSyncHelper, BufferSyncHelperDesc};
 

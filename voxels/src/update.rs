@@ -2,9 +2,7 @@ use std::collections::HashSet;
 
 use cgmath::Point3;
 
-use crate::index_utils;
-use crate::voxel_data::VoxelData;
-use crate::{Chunk, Voxel};
+use crate::{index_utils, voxel_data::VoxelData, Chunk, Voxel};
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct VoxelDelta {

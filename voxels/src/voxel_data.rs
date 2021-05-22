@@ -4,14 +4,13 @@ use anyhow::Result;
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use cgmath::{ElementWise, EuclideanSpace, Point3};
 
-use simgame_util::convert_vec;
-use simgame_util::octree::Octree;
-use simgame_util::ray::Ray;
-use simgame_util::Bounds;
+use simgame_util::{convert_vec, octree::Octree, ray::Ray, Bounds};
 
-use crate::config::VoxelDirectory;
-use crate::core::{voxels_to_u16_mut, Chunk, Voxel, VoxelRaycastHit};
-use crate::index_utils;
+use crate::{
+    config::VoxelDirectory,
+    core::{voxels_to_u16_mut, Chunk, Voxel, VoxelRaycastHit},
+    index_utils,
+};
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct VoxelData {

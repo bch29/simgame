@@ -4,8 +4,10 @@
 
 use cgmath::{EuclideanSpace, Point3, Vector3};
 
-use crate::bounds::Bounds;
-use crate::ray::{ConvexIntersection, Ray};
+use crate::{
+    bounds::Bounds,
+    ray::{ConvexIntersection, Ray},
+};
 
 type ObjectPool<T> = ListNodePool<Object<T>>;
 

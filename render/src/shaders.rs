@@ -17,10 +17,7 @@ pub struct CompileParams {
 mod shaderc_impl {
     use super::*;
 
-    use std::cell::RefCell;
-    use std::fs::File;
-    use std::io::Read;
-    use std::path::Path;
+    use std::{cell::RefCell, fs::File, io::Read, path::Path};
 
     use anyhow::{anyhow, Context, Result};
 

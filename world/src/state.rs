@@ -1,5 +1,7 @@
-use std::default::Default;
-use std::sync::{Arc, Mutex};
+use std::{
+    default::Default,
+    sync::{Arc, Mutex},
+};
 
 use anyhow::{anyhow, Result};
 use cgmath::{EuclideanSpace, InnerSpace, Matrix4, Point3, Quaternion, Vector3, Zero};

@@ -99,7 +99,6 @@ pub const OPENGL_TO_WGPU_MATRIX: Matrix4<f32> = Matrix4::new(
     0.0, 0.0, 0.5, 1.0,
 );
 
-
 pub fn create_projection_matrix(aspect_ratio: f32) -> Matrix4<f32> {
     OPENGL_TO_WGPU_MATRIX * cgmath::perspective(Deg(70f32), aspect_ratio, 1.0, 1000.0)
 }

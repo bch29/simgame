@@ -1,6 +1,6 @@
 use cgmath::{Matrix4, Transform, Vector3, Vector4};
-use zerocopy::AsBytes;
 use serde::{Deserialize, Serialize};
+use zerocopy::AsBytes;
 
 use crate::config::ModelKind;
 

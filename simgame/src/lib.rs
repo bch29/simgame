@@ -2,8 +2,10 @@ mod controls;
 pub mod files;
 pub mod settings;
 
-use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::{
+    sync::{Arc, Mutex},
+    time::{Duration, Instant},
+};
 
 use anyhow::{anyhow, Result};
 use cgmath::{EuclideanSpace, One, Point2, Vector2, Zero};

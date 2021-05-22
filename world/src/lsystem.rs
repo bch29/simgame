@@ -1,8 +1,10 @@
 use anyhow::{anyhow, bail, Context, Result};
 use std::collections::HashMap;
 
-use rand::distributions::{Distribution, WeightedIndex};
-use rand::Rng;
+use rand::{
+    distributions::{Distribution, WeightedIndex},
+    Rng,
+};
 use serde::{Deserialize, Serialize};
 
 pub const MAX_LSYSTEM_BYTES: usize = 1 << 20;

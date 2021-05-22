@@ -4,8 +4,7 @@ use cgmath::{EuclideanSpace, InnerSpace, Point3, Vector3};
 use serde::{Deserialize, Serialize};
 use std::io::{self, Read, Write};
 
-use crate::ray::Ray;
-use crate::{convert_bounds, convert_vec, Bounds, OrdFloat};
+use crate::{convert_bounds, convert_vec, ray::Ray, Bounds, OrdFloat};
 
 /// A tree structure providing a sparse representation of values in a 3D grid.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
