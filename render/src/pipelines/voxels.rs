@@ -501,7 +501,7 @@ impl VoxelRenderPipeline {
             .encoder
             .begin_compute_pass(&wgpu::ComputePassDescriptor { label: None });
 
-        log::info!("Dispatching {} work groups", count_work_groups);
+        log::debug!("Dispatching {} work groups", count_work_groups);
 
         cpass.set_pipeline(&self.compute_pipeline);
         cpass.set_bind_group(0, &state.compute_stage.bind_group, &[]);

@@ -4,7 +4,7 @@ pub mod resource;
 pub mod shaders;
 mod view;
 
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, sync::Arc, time::Instant};
 
 use anyhow::{anyhow, bail, Result};
 use cgmath::{SquareMatrix, Vector2, Vector3};
@@ -235,7 +235,10 @@ impl Renderer {
     }
 
     pub fn render_frame(&self, state: &mut RenderState) -> Result<()> {
+        let ts0 = Instant::now();
         let frame = state.swapchain.get_current_frame()?;
+        let ts1 = Instant::now();
+
         let mut encoder = self
             .ctx
             .device
@@ -245,6 +248,7 @@ impl Renderer {
 
         let mut render = FrameRenderContext { frame, encoder };
 
+        let ts2 = Instant::now();
         self.pipelines.voxel.render_frame(
             &self.ctx,
             pipelines::LoadAction::Clear,
@@ -265,6 +269,7 @@ impl Renderer {
             &mut render,
             &mut state.gui,
         );
+        let ts3 = Instant::now();
 
         render
             .encoder
@@ -279,19 +284,25 @@ impl Renderer {
         self.ctx
             .queue
             .submit(std::iter::once(render.encoder.finish()));
+        let ts4 = Instant::now();
 
         // Collect device timings
+
+        // we can ignore the future as we're about to wait for the device
+        let _ = state
+            .timestamp_query_results_buf
+            .slice(..)
+            .map_async(wgpu::MapMode::Read);
+
+        let ts5 = Instant::now();
+        self.ctx.device.poll(wgpu::Maintain::Wait);
+        let ts6 = Instant::now();
+
         {
             let timestamp_period = self.ctx.queue.get_timestamp_period() as f64;
             let ts: Vec<i64>;
 
             {
-                // we can ignore the future as we're about to wait for the device
-                let _ = state
-                    .timestamp_query_results_buf
-                    .slice(..)
-                    .map_async(wgpu::MapMode::Read);
-                self.ctx.device.poll(wgpu::Maintain::Wait);
                 // this is guaranteed to be ready
                 let view = state
                     .timestamp_query_results_buf
@@ -315,20 +326,30 @@ impl Renderer {
             let voxel_render = ts[4];
             let all_end = ts[5];
 
-            metrics::timing!("render.render", (all_end - all_begin) as u64);
+            metrics::timing!("simgame.render.gpu", (all_end - all_begin) as u64);
             metrics::timing!(
-                "render.pipelines.voxels.update_buffers",
+                "simgame.render.gpu.voxels.update_buffers",
                 (voxel_buffers - voxel_begin) as u64
             );
             metrics::timing!(
-                "render.pipelines.voxels.compute",
+                "simgame.render.gpu.voxels.compute",
                 (voxel_compute - voxel_buffers) as u64
             );
             metrics::timing!(
-                "render.pipelines.voxels.render",
+                "simgame.render.gpu.voxels.render",
                 (voxel_render - voxel_compute) as u64
             );
         }
+        let ts7 = Instant::now();
+
+        metrics::timing!("simgame.render.cpu.get_frame", ts1.duration_since(ts0));
+        metrics::timing!("simgame.render.cpu.make_encoder", ts2.duration_since(ts1));
+        metrics::timing!("simgame.render.cpu.pipelines", ts3.duration_since(ts2));
+        metrics::timing!("simgame.render.cpu.submit", ts4.duration_since(ts3));
+        metrics::timing!("simgame.render.cpu.call_map", ts5.duration_since(ts4));
+        metrics::timing!("simgame.render.cpu.poll", ts6.duration_since(ts5));
+        metrics::timing!("simgame.render.cpu.collect_timings", ts7.duration_since(ts6));
+        metrics::timing!("simgame.render.cpu", ts7.duration_since(ts0));
 
         Ok(())
     }

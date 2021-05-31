@@ -81,7 +81,9 @@ struct TimingParams {
 type MetricsObserver = <metrics_runtime::observers::YamlBuilder as metrics_core::Builder>::Output;
 
 struct EventTracker {
-    metrics_key: Option<metrics::Key>,
+    interval_metrics_key: Option<metrics::Key>,
+    drops_metrics_key: Option<metrics::Key>,
+    next_event: Option<Instant>,
     prev_event: Option<Instant>,
 }
 
@@ -207,7 +209,9 @@ impl<'a> GameBuilder<'a> {
         let control_state = controls::ControlState::new(&self.args.test_params);
 
         use metrics_core::Builder;
-        let metrics_observer = metrics_runtime::observers::YamlBuilder::new().build();
+        let metrics_observer = metrics_runtime::observers::YamlBuilder::new()
+            .set_quantiles(&[0.5, 0.95, 1.0])
+            .build();
 
         let time_tracker = TimeTracker::new(
             TimingParams {
@@ -523,7 +527,9 @@ impl Game {
         };
 
         for (now, elapsed) in self.time_tracker.tick(Instant::now()) {
+            let before_tick = Instant::now();
             self.tick(now, elapsed)?;
+            metrics::timing!("simgame.tick", Instant::now().duration_since(before_tick));
         }
 
         if *control_flow == ControlFlow::Exit {
@@ -553,13 +559,22 @@ impl Game {
             self.world_state.voxel_delta(&mut voxel_delta)?;
             self.world_state.model_render_data(&mut entities)?;
 
+            let ts_lock = Instant::now();
             let voxels = self.voxels.lock().unwrap();
+            let ts_update = Instant::now();
             self.renderer.update(
                 &mut self.render_state,
                 &*voxels,
                 &voxel_delta,
                 entities.as_slice(),
             )?;
+            let ts_end = Instant::now();
+
+            metrics::timing!("simgame.lib.lock_voxels", ts_update.duration_since(ts_lock));
+            metrics::timing!(
+                "simgame.lib.render_update",
+                ts_end.duration_since(ts_update)
+            );
         }
 
         self.renderer.render_frame(&mut self.render_state)?;
@@ -587,25 +602,40 @@ impl Game {
 
 impl EventTracker {
     fn check_ready(&mut self, now: Instant, period: Duration) -> bool {
-        let prev_event = match &mut self.prev_event {
+        let next_event = match &mut self.next_event {
             None => {
-                self.prev_event = Some(now);
+                self.next_event = Some(now + period);
                 return true;
             }
-            Some(prev_event) => prev_event,
+            Some(next_event) => next_event,
         };
 
-        let elapsed = now.duration_since(*prev_event);
-        let ready = elapsed >= period;
-        if ready {
-            *prev_event = now;
-            if let Some(metrics_key) = &self.metrics_key {
+        if now < *next_event {
+            return false;
+        }
+
+        if let Some(prev_event) = self.prev_event {
+            let elapsed = now - prev_event;
+            if let Some(interval_metrics_key) = &self.interval_metrics_key {
                 metrics::recorder()
-                    .record_histogram(metrics_key.clone(), elapsed.as_nanos() as u64);
+                    .record_histogram(interval_metrics_key.clone(), elapsed.as_nanos() as u64);
             }
         }
 
-        ready
+        self.prev_event = Some(now);
+        *next_event += period;
+
+        let mut count_drops = 0;
+        while *next_event <= now {
+            *next_event += period;
+            count_drops += 1;
+        }
+
+        if let Some(drops_metrics_key) = &self.drops_metrics_key {
+            metrics::recorder().increment_counter(drops_metrics_key.clone(), count_drops);
+        }
+
+        true
     }
 }
 
@@ -619,11 +649,15 @@ impl TimeTracker {
         Self {
             start_time: now,
             render_event: EventTracker {
-                metrics_key: Some(metrics::Key::from_name("simgame.frame_interval")),
+                interval_metrics_key: Some(metrics::Key::from_name("simgame.frame_interval")),
+                drops_metrics_key: Some(metrics::Key::from_name("simgame.frame_drops")),
+                next_event: None,
                 prev_event: None,
             },
             log_event: EventTracker {
-                metrics_key: None,
+                interval_metrics_key: None,
+                drops_metrics_key: None,
+                next_event: None,
                 prev_event: None,
             },
             total_ticks: 0,
@@ -660,7 +694,7 @@ impl TimeTracker {
         let render_interval = self
             .args
             .render_interval
-            .unwrap_or_else(|| Duration::from_secs(0));
+            .unwrap_or_else(|| Duration::from_millis(1));
         self.render_event.check_ready(now, render_interval)
     }
 
