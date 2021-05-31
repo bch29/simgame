@@ -482,6 +482,6 @@ fn swapchain_descriptor(win_size: Vector2<u32>) -> wgpu::SwapChainDescriptor {
         format: wgpu::TextureFormat::Bgra8UnormSrgb,
         width: win_size.x,
         height: win_size.y,
-        present_mode: wgpu::PresentMode::Fifo,
+        present_mode: wgpu::PresentMode::Immediate,
     }
 }
