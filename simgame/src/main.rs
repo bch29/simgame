@@ -73,11 +73,11 @@ fn run(opt: Opts) -> Result<()> {
 
     match &opt.action {
         Action::GenerateWorld { options } => run_generate(&ctx, options),
-        Action::RenderWorld { options } => smol::run(run_render_world(&ctx, &options)),
+        Action::RenderWorld { options } => run_render_world(&ctx, &options),
     }
 }
 
-async fn run_render_world(ctx: &FileContext, options: &RenderWorldOpts) -> Result<()> {
+fn run_render_world(ctx: &FileContext, options: &RenderWorldOpts) -> Result<()> {
     let settings = ctx.load_settings()?;
 
     let resource_options = {
@@ -139,7 +139,6 @@ async fn run_render_world(ctx: &FileContext, options: &RenderWorldOpts) -> Resul
         texture_loader,
         metrics_controller: ctx.metrics_controller.clone(),
     })
-    .await
 }
 
 fn run_generate(ctx: &FileContext, options: &GenerateWorldOpts) -> Result<()> {

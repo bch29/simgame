@@ -12,6 +12,7 @@ pub(crate) struct GraphicsContext {
     pub device: wgpu::Device,
     pub queue: wgpu::Queue,
     pub textures: crate::resource::Textures,
+    pub timestamp_query_set: wgpu::QuerySet,
     pub multi_draw_enabled: bool,
 }
 

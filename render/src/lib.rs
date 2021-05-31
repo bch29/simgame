@@ -4,7 +4,7 @@ pub mod resource;
 pub mod shaders;
 mod view;
 
-use std::{collections::HashMap, sync::Arc, time::Instant};
+use std::{collections::HashMap, sync::Arc};
 
 use anyhow::{anyhow, bail, Result};
 use cgmath::{SquareMatrix, Vector2, Vector3};
@@ -19,6 +19,8 @@ use pipelines::{Pipeline, State as PipelineState};
 use resource::{ResourceLoader, TextureLoader};
 pub use view::ViewParams;
 pub(crate) use view::ViewState;
+
+const COUNT_TIMESTAMP_QUERIES: u32 = 6;
 
 pub struct RendererBuilder {
     pub resource_loader: ResourceLoader,
@@ -47,6 +49,7 @@ pub struct RenderState {
     gui: pipelines::gui::GuiRenderState,
     view: ViewState,
     surface: wgpu::Surface,
+    timestamp_query_results_buf: wgpu::Buffer,
 }
 
 /// Object responsible for rendering the game.
@@ -91,11 +94,20 @@ impl RendererBuilder {
             .texture_loader
             .load(&device_result.device, &device_result.queue)?;
 
+        let timestamp_query_set =
+            device_result
+                .device
+                .create_query_set(&wgpu::QuerySetDescriptor {
+                    ty: wgpu::QueryType::Timestamp,
+                    count: COUNT_TIMESTAMP_QUERIES,
+                });
+
         let ctx = GraphicsContext {
             device: device_result.device,
             queue: device_result.queue,
-            multi_draw_enabled: device_result.multi_draw_enabled,
             textures,
+            timestamp_query_set,
+            multi_draw_enabled: device_result.multi_draw_enabled,
         };
 
         let directory = self.directory;
@@ -171,6 +183,14 @@ impl Renderer {
             .pipelines
             .gui
             .create_state(&self.ctx, pipeline_params, ())?;
+
+        let timestamp_query_results_buf = self.ctx.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("timestamp query results"),
+            size: COUNT_TIMESTAMP_QUERIES as wgpu::BufferAddress * 8,
+            usage: wgpu::BufferUsage::MAP_READ | wgpu::BufferUsage::COPY_DST,
+            mapped_at_creation: false,
+        });
+
         Ok(RenderState {
             swapchain,
             world_voxels,
@@ -178,6 +198,7 @@ impl Renderer {
             gui,
             view,
             surface,
+            timestamp_query_results_buf,
         })
     }
 
@@ -214,13 +235,13 @@ impl Renderer {
     }
 
     pub fn render_frame(&self, state: &mut RenderState) -> Result<()> {
-        let ts_begin = Instant::now();
         let frame = state.swapchain.get_current_frame()?;
-        let ts_frame = Instant::now();
-        let encoder = self
+        let mut encoder = self
             .ctx
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+
+        encoder.write_timestamp(&self.ctx.timestamp_query_set, 0);
 
         let mut render = FrameRenderContext { frame, encoder };
 
@@ -245,15 +266,69 @@ impl Renderer {
             &mut state.gui,
         );
 
-        let ts_render = Instant::now();
+        render
+            .encoder
+            .write_timestamp(&self.ctx.timestamp_query_set, 5);
+        render.encoder.resolve_query_set(
+            &self.ctx.timestamp_query_set,
+            0..COUNT_TIMESTAMP_QUERIES,
+            &state.timestamp_query_results_buf,
+            0,
+        );
+
         self.ctx
             .queue
             .submit(std::iter::once(render.encoder.finish()));
-        let ts_submit = Instant::now();
 
-        metrics::timing!("render.swapchain", ts_frame.duration_since(ts_begin));
-        metrics::timing!("render.render", ts_render.duration_since(ts_frame));
-        metrics::timing!("render.submit", ts_submit.duration_since(ts_render));
+        // Collect device timings
+        {
+            let timestamp_period = self.ctx.queue.get_timestamp_period() as f64;
+            let ts: Vec<i64>;
+
+            {
+                // we can ignore the future as we're about to wait for the device
+                let _ = state
+                    .timestamp_query_results_buf
+                    .slice(..)
+                    .map_async(wgpu::MapMode::Read);
+                self.ctx.device.poll(wgpu::Maintain::Wait);
+                // this is guaranteed to be ready
+                let view = state
+                    .timestamp_query_results_buf
+                    .slice(..)
+                    .get_mapped_range();
+                let view_layout_verified: zerocopy::LayoutVerified<&[u8], [u64]> =
+                    zerocopy::LayoutVerified::new_slice(&*view).unwrap();
+                let query_results = view_layout_verified.into_slice();
+                ts = query_results
+                    .iter()
+                    .copied()
+                    .map(|x| (x as f64 * timestamp_period) as i64)
+                    .collect();
+            }
+            state.timestamp_query_results_buf.unmap();
+
+            let all_begin = ts[0];
+            let voxel_begin = ts[1];
+            let voxel_buffers = ts[2];
+            let voxel_compute = ts[3];
+            let voxel_render = ts[4];
+            let all_end = ts[5];
+
+            metrics::timing!("render.render", (all_end - all_begin) as u64);
+            metrics::timing!(
+                "render.pipelines.voxels.update_buffers",
+                (voxel_buffers - voxel_begin) as u64
+            );
+            metrics::timing!(
+                "render.pipelines.voxels.compute",
+                (voxel_compute - voxel_buffers) as u64
+            );
+            metrics::timing!(
+                "render.pipelines.voxels.render",
+                (voxel_render - voxel_compute) as u64
+            );
+        }
 
         Ok(())
     }
@@ -319,7 +394,8 @@ async fn request_device(
 ) -> Result<DeviceResult> {
     let required_features = wgpu::Features::SAMPLED_TEXTURE_BINDING_ARRAY
         | wgpu::Features::SAMPLED_TEXTURE_ARRAY_DYNAMIC_INDEXING
-        | wgpu::Features::UNSIZED_BINDING_ARRAY;
+        | wgpu::Features::UNSIZED_BINDING_ARRAY
+        | wgpu::Features::TIMESTAMP_QUERY;
 
     let (device, queue) = match adapter
         .request_device(

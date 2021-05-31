@@ -26,15 +26,16 @@ use simgame_util::{convert_point, convert_vec};
 use settings::RenderTestParams;
 use simgame_world::{component, WorldStateBuilder, WorldStateHandle};
 
-pub async fn run_game(args: GameArgs<'_>) -> Result<()> {
+pub fn run_game(args: GameArgs<'_>) -> Result<()> {
     let event_loop = EventLoop::new();
 
-    let game = GameBuilder {
-        event_loop: &event_loop,
-        args,
-    }
-    .build()
-    .await?;
+    let game = smol::run(
+        GameBuilder {
+            event_loop: &event_loop,
+            args,
+        }
+        .build(),
+    )?;
     game.run(event_loop);
     Ok(())
 }

@@ -1,7 +1,7 @@
 mod chunk_state;
 mod voxel_info;
 
-use std::{convert::TryInto, time::Instant};
+use std::{convert::TryInto};
 
 use anyhow::Result;
 use cgmath::Matrix4;
@@ -419,18 +419,15 @@ impl pipelines::Pipeline for VoxelRenderPipeline {
         frame_render: &mut crate::FrameRenderContext,
         state: &mut VoxelRenderState,
     ) {
-        let ts_begin = Instant::now();
+        frame_render.encoder.write_timestamp(&ctx.timestamp_query_set, 1);
         let count_work_groups = state.chunk_state.update_buffers(&ctx.queue);
-        let ts_update = Instant::now();
+        frame_render.encoder.write_timestamp(&ctx.timestamp_query_set, 2);
         if count_work_groups != 0 {
             self.compute_pass(ctx, frame_render, state, count_work_groups);
         }
+        frame_render.encoder.write_timestamp(&ctx.timestamp_query_set, 3);
         self.render_pass(ctx, load_action, frame_render, state);
-
-        metrics::timing!(
-            "render.pipelines.voxels.update_buffers",
-            ts_update.duration_since(ts_begin)
-        );
+        frame_render.encoder.write_timestamp(&ctx.timestamp_query_set, 4);
     }
 
     fn create_state(
