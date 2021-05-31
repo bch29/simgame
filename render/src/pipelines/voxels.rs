@@ -440,6 +440,7 @@ impl pipelines::Pipeline for VoxelRenderPipeline {
 
         let mut chunk_state = ChunkState::new(
             &ctx.device,
+            &ctx.queue,
             input.max_visible_chunks,
             input.view_state.params.visible_size,
         );
