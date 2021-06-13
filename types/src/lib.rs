@@ -2,7 +2,6 @@ pub mod config;
 pub mod mesh;
 mod model;
 
-pub use config::ResourceName;
 pub use model::{
     MeshKey, ModelDirectory, ModelKey, ModelRenderData, TextureDirectory, TextureKey,
 };

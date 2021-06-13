@@ -7,3 +7,6 @@ members = [
   "render",
   "simgame",
 ]
+
+[patch.crates-io]
+bevy = { path = "../bevy" }

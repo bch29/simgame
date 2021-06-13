@@ -8,13 +8,11 @@ pub struct EntityConfig {
     pub models: Vec<Model>,
 }
 
-pub type ResourceName = String;
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Model {
     pub name: String,
     pub kind: ModelKind,
-    pub face_texture_resources: Vec<ResourceName>,
+    pub face_textures: Vec<String>,
     pub transforms: Vec<Transform>,
 }
 
@@ -30,6 +28,36 @@ pub enum Transform {
     Rotation { axis: Vector3<f32>, degrees: f32 },
     UniformScale(f32),
     NonuniformScale(Vector3<f32>),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AssetConfig {
+    pub textures: Vec<Texture>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub enum TextureMipKind {
+    Mip,
+    NoMip,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum TextureKind {
+    Image {
+        asset_path: String,
+        mip: TextureMipKind,
+    },
+    SolidColor {
+        red: u8,
+        green: u8,
+        blue: u8,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Texture {
+    pub name: String,
+    pub kind: TextureKind,
 }
 
 impl Transform {

@@ -1,8 +1,10 @@
 use cgmath::{Point3, Vector2, Vector3};
 use serde::{Deserialize, Serialize};
 
-use simgame_render::resource::ResourceConfig;
-use simgame_types::{config::EntityConfig, Behavior};
+use simgame_types::{
+    config::{AssetConfig, EntityConfig},
+    Behavior,
+};
 use simgame_voxels::VoxelConfig;
 use simgame_world::tree::TreeConfig;
 
@@ -21,7 +23,7 @@ pub struct CoreSettings {
     pub world_meta_file_name: String,
     pub voxel_config: VoxelConfig,
     pub entity_config: EntityConfig,
-    pub resources: ResourceConfig,
+    pub asset_config: AssetConfig,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

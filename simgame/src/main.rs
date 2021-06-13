@@ -1,11 +1,10 @@
-use std::{collections::HashSet, env, path::PathBuf};
+use std::{env, path::PathBuf};
 
 use anyhow::{anyhow, Result};
 use structopt::StructOpt;
 
 use simgame::files::FileContext;
-use simgame_render::resource::{self, ResourceLoader};
-use simgame_types::{Directory, ModelDirectory, VoxelDirectory};
+use simgame_types::VoxelDirectory;
 use simgame_world::worldgen;
 
 #[derive(Debug, StructOpt)]
@@ -16,17 +15,17 @@ struct Opts {
     action: Action,
 }
 
-#[derive(Debug, StructOpt)]
-struct RenderWorldOpts {
-    #[structopt(short, long)]
-    save_name: Option<String>,
+// #[derive(Debug, StructOpt)]
+// struct RenderWorldOpts {
+//     #[structopt(short, long)]
+//     save_name: Option<String>,
 
-    #[structopt(short = "t", long)]
-    graphics_trace_path: Option<PathBuf>,
+//     #[structopt(short = "t", long)]
+//     graphics_trace_path: Option<PathBuf>,
 
-    #[structopt(flatten)]
-    resource_options: ResourceOptions,
-}
+//     #[structopt(flatten)]
+//     resource_options: ResourceOptions,
+// }
 
 #[derive(Debug, Clone, StructOpt)]
 struct ResourceOptions {
@@ -40,9 +39,9 @@ enum Action {
         #[structopt(flatten)]
         options: GenerateWorldOpts,
     },
-    RenderWorld {
+    Bevy {
         #[structopt(flatten)]
-        options: RenderWorldOpts,
+        options: simgame::bevy::BevyOpts,
     },
 }
 
@@ -71,75 +70,76 @@ fn run(opt: Opts) -> Result<()> {
     let ctx = FileContext::load(data_root)?;
     ctx.ensure_directories()?;
 
-    match &opt.action {
-        Action::GenerateWorld { options } => run_generate(&ctx, options),
-        Action::RenderWorld { options } => run_render_world(&ctx, &options),
+    match opt.action {
+        Action::GenerateWorld { options } => run_generate(&ctx, &options),
+        // Action::RenderWorld { options } => run_render_world(&ctx, &options),
+        Action::Bevy { options } => simgame::bevy::run_bevy(ctx, options),
     }
 }
 
-fn run_render_world(ctx: &FileContext, options: &RenderWorldOpts) -> Result<()> {
-    let settings = ctx.load_settings()?;
+// fn run_render_world(ctx: &FileContext, options: &RenderWorldOpts) -> Result<()> {
+//     let settings = ctx.load_settings()?;
 
-    let resource_options = {
-        let recompile_shaders: HashSet<_> = options
-            .resource_options
-            .recompile_shaders
-            .iter()
-            .cloned()
-            .collect();
+//     let resource_options = {
+//         let recompile_shaders: HashSet<_> = options
+//             .resource_options
+//             .recompile_shaders
+//             .iter()
+//             .cloned()
+//             .collect();
 
-        let recompile_option = if recompile_shaders.is_empty() {
-            resource::RecompileOption::None
-        } else if recompile_shaders.contains("all") {
-            resource::RecompileOption::All
-        } else {
-            resource::RecompileOption::Subset(recompile_shaders)
-        };
-        resource::ResourceOptions { recompile_option }
-    };
+//         let recompile_option = if recompile_shaders.is_empty() {
+//             resource::RecompileOption::None
+//         } else if recompile_shaders.contains("all") {
+//             resource::RecompileOption::All
+//         } else {
+//             resource::RecompileOption::Subset(recompile_shaders)
+//         };
+//         resource::ResourceOptions { recompile_option }
+//     };
 
-    let resource_loader = ResourceLoader::new(
-        ctx.data_root.as_path(),
-        ctx.core_settings.resources.clone(),
-        resource_options,
-    )?;
+//     let resource_loader = ResourceLoader::new(
+//         ctx.data_root.as_path(),
+//         ctx.core_settings.resources.clone(),
+//         resource_options,
+//     )?;
 
-    let voxels = match &options.save_name {
-        Some(save_name) => ctx.load_world_voxels(save_name)?,
-        None => FileContext::load_debug_world_voxels()?,
-    };
-    log::info!("Loaded world: {:?}", voxels.debug_summary());
+//     let voxels = match &options.save_name {
+//         Some(save_name) => ctx.load_world_voxels(save_name)?,
+//         None => FileContext::load_debug_world_voxels()?,
+//     };
+//     log::info!("Loaded world: {:?}", voxels.debug_summary());
 
-    let render_params = simgame::RenderParams {
-        trace_path: options.graphics_trace_path.as_deref(),
-    };
+//     let render_params = simgame::RenderParams {
+//         trace_path: options.graphics_trace_path.as_deref(),
+//     };
 
-    let texture_loader = resource_loader.texture_loader()?;
+//     let texture_loader = resource_loader.texture_loader()?;
 
-    let directory = {
-        let voxel = VoxelDirectory::new(&ctx.core_settings.voxel_config)?;
-        let texture = texture_loader.directory();
-        let model = ModelDirectory::new(&ctx.core_settings.entity_config.models, &texture)?;
-        Directory {
-            voxel,
-            texture,
-            model,
-        }
-    };
+//     let directory = {
+//         let voxel = VoxelDirectory::new(&ctx.core_settings.voxel_config)?;
+//         let texture = texture_loader.directory();
+//         let model = ModelDirectory::new(&ctx.core_settings.entity_config.models, &texture)?;
+//         Directory {
+//             voxel,
+//             texture,
+//             model,
+//         }
+//     };
 
-    let entities = hecs::World::new();
+//     let entities = hecs::World::new();
 
-    simgame::run_game(simgame::GameArgs {
-        voxels,
-        test_params: settings.render_test_params,
-        entities,
-        render_params,
-        directory,
-        resource_loader,
-        texture_loader,
-        metrics_controller: ctx.metrics_controller.clone(),
-    })
-}
+//     simgame::run_game(simgame::GameArgs {
+//         voxels,
+//         test_params: settings.render_test_params,
+//         entities,
+//         render_params,
+//         directory,
+//         resource_loader,
+//         texture_loader,
+//         metrics_controller: ctx.metrics_controller.clone(),
+//     })
+// }
 
 fn run_generate(ctx: &FileContext, options: &GenerateWorldOpts) -> Result<()> {
     let mut metrics_exporter = metrics_runtime::exporters::LogExporter::new(

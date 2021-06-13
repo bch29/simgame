@@ -1,12 +1,53 @@
+use bevy::{
+    app::{App, EventReader, Plugin},
+    core::Time,
+    ecs::system::{IntoSystem, Res, ResMut},
+    input::{
+        keyboard::{KeyCode, KeyboardInput},
+        mouse::MouseMotion,
+        ElementState,
+    },
+};
 use cgmath::{
     Angle, Basis3, Deg, InnerSpace, Point3, Rad, Rotation, Rotation3, Vector2, Vector3, Zero,
 };
 
-use simgame_render::visible_size_to_chunks;
-use simgame_util::{convert_point, convert_vec};
+use simgame_util::{convert_point, convert_vec, DivUp};
+use simgame_voxels::index_utils;
 
 use crate::settings::RenderTestParams;
 
+pub struct ControlsPlugin(pub ControlState);
+
+impl Plugin for ControlsPlugin {
+    fn build(&self, app: &mut App) {
+        app.insert_resource(self.0.clone())
+            .add_system(controls_system.system());
+    }
+}
+
+fn controls_system(
+    mut control_state: ResMut<ControlState>,
+    mut view_params: ResMut<simgame_render::ViewParams>,
+    time: Res<Time>,
+    mut mouse_motion_events: EventReader<MouseMotion>,
+    mut keyboard_input_events: EventReader<KeyboardInput>,
+) {
+    for event in mouse_motion_events.iter() {
+        control_state.move_cursor(Vector2 {
+            x: event.delta.x as f64 / 50.0,
+            y: event.delta.y as f64 / 50.0,
+        });
+    }
+
+    for event in keyboard_input_events.iter() {
+        control_state.handle_keyboard_input(event);
+    }
+
+    control_state.tick(time.delta_seconds_f64(), &mut *view_params);
+}
+
+#[derive(Clone)]
 pub struct ControlState {
     look_at_dir: Vector3<f64>,
     camera_dir: Vector3<i32>,
@@ -31,6 +72,7 @@ struct AccelControlParams {
     pub min_value: Option<Point3<f64>>,
 }
 
+#[derive(Clone)]
 struct AccelControlState {
     // parameters
     params: AccelControlParams,
@@ -99,10 +141,9 @@ impl ControlState {
         }
     }
 
-    pub fn handle_keyboad_input(&mut self, event: winit::event::KeyboardInput) {
-        use winit::event::VirtualKeyCode;
-        if let winit::event::KeyboardInput {
-            virtual_keycode: Some(key),
+    fn handle_keyboard_input(&mut self, event: &KeyboardInput) {
+        if let KeyboardInput {
+            key_code: Some(key),
             state,
             ..
         } = event
@@ -116,16 +157,16 @@ impl ControlState {
             let neg_mag_z = mag_z.map(|v| Vector3::zero() - v);
 
             match key {
-                VirtualKeyCode::D => self.camera_dir.x = mag,
-                VirtualKeyCode::A => self.camera_dir.x = -mag,
-                VirtualKeyCode::W => self.camera_dir.y = mag,
-                VirtualKeyCode::S => self.camera_dir.y = -mag,
-                VirtualKeyCode::K => self.camera_dir.z = mag,
-                VirtualKeyCode::J => self.camera_dir.z = -mag,
-                VirtualKeyCode::I => self.z_level.set_direction(mag_z),
-                VirtualKeyCode::U => self.z_level.set_direction(neg_mag_z),
-                VirtualKeyCode::M => self.visible_height.set_direction(mag_z),
-                VirtualKeyCode::N => self.visible_height.set_direction(neg_mag_z),
+                KeyCode::D => self.camera_dir.x = mag,
+                KeyCode::A => self.camera_dir.x = -mag,
+                KeyCode::W => self.camera_dir.y = mag,
+                KeyCode::S => self.camera_dir.y = -mag,
+                KeyCode::K => self.camera_dir.z = mag,
+                KeyCode::J => self.camera_dir.z = -mag,
+                KeyCode::I => self.z_level.set_direction(mag_z),
+                KeyCode::U => self.z_level.set_direction(neg_mag_z),
+                KeyCode::M => self.visible_height.set_direction(mag_z),
+                KeyCode::N => self.visible_height.set_direction(neg_mag_z),
                 _ => {}
             }
         }
@@ -148,12 +189,12 @@ impl ControlState {
         self.camera_height.set_direction(Some(height_dir));
     }
 
-    pub fn clear_key_states(&mut self) {
-        self.z_level.set_direction(None);
-        self.visible_height.set_direction(None);
-    }
+    // fn clear_key_states(&mut self) {
+    //     self.z_level.set_direction(None);
+    //     self.visible_height.set_direction(None);
+    // }
 
-    pub fn move_cursor(&mut self, offset: Vector2<f64>) {
+    fn move_cursor(&mut self, offset: Vector2<f64>) {
         if offset.x == 0. && offset.y == 0. {
             return;
         }
@@ -198,7 +239,7 @@ impl ControlState {
         self.look_at_dir = rotation.rotate_vector(self.look_at_dir);
     }
 
-    pub fn tick(&mut self, elapsed: f64, view_state: &mut simgame_render::ViewParams) {
+    fn tick(&mut self, elapsed: f64, view_state: &mut simgame_render::ViewParams) {
         self.camera_pan.tick(elapsed);
         self.camera_height.tick(elapsed);
         self.z_level.tick(elapsed);
@@ -241,10 +282,10 @@ impl ControlState {
         dir
     }
 
-    fn state_to_mag(&self, state: winit::event::ElementState) -> i32 {
+    fn state_to_mag(&self, state: &ElementState) -> i32 {
         match state {
-            winit::event::ElementState::Pressed => 1,
-            winit::event::ElementState::Released => 0,
+            ElementState::Pressed => 1,
+            ElementState::Released => 0,
         }
     }
 }
@@ -354,4 +395,8 @@ pub fn restrict_visible_size(max_chunks: usize, mut visible_size: Vector3<i32>) 
     }
 
     visible_size
+}
+
+fn visible_size_to_chunks(visible_size: Vector3<i32>) -> Vector3<i32> {
+    visible_size.div_up(convert_vec!(index_utils::chunk_size(), i32)) + Vector3::new(1, 1, 1)
 }

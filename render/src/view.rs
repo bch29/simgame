@@ -56,6 +56,7 @@ impl Default for ViewParams {
 }
 
 impl ViewState {
+    #[allow(unused)]
     pub fn new(params: ViewParams, display_size: Vector2<u32>) -> Self {
         let aspect_ratio = display_size.x as f32 / display_size.y as f32;
 
@@ -83,11 +84,6 @@ impl ViewState {
 
     pub fn camera_pos(&self) -> Point3<f32> {
         self.params.effective_camera_pos()
-    }
-
-    pub fn update_display_size(&mut self, display_size: Vector2<u32>) {
-        let aspect_ratio = display_size.x as f32 / display_size.y as f32;
-        self.proj = create_projection_matrix(aspect_ratio);
     }
 }
 

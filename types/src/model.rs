@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use simgame_util::{convert_matrix4, Bounds};
 
 use crate::{
-    config::{self, ModelKind, ResourceName},
+    config::{self, ModelKind},
     mesh::Mesh,
 };
 
@@ -38,7 +38,7 @@ pub struct ModelDirectory {
 
 #[derive(Debug, Clone)]
 pub struct TextureDirectory {
-    texture_keys: HashMap<ResourceName, TextureKey>,
+    texture_keys: HashMap<String, TextureKey>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -99,7 +99,7 @@ impl ModelDirectory {
                 .ok_or_else(|| anyhow!("unknown model kind {:?}", model.kind))?;
 
             let face_texture_ids = model
-                .face_texture_resources
+                .face_textures
                 .iter()
                 .map(|resource| {
                     let key = texture_directory.texture_key(&resource)?;
@@ -148,7 +148,7 @@ impl ModelDirectory {
 }
 
 impl TextureDirectory {
-    pub fn new(texture_keys: HashMap<ResourceName, TextureKey>) -> Self {
+    pub fn new(texture_keys: HashMap<String, TextureKey>) -> Self {
         Self { texture_keys }
     }
 

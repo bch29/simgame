@@ -1,15 +1,21 @@
 use std::{
-    convert::TryInto,
     ops::{Deref, DerefMut},
+    sync::Arc,
 };
 
-use wgpu::{Buffer, BufferDescriptor, BufferUsage, Device, Queue};
+use bevy::{
+    render2::{
+        render_resource::{BufferId, BufferInfo, BufferUsage, RenderResourceBinding},
+        renderer::RenderResourceContext,
+    },
+    wgpu2::WgpuRenderResourceContext,
+};
 use zerocopy::{AsBytes, FromBytes};
 
 pub struct BufferSyncedData<Data, Item> {
     data: Data,
     helper: BufferSyncHelper<Item>,
-    buffer: Buffer,
+    buffer: BufferId,
 }
 
 #[derive(Debug, Clone)]
@@ -35,21 +41,24 @@ pub trait BufferSyncable {
 pub trait IntoBufferSynced: BufferSyncable {
     fn buffer_sync_desc(&self) -> BufferSyncHelperDesc;
 
-    fn into_buffer_synced(self, device: &wgpu::Device) -> BufferSyncedData<Self, Self::Item>
+    fn into_buffer_synced(
+        self,
+        ctx: &WgpuRenderResourceContext,
+    ) -> BufferSyncedData<Self, Self::Item>
     where
         Self: Sized,
     {
         let desc = self.buffer_sync_desc();
-        BufferSyncedData::new(device, self, desc)
+        BufferSyncedData::new(ctx, self, desc)
     }
 }
 
 impl<Data, Item> BufferSyncedData<Data, Item> {
-    pub fn new(device: &Device, data: Data, desc: BufferSyncHelperDesc) -> Self {
-        assert!(desc.usage.contains(wgpu::BufferUsage::COPY_DST));
+    pub fn new(ctx: &WgpuRenderResourceContext, data: Data, desc: BufferSyncHelperDesc) -> Self {
+        assert!(desc.usage.contains(BufferUsage::COPY_DST));
 
         let helper = BufferSyncHelper::new(desc);
-        let buffer = helper.make_buffer(device);
+        let buffer = helper.make_buffer(ctx);
         BufferSyncedData {
             data,
             helper,
@@ -57,7 +66,7 @@ impl<Data, Item> BufferSyncedData<Data, Item> {
         }
     }
 
-    pub fn from_buffer(data: Data, desc: BufferSyncHelperDesc, buffer: Buffer) -> Self {
+    pub fn from_buffer(data: Data, desc: BufferSyncHelperDesc, buffer: BufferId) -> Self {
         BufferSyncedData {
             data,
             helper: BufferSyncHelper::new(desc),
@@ -66,18 +75,18 @@ impl<Data, Item> BufferSyncedData<Data, Item> {
     }
 
     #[inline]
-    pub fn sync(&self, queue: &Queue)
+    pub fn sync(&self, ctx: &WgpuRenderResourceContext)
     where
         Data: BufferSyncable<Item = Item>,
         Item: Copy + AsBytes + FromBytes + 'static,
     {
-        let mut fill_buffer = self.helper.begin_fill_buffer(queue, &self.buffer, 0);
+        let mut fill_buffer = self.helper.begin_fill_buffer(ctx, self.buffer, 0);
         self.data.sync(&mut fill_buffer);
         fill_buffer.finish();
     }
 
     #[inline]
-    pub fn buffer(&self) -> &Buffer {
+    pub fn buffer(&self) -> &BufferId {
         &self.buffer
     }
 
@@ -87,8 +96,8 @@ impl<Data, Item> BufferSyncedData<Data, Item> {
     }
 
     #[inline]
-    pub fn as_binding(&self, index: u32) -> wgpu::BindGroupEntry {
-        self.helper.as_binding(index, &self.buffer, 0)
+    pub fn as_binding(&self) -> RenderResourceBinding {
+        self.helper.as_binding(self.buffer, 0)
     }
 }
 
@@ -108,17 +117,16 @@ impl<Data, Item> DerefMut for BufferSyncedData<Data, Item> {
 }
 
 impl<Item> BufferSyncHelper<Item> {
-    pub fn make_buffer(&self, device: &Device) -> Buffer {
+    pub fn make_buffer(&self, ctx: &WgpuRenderResourceContext) -> BufferId {
         log::info!(
             "Creating buffer \"{}\" of size {} MB",
             self.desc().label,
             self.desc().buffer_len * std::mem::size_of::<Item>() / (1024 * 1024)
         );
 
-        device.create_buffer(&BufferDescriptor {
-            label: Some(self.desc().label),
-            size: (self.desc.buffer_len * std::mem::size_of::<Item>()) as u64,
-            usage: self.desc.usage,
+        ctx.create_buffer(BufferInfo {
+            size: self.desc.buffer_len * std::mem::size_of::<Item>(),
+            buffer_usage: self.desc.usage,
             mapped_at_creation: false,
         })
     }
@@ -153,15 +161,18 @@ impl<Item> BufferSyncHelper<Item> {
     /// The `Drop` impl may panic if you fail to do so.
     pub fn begin_fill_buffer<'a>(
         &'a self,
-        queue: &'a Queue,
-        target: &'a Buffer,
+        ctx: &'a WgpuRenderResourceContext,
+        target: BufferId,
         start_pos: usize,
     ) -> FillBuffer<'a, Item>
     where
         Item: 'static + Copy + AsBytes + FromBytes,
     {
+        let buffers = ctx.resources.buffers.read();
+        let target = buffers.get(&target).unwrap().clone();
+
         FillBuffer {
-            queue,
+            queue: &*ctx.queue,
             target,
             mapped_buffer: None,
             pos: start_pos,
@@ -173,8 +184,8 @@ impl<Item> BufferSyncHelper<Item> {
     /// Fills the buffer with chunks of data from the given iterator.
     pub fn fill_buffer<Chunks>(
         &self,
-        queue: &Queue,
-        target: &Buffer,
+        ctx: &WgpuRenderResourceContext,
+        target: BufferId,
         start_pos: usize,
         chunks: Chunks,
     ) where
@@ -182,7 +193,7 @@ impl<Item> BufferSyncHelper<Item> {
         Chunks::Item: AsRef<[Item]>,
         Item: 'static + Copy + AsBytes + FromBytes,
     {
-        let mut fill_buffer = self.begin_fill_buffer(queue, target, start_pos);
+        let mut fill_buffer = self.begin_fill_buffer(ctx, target, start_pos);
 
         for chunk in chunks {
             fill_buffer.advance(chunk);
@@ -202,31 +213,22 @@ impl<Item> BufferSyncHelper<Item> {
     }
 
     #[inline]
-    pub fn as_binding<'a>(
+    pub fn as_binding(
         &self,
-        index: u32,
-        buffer: &'a Buffer,
+        buffer: BufferId,
         start_offset: wgpu::BufferAddress,
-    ) -> wgpu::BindGroupEntry<'a> {
-        wgpu::BindGroupEntry {
-            binding: index,
-            resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                buffer,
-                offset: start_offset,
-                size: Some(
-                    self.buffer_byte_len()
-                        .try_into()
-                        .expect("buffer byte len expected to be nonzero"),
-                ),
-            }),
+    ) -> RenderResourceBinding {
+        RenderResourceBinding::Buffer {
+            buffer,
+            range: start_offset..start_offset + self.buffer_byte_len(),
         }
     }
 }
 
 pub struct FillBuffer<'a, Item> {
-    queue: &'a Queue,
-    target: &'a Buffer,
-    mapped_buffer: Option<Buffer>,
+    queue: &'a wgpu::Queue,
+    target: Arc<wgpu::Buffer>,
+    mapped_buffer: Option<BufferId>,
     pos: usize,
     batch_len: usize,
     sync_helper: &'a BufferSyncHelper<Item>,
@@ -260,7 +262,7 @@ impl<'a, Item> FillBuffer<'a, Item> {
         let begin = item_size * (self.pos + self.batch_len);
 
         self.queue
-            .write_buffer(self.target, begin as _, chunk_slice.as_bytes());
+            .write_buffer(&*self.target, begin as _, chunk_slice.as_bytes());
         self.batch_len += chunk_len;
     }
 
@@ -304,7 +306,7 @@ impl<'a, Item> Drop for FillBuffer<'a, Item> {
 pub struct InstancedBuffer {
     desc: InstancedBufferDesc,
     helper: BufferSyncHelper<u8>,
-    buffer: Buffer,
+    buffer: BufferId,
 }
 
 #[derive(Debug, Clone)]
@@ -316,7 +318,7 @@ pub struct InstancedBufferDesc {
 }
 
 impl InstancedBuffer {
-    pub fn new(device: &wgpu::Device, desc: InstancedBufferDesc) -> Self {
+    pub fn new(ctx: &WgpuRenderResourceContext, desc: InstancedBufferDesc) -> Self {
         let helper_desc = BufferSyncHelperDesc {
             label: desc.label,
             buffer_len: desc.n_instances * desc.instance_len,
@@ -325,7 +327,7 @@ impl InstancedBuffer {
         };
         let helper = BufferSyncHelper::new(helper_desc);
 
-        let buffer = helper.make_buffer(device);
+        let buffer = helper.make_buffer(ctx);
         Self {
             desc,
             helper,
@@ -334,8 +336,8 @@ impl InstancedBuffer {
     }
 
     #[inline]
-    pub fn buffer(&self) -> &Buffer {
-        &self.buffer
+    pub fn buffer(&self) -> BufferId {
+        self.buffer
     }
 
     #[inline]
@@ -344,8 +346,8 @@ impl InstancedBuffer {
     }
 
     #[inline]
-    pub fn as_binding(&self, index: u32) -> wgpu::BindGroupEntry {
-        self.helper.as_binding(index, &self.buffer, 0)
+    pub fn as_binding(&self) -> RenderResourceBinding {
+        self.helper.as_binding(self.buffer, 0)
     }
 
     #[inline]
@@ -364,20 +366,20 @@ impl InstancedBuffer {
     }
 
     #[inline]
-    pub fn clear(&self, queue: &Queue) {
+    pub fn clear(&self, ctx: &WgpuRenderResourceContext) {
         self.helper.fill_buffer(
-            queue,
-            &self.buffer,
+            ctx,
+            self.buffer,
             0,
             std::iter::repeat(&[0u8, 0, 0, 0]).take(self.size() as usize / 4),
         );
     }
 
     #[inline]
-    pub fn write(&self, queue: &Queue, instance: usize, data: &[u8]) {
+    pub fn write(&self, ctx: &WgpuRenderResourceContext, instance: usize, data: &[u8]) {
         let mut fill = self.helper.begin_fill_buffer(
-            queue,
-            &self.buffer,
+            ctx,
+            self.buffer,
             self.instance_offset(instance) as usize,
         );
         fill.advance(data);

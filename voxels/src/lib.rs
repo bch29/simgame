@@ -13,3 +13,11 @@ pub use crate::{
     update::{VoxelDelta, VoxelUpdater},
     voxel_data::VoxelData,
 };
+
+use std::sync::Arc;
+use parking_lot::Mutex;
+
+#[derive(Clone)]
+pub struct SharedVoxelData {
+    pub data: Arc<Mutex<VoxelData>>
+}

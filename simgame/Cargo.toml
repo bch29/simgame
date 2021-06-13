@@ -4,8 +4,8 @@ version = "0.1.0"
 authors = ["Bradley Hardy <bradleyhardy@live.com>"]
 edition = "2018"
 
-[features]
-default = ["simgame_render/shader-compiler"]
+# [features]
+# default = ["simgame_render/shader-compiler"]
 
 [dependencies]
 simgame_util = { path = "../util/" }
@@ -19,7 +19,6 @@ env_logger = "0.7"
 log = "0.4"
 anyhow = "1.0"
 smol = "0.1"
-winit = "0.22"
 rand = "0.7"
 serde = "1.0"
 serde_yaml = "0.8"
@@ -28,7 +27,8 @@ directories = "3.0"
 lz4 = "1.23"
 metrics = "0.12"
 metrics-core = "0.5"
-hecs = "0.5"
+bevy = "0.5"
+parking_lot = "*"
 
 [dependencies.metrics-runtime]
 version = "0.13"
