@@ -1,6 +1,8 @@
 mod chunk_state;
 mod voxel_info;
 
+use std::{convert::TryInto, num::NonZeroU32};
+
 use anyhow::Result;
 use bevy::{
     asset::{AddAsset, AssetServer, Assets, Handle},
@@ -19,9 +21,10 @@ use bevy::{
         render_graph::{
             NodeRunError, RenderGraph, RenderGraphContext, SlotInfo, SlotType, SlotValue,
         },
-        render_resource::{BindGroup, BindGroupBuilder, BufferUsage},
+        render_resource::{BindGroup, BindGroupBuilder, BufferUsage, RenderResourceBinding},
         renderer::{RenderContext, RenderResourceContext, RenderResources},
-        shader::{ComputeShaderStages, Shader, ShaderStages},
+        shader::{ComputeShaderStages, Shader, ShaderReflectOptions, ShaderStages},
+        texture::Texture,
         view::ExtractedWindows,
     },
     wgpu2::WgpuRenderResourceContext,
@@ -30,12 +33,12 @@ use bevy::{
 use cgmath::{Matrix4, SquareMatrix};
 use zerocopy::{AsBytes, FromBytes};
 
-use simgame_types::VoxelDirectory;
+use simgame_types::{TextureDirectory, VoxelDirectory};
 use simgame_util::{convert_point, Bounds};
 use simgame_voxels::{index_utils, SharedVoxelData, VoxelData, VoxelDelta};
 
 use crate::{
-    assets::TextureAssets,
+    assets::TextureHandles,
     buffer_util::{
         BufferSyncHelperDesc, BufferSyncable, BufferSyncedData, FillBuffer, InstancedBuffer,
         InstancedBufferDesc, IntoBufferSynced,
@@ -44,7 +47,7 @@ use crate::{
 };
 
 use chunk_state::ChunkState;
-use voxel_info::VoxelInfoManager;
+use voxel_info::{ExtractedTextures, VoxelInfoManager};
 
 pub struct VoxelRenderPlugin;
 
@@ -85,6 +88,7 @@ impl bevy::app::Plugin for VoxelRenderPlugin {
 
         app.insert_resource(LoadingVoxelAssets {
             loaded: false,
+            done_init: false,
             shaders,
         });
     }
@@ -92,6 +96,7 @@ impl bevy::app::Plugin for VoxelRenderPlugin {
 
 struct LoadingVoxelAssets {
     loaded: bool,
+    done_init: bool,
     shaders: ShaderHandles,
 }
 
@@ -113,9 +118,11 @@ struct CountWorkGroups {
     count_work_groups: u32,
 }
 
+struct VoxelDriverNode;
+
 /// Holds the static pipeline for rendering voxels. Can be used to render multiple different pieces
 /// of voxel geometry simultaneously.
-pub(crate) struct VoxelRenderNode {
+struct VoxelRenderNode {
     pipeline: bevy::render2::pipeline::PipelineId,
     pipeline_descriptor: RenderPipelineDescriptor,
 }
@@ -127,7 +134,7 @@ struct VoxelComputeNode {
 
 /// Holds the current state (including GPU buffers) of rendering a particular piece of voxel
 /// geometry.
-pub(crate) struct VoxelRenderState {
+struct VoxelRenderState {
     chunk_state: ChunkState,
     compute_stage: ComputeStageState,
     render_stage: RenderStageState,
@@ -193,34 +200,34 @@ struct IndirectCommand {
 
 fn extract_assets(
     mut commands: Commands,
-    directory: Res<VoxelDirectory>,
+    voxel_directory: Res<VoxelDirectory>,
     voxels: Res<SharedVoxelData>,
     shaders: Res<Assets<Shader>>,
-    textures: Option<Res<TextureAssets>>,
-    load_state: Option<ResMut<LoadingVoxelAssets>>,
+    texture_handles: Res<TextureHandles>,
+    texture_assets: Res<Assets<Texture>>,
     view_params: Res<ViewParams>,
     params: Res<Params>,
+    mut load_state: ResMut<LoadingVoxelAssets>,
 ) {
-    commands.insert_resource(voxels.clone());
-    commands.insert_resource(params.clone());
     commands.insert_resource(ViewState::new(
         view_params.clone(),
         cgmath::Vector2 { x: 800, y: 600 },
     ));
 
-    let mut load_state = match load_state {
-        Some(load_state) => load_state,
-        None => return,
-    };
+    if !load_state.done_init {
+        commands.insert_resource(voxels.clone());
+        commands.insert_resource(params.clone());
+        commands.insert_resource(texture_handles.clone());
+        load_state.done_init = true;
+    }
 
     if load_state.loaded {
         return;
     }
 
-    let textures = match textures {
-        Some(textures) => textures,
-        None => return,
-    };
+    if !texture_handles.all_loaded {
+        return;
+    }
 
     if !(shaders.get(&load_state.shaders.vertex).is_some()
         && shaders.get(&load_state.shaders.fragment).is_some()
@@ -228,6 +235,35 @@ fn extract_assets(
     {
         return;
     }
+
+    let extracted_textures = {
+        let texture_ids = match texture_handles
+            .textures
+            .iter()
+            .map(|handle| {
+                let texture = texture_assets.get(handle).unwrap();
+                let gpu_data = texture.gpu_data.as_ref()?;
+                Some(gpu_data.texture)
+            })
+            .collect()
+        {
+            None => return,
+            Some(texture_ids) => texture_ids,
+        };
+
+        let sampler_id = texture_assets
+            .get(&texture_handles.textures[0])
+            .unwrap()
+            .gpu_data
+            .as_ref()
+            .unwrap()
+            .sampler;
+
+        ExtractedTextures {
+            texture_ids,
+            sampler_id,
+        }
+    };
 
     let shaders: Shaders<Shader> = Shaders {
         vertex: shaders
@@ -254,15 +290,17 @@ fn extract_assets(
     log::info!("Finished loading assets");
 
     commands.insert_resource(shaders);
-    commands.insert_resource(directory.clone());
-    commands.insert_resource(textures.clone());
+    commands.insert_resource(voxel_directory.clone());
+    commands.insert_resource(texture_handles.directory.clone());
+    commands.insert_resource(extracted_textures);
 }
 
 fn prepare_assets(
     mut commands: Commands,
     shaders: Option<Res<LoadedShaders>>,
-    textures: Option<Res<TextureAssets>>,
-    directory: Option<Res<VoxelDirectory>>,
+    voxel_directory: Option<Res<VoxelDirectory>>,
+    texture_directory: Option<Res<TextureDirectory>>,
+    extracted_textures: Option<Res<ExtractedTextures>>,
     render_resources: Res<RenderResources>,
     voxels: Res<SharedVoxelData>,
     params: Res<Params>,
@@ -274,18 +312,28 @@ fn prepare_assets(
         None => return,
     };
 
-    let textures = match textures {
-        Some(textures) => textures,
-        None => return,
-    };
-
-    let directory = directory.unwrap();
+    let voxel_directory = voxel_directory.unwrap();
+    let texture_directory = texture_directory.unwrap();
+    let extracted_textures = extracted_textures.unwrap();
     let ctx = render_resources.downcast_ref().unwrap();
 
-    let voxel_info = crate::voxels::VoxelInfoManager::new(&*directory, &*textures, ctx).unwrap();
+    let voxel_info = crate::voxels::VoxelInfoManager::new(
+        &*voxel_directory,
+        &*texture_directory,
+        &*extracted_textures,
+        ctx,
+    )
+    .unwrap();
 
     let compute_node = VoxelComputeNode::new(&*ctx, &*shaders).unwrap();
-    let render_node = VoxelRenderNode::new(&*ctx, &*shaders).unwrap();
+    let render_node = VoxelRenderNode::new(
+        &*ctx,
+        &*shaders,
+        (extracted_textures.texture_ids.len() as u32)
+            .try_into()
+            .unwrap(),
+    )
+    .unwrap();
 
     let voxels = voxels.data.lock();
     let render_state = VoxelRenderState::new(
@@ -330,7 +378,6 @@ fn prepare_assets(
         .unwrap();
 
     commands.remove_resource::<LoadedShaders>();
-    commands.remove_resource::<TextureAssets>();
     commands.insert_resource(voxel_info);
     commands.insert_resource(render_state);
 
@@ -368,21 +415,23 @@ fn prepare_chunks(
         None => return,
     };
 
-    let model = Matrix4::identity();
-    let voxels = voxels.data.lock();
-    let voxel_delta = &extracted_chunks.voxel_delta;
-
     let active_view_box = view_state.params.calculate_view_box();
-    state
-        .compute_stage
-        .uniforms
-        .update_view_box(active_view_box);
 
-    state.chunk_state.update_view_box(active_view_box, &*voxels);
+    {
+        let model = Matrix4::identity();
+        state
+            .compute_stage
+            .uniforms
+            .update_view_box(active_view_box);
+        *state.render_stage.uniforms = RenderUniforms::new(&*view_state, model, active_view_box);
+    }
 
-    state.chunk_state.apply_chunk_diff(&*voxels, &*voxel_delta);
-
-    *state.render_stage.uniforms = RenderUniforms::new(&*view_state, model, active_view_box);
+    {
+        let voxel_delta = &extracted_chunks.voxel_delta;
+        let voxels = voxels.data.lock();
+        state.chunk_state.update_view_box(active_view_box, &*voxels);
+        state.chunk_state.apply_chunk_diff(&*voxels, &*voxel_delta);
+    }
 }
 
 fn queue_chunks(
@@ -403,8 +452,6 @@ fn queue_chunks(
 
     state.render_stage.uniforms.sync(&ctx);
 }
-
-pub struct VoxelDriverNode;
 
 impl bevy::render2::render_graph::Node for VoxelDriverNode {
     fn run(
@@ -544,7 +591,7 @@ impl VoxelComputeNode {
     fn new(ctx: &WgpuRenderResourceContext, shaders: &LoadedShaders) -> Result<Self> {
         let compute_layout = shaders
             .compute
-            .reflect_layout(true)
+            .reflect_layout(&Default::default())
             .expect("failed to reflect compute shader layout");
 
         let pipeline_layout = PipelineLayout::from_shader_layouts(&mut [compute_layout]);
@@ -567,19 +614,30 @@ impl VoxelComputeNode {
 }
 
 impl VoxelRenderNode {
-    fn new(ctx: &WgpuRenderResourceContext, shaders: &LoadedShaders) -> Result<Self> {
+    fn new(
+        ctx: &WgpuRenderResourceContext,
+        shaders: &LoadedShaders,
+        count_textures: NonZeroU32,
+    ) -> Result<Self> {
         let vertex_layout = shaders
             .vertex
-            .reflect_layout(true)
+            .reflect_layout(&Default::default())
             .expect("failed to reflect vertex shader layout");
         let fragment_layout = shaders
             .fragment
-            .reflect_layout(true)
+            .reflect_layout(&ShaderReflectOptions {
+                array_sizes: vec![("t_Textures".into(), count_textures)]
+                    .into_iter()
+                    .collect(),
+                ..Default::default()
+            })
             .expect("failed to reflect fragment shader layout");
+
+        let layout = PipelineLayout::from_shader_layouts(&mut [vertex_layout, fragment_layout]);
 
         let pipeline_descriptor = RenderPipelineDescriptor {
             name: None,
-            layout: PipelineLayout::from_shader_layouts(&mut [vertex_layout, fragment_layout]),
+            layout,
             shader_stages: ShaderStages {
                 vertex: ctx.create_shader_module(&shaders.vertex),
                 fragment: Some(ctx.create_shader_module(&shaders.fragment)),
@@ -671,13 +729,8 @@ impl VoxelRenderState {
         );
 
         log::info!("initializing voxel render stage");
-        let render_stage = RenderStageState::new(
-            ctx,
-            voxel_info,
-            view_state,
-            &chunk_state,
-            &geometry_buffers,
-        );
+        let render_stage =
+            RenderStageState::new(ctx, voxel_info, view_state, &chunk_state, &geometry_buffers);
         ctx.create_bind_group(
             render_node.pipeline_descriptor.layout.bind_groups[0].id,
             &render_stage.bind_group,
@@ -739,20 +792,13 @@ impl RenderStageState {
             .add_binding(3, chunk_state.chunk_metadata_binding())
             .add_binding(4, geometry_buffers.faces.as_binding())
             .add_binding(5, voxel_info.texture_metadata_buf.as_binding())
-            //         wgpu::BindGroupEntry {
-            //             binding: 6,
-            //             resource: wgpu::BindingResource::TextureViewArray(
-            //                 self.voxel_info
-            //                     .texture_array()
-            //                     .iter()
-            //                     .collect::<Vec<_>>()
-            //                     .as_slice(),
-            //             ),
-            //         },
-            //         wgpu::BindGroupEntry {
-            //             binding: 7,
-            //             resource: wgpu::BindingResource::Sampler(&self.voxel_info.sampler),
-            //         },
+            .add_binding(
+                6,
+                RenderResourceBinding::TextureArrayView(
+                    voxel_info.texture_array().iter().copied().collect(),
+                ),
+            )
+            .add_binding(7, RenderResourceBinding::Sampler(voxel_info.sampler))
             .finish();
 
         RenderStageState {

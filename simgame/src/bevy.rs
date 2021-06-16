@@ -88,6 +88,7 @@ pub fn run_bevy(ctx: FileContext, options: BevyOpts) -> Result<()> {
             max_storage_buffers_per_shader_stage: 7,
             max_storage_textures_per_shader_stage: 6,
             max_storage_buffer_binding_size: 1024 * 1024 * 1024,
+            max_sampled_textures_per_shader_stage: 1024,
             ..Default::default()
         },
         ..Default::default()
@@ -104,8 +105,9 @@ pub fn run_bevy(ctx: FileContext, options: BevyOpts) -> Result<()> {
         .add_plugin(bevy::render2::RenderPlugin::default())
         .add_plugin(bevy::wgpu2::WgpuPlugin::default())
         .add_plugin(bevy::winit::WinitPlugin::default())
-        // .add_plugin(bevy::diagnostic::FrameTimeDiagnosticsPlugin::default())
+        .add_plugin(bevy::diagnostic::FrameTimeDiagnosticsPlugin::default())
         .add_plugin(bevy::diagnostic::LogDiagnosticsPlugin::default());
+        // .add_plugin(bevy::wgpu2::diagnostic::WgpuResourceDiagnosticsPlugin::default());
 
     app.insert_resource(simgame_render::assets::SimgameAssetsParams {
         config: ctx.core_settings.asset_config.clone(),

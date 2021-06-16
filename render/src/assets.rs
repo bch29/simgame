@@ -1,6 +1,6 @@
 use std::{collections::HashMap, convert::TryInto, num::NonZeroU32, path::PathBuf, sync::Arc};
 
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use bevy::{
     app::{App, Plugin},
     asset::{AssetIo, Assets, FileAssetIo, Handle, HandleId},
@@ -41,7 +41,7 @@ fn setup_system(
 
 fn await_load_system(
     mut core_texture_assets: ResMut<Assets<Texture>>,
-    mut loading_texture_assets: ResMut<TextureAssets>,
+    mut loading_texture_assets: ResMut<TextureHandles>,
 ) {
     let loading_texture_assets = &mut *loading_texture_assets;
 
@@ -74,7 +74,7 @@ struct LoadedTexture {
 }
 
 #[derive(Clone)]
-pub struct TextureAssets {
+pub struct TextureHandles {
     pub directory: TextureDirectory,
     pub textures: Vec<Handle<Texture>>,
     pub all_loaded: bool,
@@ -83,7 +83,7 @@ pub struct TextureAssets {
     count_expected: usize,
 }
 
-impl TextureAssets {
+impl TextureHandles {
     pub fn texture_from_name(&self, name: &str) -> Result<Handle<Texture>> {
         Ok(self.textures[self.directory.texture_key(name)?.index as usize].clone())
     }
@@ -151,7 +151,7 @@ impl TextureLoader {
         })
     }
 
-    fn load(&self, task_pool: &TaskPool) -> Result<TextureAssets> {
+    fn load(&self, task_pool: &TaskPool) -> Result<TextureHandles> {
         log::info!("Beginning loaded of {} textures", self.images.len());
 
         let (sender, receiver) = crossbeam_channel::bounded(self.images.len());
@@ -189,7 +189,7 @@ impl TextureLoader {
                 .detach();
         }
 
-        Ok(TextureAssets {
+        Ok(TextureHandles {
             textures,
             receiver,
             count_loaded: 0,
@@ -204,7 +204,7 @@ impl TextureLoader {
         index: usize,
         sample_generator: SampleGeneratorBuilder,
         file_io: Arc<FileAssetIo>,
-        _mip_kind: config::TextureMipKind,
+        mip_kind: config::TextureMipKind,
         handle: Handle<Texture>,
         sender: Arc<Sender<LoadedTexture>>,
     ) -> Result<()> {
@@ -233,8 +233,42 @@ impl TextureLoader {
         };
         let data = sample_generator.generate(width, height)?.0;
 
+        let mip_levels_data = match mip_kind {
+            config::TextureMipKind::Mip => {
+                if log2_exact(width).is_none() || log2_exact(height).is_none() {
+                    bail!(
+                        "Texture {:?} has dimensions {}x{}. Expected powers of 2 for mipped textures.",
+                        name,
+                        width,
+                        height
+                    );
+                }
+
+                let mip_level_count = log2_exact(width.min(height))
+                    .expect("expected dimensions to be powers of 2")
+                    .max(1);
+
+                let mut mip_levels_data = Vec::new();
+                for mip_level in 1..mip_level_count {
+                    let (mip_width, mip_height) = (width >> mip_level, height >> mip_level);
+                    let data = sample_generator.generate(mip_width, mip_height)?.0;
+                    log::info!(
+                        "writing mip level {} for {:?} len={}",
+                        mip_level,
+                        name,
+                        data.len()
+                    );
+                    assert_eq!(data.len() as u32, mip_width * mip_height * 4);
+                    mip_levels_data.push(data);
+                }
+                Some(mip_levels_data)
+            }
+            config::TextureMipKind::NoMip => None,
+        };
+
         let texture = Texture {
             data,
+            mip_levels_data,
             gpu_data: None,
             size,
             format,
@@ -251,75 +285,6 @@ impl TextureLoader {
         log::info!("Loading texture {:?} done", name,);
 
         Ok(())
-
-        // TODO: mips
-
-        // match mip_kind {
-        //     config::TextureMipKind::NoMip => {
-        //     }
-        //     config::TextureMipKind::Mip => {
-        //         if log2_exact(width).is_none() || log2_exact(height).is_none() {
-        //             bail!(
-        //                 "Texture {:?} has dimensions {}x{}. Expected powers of 2 for mipped textures.",
-        //                 name,
-        //                 width,
-        //                 height
-        //             );
-        //         }
-
-        //         let mip_level_count = log2_exact(width.min(height))
-        //             .expect("expected dimensions to be powers of 2")
-        //             .max(1);
-
-        //         let texture = device.create_texture(&wgpu::TextureDescriptor {
-        //             label: Some("voxel texture array"),
-        //             size: wgpu::Extent3d {
-        //                 width,
-        //                 height,
-        //                 depth_or_array_layers: 1,
-        //             },
-        //             mip_level_count,
-        //             sample_count: 1,
-        //             dimension: wgpu::TextureDimension::D2,
-        //             format: wgpu::TextureFormat::Rgba8UnormSrgb,
-        //             usage: wgpu::TextureUsage::COPY_DST | wgpu::TextureUsage::SAMPLED,
-        //         });
-
-        //         log::info!("writing mip levels for {:?}", name);
-        //         for mip_level in 0..mip_level_count {
-        //             let (mip_width, mip_height) = (width >> mip_level, height >> mip_level);
-
-        //             let copy_view = wgpu::ImageCopyTexture {
-        //                 texture: &texture,
-        //                 mip_level,
-        //                 origin: wgpu::Origin3d { x: 0, y: 0, z: 0 },
-        //             };
-
-        //             let (samples, bytes_per_row) =
-        //                 sample_generator.generate(mip_width, mip_height)?;
-
-        //             queue.write_texture(
-        //                 copy_view,
-        //                 samples.as_slice(),
-        //                 wgpu::ImageDataLayout {
-        //                     offset: 0,
-        //                     bytes_per_row: Some(bytes_per_row),
-        //                     rows_per_image: None,
-        //                 },
-        //                 wgpu::Extent3d {
-        //                     width: mip_width,
-        //                     height: mip_height,
-        //                     depth_or_array_layers: 1,
-        //                 },
-        //             );
-        //         }
-
-        //         Ok(TextureData {
-        //             texture,
-        //             mip_level_count,
-        //         })
-        //     }
-        // }
     }
 }
 
@@ -423,22 +388,22 @@ impl SampleGenerator for SolidColorSampleGenerator {
     }
 }
 
-// /// If the value is a power of 2, returns its log base 2. Otherwise, returns `None`.
-// fn log2_exact(value: u32) -> Option<u32> {
-//     if value == 0 {
-//         return None;
-//     }
+/// If the value is a power of 2, returns its log base 2. Otherwise, returns `None`.
+fn log2_exact(value: u32) -> Option<u32> {
+    if value == 0 {
+        return None;
+    }
 
-//     let mut log2 = 0;
-//     let mut shifted = value;
-//     while shifted > 1 {
-//         shifted >>= 1;
-//         log2 += 1;
-//     }
+    let mut log2 = 0;
+    let mut shifted = value;
+    while shifted > 1 {
+        shifted >>= 1;
+        log2 += 1;
+    }
 
-//     if 1 << log2 == value {
-//         Some(log2)
-//     } else {
-//         None
-//     }
-// }
+    if 1 << log2 == value {
+        Some(log2)
+    } else {
+        None
+    }
+}

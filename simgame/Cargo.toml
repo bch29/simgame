@@ -27,10 +27,13 @@ directories = "3.0"
 lz4 = "1.23"
 metrics = "0.12"
 metrics-core = "0.5"
-bevy = "0.5"
 parking_lot = "*"
 
 [dependencies.metrics-runtime]
 version = "0.13"
 default-features = false
 features = ["metrics-exporter-log", "metrics-observer-yaml"]
+
+[dependencies.bevy]
+version = "0.5"
+# features = ["trace"]

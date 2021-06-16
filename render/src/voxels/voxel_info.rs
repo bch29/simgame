@@ -1,21 +1,25 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, convert::TryInto};
 
 use anyhow::{anyhow, Result};
-use bevy::{render2::render_resource::BufferUsage, wgpu2::WgpuRenderResourceContext};
+use bevy::{
+    render2::{
+        render_resource::{BufferUsage, SamplerId, TextureId, TextureViewId},
+        renderer::RenderResourceContext,
+        texture::{TextureAspect, TextureFormat, TextureViewDescriptor, TextureViewDimension},
+    },
+    wgpu2::WgpuRenderResourceContext,
+};
 use zerocopy::{AsBytes, FromBytes};
 
-use simgame_types::{mesh::cube::Cube, VoxelDirectory};
+use simgame_types::{mesh::cube::Cube, TextureDirectory, VoxelDirectory};
 use simgame_voxels::config as voxel;
 
-use crate::{
-    assets::TextureAssets,
-    buffer_util::{InstancedBuffer, InstancedBufferDesc},
-};
+use crate::buffer_util::{InstancedBuffer, InstancedBufferDesc};
 
 /// Manages all GPU buffers that are static for any given set of voxel types.
 pub(crate) struct VoxelInfoManager {
-    // pub texture_arr_views: Vec<wgpu::TextureView>,
-    // pub sampler: wgpu::Sampler,
+    pub texture_arr_views: Vec<TextureViewId>,
+    pub sampler: SamplerId,
     pub voxel_info_buf: InstancedBuffer,
     pub texture_metadata_buf: InstancedBuffer,
 }
@@ -36,51 +40,51 @@ struct VoxelRenderInfo {
     vertex_data: Cube,
 }
 
+pub struct ExtractedTextures {
+    pub texture_ids: Vec<TextureId>,
+    pub sampler_id: SamplerId,
+}
+
 impl VoxelInfoManager {
     pub fn new(
         voxel_directory: &VoxelDirectory,
-        texture_assets: &TextureAssets,
+        texture_directory: &TextureDirectory,
+        extracted_textures: &ExtractedTextures,
         ctx: &WgpuRenderResourceContext,
     ) -> Result<Self> {
-        let index_map = HashMap::new();
-        // let index_map = voxel_directory
-        //     .all_face_textures()
-        //     .into_iter()
-        //     .map(|face_tex| {
-        //         let index = texture_assets
-        //             .directory
-        //             .texture_key(face_tex.resource.as_str())?
-        //             .index;
-        //         Ok((face_tex, index))
-        //     })
-        //     .collect::<Result<HashMap<_, _>>>()?;
+        let index_map = voxel_directory
+            .all_face_textures()
+            .into_iter()
+            .map(|face_tex| {
+                let index = texture_directory
+                    .texture_key(face_tex.resource.as_str())?
+                    .index;
+                Ok((face_tex, index))
+            })
+            .collect::<Result<HashMap<_, _>>>()?;
 
-        // TODO: texture creation is handled by asset system, need to add our textures to
-        // Assets<Texture>
+        let texture_arr_views = extracted_textures
+            .texture_ids
+            .iter()
+            .map(|texture_id| -> Result<_> {
+                let view_id = ctx.create_texture_view(
+                    *texture_id,
+                    TextureViewDescriptor {
+                        format: Some(TextureFormat::Rgba8UnormSrgb),
+                        dimension: Some(TextureViewDimension::D2),
+                        aspect: TextureAspect::All,
+                        base_mip_level: 0,
+                        level_count: None,
+                        base_array_layer: 0,
+                        array_layer_count: Some(1u32.try_into().expect("nonzero")),
+                    },
+                );
 
-        // ctx.create_texture(descriptor);
+                Ok(view_id)
+            })
+            .collect::<Result<Vec<_>>>()?;
 
-        // let texture_arr_views = ctx
-        //     .textures
-        //     .textures()
-        //     .iter()
-        //     .map(|data| {
-        //         data.texture.create_view(&wgpu::TextureViewDescriptor {
-        //             label: Some("voxel textures"),
-        //             format: Some(wgpu::TextureFormat::Rgba8UnormSrgb),
-        //             dimension: Some(wgpu::TextureViewDimension::D2),
-        //             aspect: wgpu::TextureAspect::All,
-        //             base_mip_level: 0,
-        //             mip_level_count: Some(
-        //                 data.mip_level_count
-        //                     .try_into()
-        //                     .expect("mip level count cannot be 0"),
-        //             ),
-        //             base_array_layer: 0,
-        //             array_layer_count: Some(1.try_into().expect("nonzero")),
-        //         })
-        //     })
-        //     .collect();
+        let sampler = extracted_textures.sampler_id;
 
         let voxel_info_buf = InstancedBuffer::new(
             ctx,
@@ -102,8 +106,7 @@ impl VoxelInfoManager {
             InstancedBufferDesc {
                 label: "texture metadata",
                 instance_len: std::mem::size_of::<VoxelTextureMetadata>(),
-                // n_instances: ctx.textures.textures().len(),
-                n_instances: 1,
+                n_instances: extracted_textures.texture_ids.len(),
                 usage: BufferUsage::STORAGE | BufferUsage::COPY_DST,
             },
         );
@@ -114,28 +117,27 @@ impl VoxelInfoManager {
         }
 
         Ok(Self {
-            // texture_arr_views,
-            // sampler,
+            texture_arr_views,
+            sampler,
             voxel_info_buf,
             texture_metadata_buf,
         })
     }
 
-    // pub fn texture_array(&self) -> &[wgpu::TextureView] {
-    //     self.texture_arr_views.as_slice()
-    // }
+    pub fn texture_array(&self) -> &[TextureViewId] {
+        self.texture_arr_views.as_slice()
+    }
 
     fn get_voxel_render_info(
         index_map: &HashMap<voxel::FaceTexture, u32>,
         voxel: &voxel::VoxelInfo,
     ) -> Result<VoxelRenderInfo> {
-        let to_index = |_| -> Result<_> { Ok(0) };
-        // let to_index = |face_tex| {
-        //     index_map
-        //         .get(face_tex)
-        //         .ok_or_else(|| anyhow!("missing index for face tex {:?}", face_tex))
-        //         .map(|&ix| ix)
-        // };
+        let to_index = |face_tex| {
+            index_map
+                .get(face_tex)
+                .ok_or_else(|| anyhow!("missing index for face tex {:?}", face_tex))
+                .map(|&ix| ix)
+        };
 
         let face_tex_ids = match &voxel.texture {
             voxel::VoxelTexture::Uniform(face_tex) => {

@@ -10,8 +10,8 @@ layout(location = 4) in vec3 v_CameraPos;
 
 layout(location = 0) out vec4 o_Target;
 
-/* layout(set = 0, binding = 6) uniform texture2D[] t_Textures; */
-/* layout(set = 0, binding = 7) uniform sampler s_Textures; */
+layout(set = 0, binding = 6) uniform texture2D[] t_Textures;
+layout(set = 0, binding = 7) uniform sampler s_Textures;
 
 const vec3 ambientColor = vec3(1.0, 1.0, 1.0);
 const float ambientStrength = 0.1;
@@ -41,10 +41,9 @@ void main() {
   float diff = max(dot(norm, lightDir), 0.0);
   vec3 diffuse = diff * lightColor;
 
-  vec3 texColor = vec3(1.0);
-  /* vec4 texColor = texture(sampler2D(t_Textures[v_TexId], s_Textures), v_TexCoord); */
+  vec4 texColor = texture(sampler2D(t_Textures[v_TexId], s_Textures), v_TexCoord);
 
-  o_Target = vec4((ambient + diffuse) * texColor, 1.0);
+  o_Target = vec4((ambient + diffuse) * texColor.xyz, 1.0);
 }
 
 // vi: ft=c

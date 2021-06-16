@@ -118,6 +118,7 @@ impl ChunkState {
         self.active_chunks.capacity()
     }
 
+    #[allow(dead_code)]
     pub fn iter_chunk_indices(&self) -> impl Iterator<Item = usize> + '_ {
         self.active_chunks.iter().map(|(_, index, _)| index)
     }
@@ -230,6 +231,8 @@ impl ChunkState {
 
         self.meta_tracker.reset();
 
+        let mut count_updated_chunks = 0;
+
         {
             let diff = self.active_chunks.take_diff();
             let active_chunks = diff.inner();
@@ -243,6 +246,7 @@ impl ChunkState {
                     let chunk_data = simgame_voxels::voxels_to_u16(&chunk.voxels);
                     fill_voxel_types.seek(index * std::mem::size_of::<Chunk>());
                     fill_voxel_types.advance(chunk_data.as_bytes());
+                    count_updated_chunks += 1;
                 } else {
                     self.meta_tracker.remove(index)
                 }

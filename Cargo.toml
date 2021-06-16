@@ -10,3 +10,6 @@ members = [
 
 [patch.crates-io]
 bevy = { path = "../bevy" }
+
+[profile.dev]
+opt-level = 2
