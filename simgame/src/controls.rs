@@ -1,12 +1,14 @@
 use bevy::{
     app::{App, EventReader, Plugin},
     core::Time,
-    ecs::system::{IntoSystem, Res, ResMut},
+    ecs::system::{IntoSystem, Query, Res, ResMut},
     input::{
         keyboard::{KeyCode, KeyboardInput},
         mouse::MouseMotion,
         ElementState,
     },
+    math::Vec3,
+    transform::components::Transform,
 };
 use cgmath::{
     Angle, Basis3, Deg, InnerSpace, Point3, Rad, Rotation, Rotation3, Vector2, Vector3, Zero,
@@ -17,34 +19,43 @@ use simgame_voxels::index_utils;
 
 use crate::settings::RenderTestParams;
 
-pub struct ControlsPlugin(pub ControlState);
+pub struct ControlsPlugin;
+
+pub struct PlayerCamera(pub ControlState);
 
 impl Plugin for ControlsPlugin {
     fn build(&self, app: &mut App) {
-        app.insert_resource(self.0.clone())
-            .add_system(controls_system.system());
+        app.add_system(controls_system.system());
     }
 }
 
 fn controls_system(
-    mut control_state: ResMut<ControlState>,
+    mut query: Query<(&mut PlayerCamera, &mut Transform)>,
     mut view_params: ResMut<simgame_render::ViewParams>,
     time: Res<Time>,
     mut mouse_motion_events: EventReader<MouseMotion>,
     mut keyboard_input_events: EventReader<KeyboardInput>,
 ) {
     for event in mouse_motion_events.iter() {
-        control_state.move_cursor(Vector2 {
-            x: event.delta.x as f64 / 50.0,
-            y: event.delta.y as f64 / 50.0,
-        });
+        for (mut player_camera, _) in query.iter_mut() {
+            player_camera.0.move_cursor(Vector2 {
+                x: event.delta.x as f64 / 50.0,
+                y: event.delta.y as f64 / 50.0,
+            });
+        }
     }
 
     for event in keyboard_input_events.iter() {
-        control_state.handle_keyboard_input(event);
+        for (mut player_camera, _) in query.iter_mut() {
+            player_camera.0.handle_keyboard_input(event);
+        }
     }
 
-    control_state.tick(time.delta_seconds_f64(), &mut *view_params);
+    for (mut player_camera, mut transform) in query.iter_mut() {
+        *transform = player_camera
+            .0
+            .tick(time.delta_seconds_f64(), &mut *view_params);
+    }
 }
 
 #[derive(Clone)]
@@ -239,18 +250,22 @@ impl ControlState {
         self.look_at_dir = rotation.rotate_vector(self.look_at_dir);
     }
 
-    fn tick(&mut self, elapsed: f64, view_state: &mut simgame_render::ViewParams) {
+    fn tick(&mut self, elapsed: f64, view_state: &mut simgame_render::ViewParams) -> Transform {
         self.camera_pan.tick(elapsed);
         self.camera_height.tick(elapsed);
         self.z_level.tick(elapsed);
         self.visible_height.tick(elapsed);
 
-        view_state.look_at_dir = convert_vec!(self.look_at_dir, f32);
+        let look_at_dir = convert_vec!(self.look_at_dir, f32);
 
-        view_state.camera_pos.x = self.camera_pan.value().x as f32;
-        view_state.camera_pos.y = self.camera_pan.value().y as f32;
-        view_state.camera_pos.z = self.camera_height.value().z as f32;
+        let camera_pos = Point3 {
+            x: self.camera_pan.value().x as f32,
+            y: self.camera_pan.value().y as f32,
+            z: self.camera_height.value().z as f32,
+        };
 
+        view_state.look_at_dir = look_at_dir;
+        view_state.camera_pos = camera_pos;
         view_state.z_level = self.z_level.value().z.round() as i32;
         view_state.visible_size.z = self.visible_height.value().z.round() as i32;
 
@@ -265,6 +280,14 @@ impl ControlState {
             view_state.visible_size = visible_size;
             self.visible_height.value_mut().z = visible_size.z as f64;
         }
+
+        let camera_pos = camera_pos + Vector3::unit_z() * self.z_level.value().z as f32;
+
+        let looking_at = camera_pos + look_at_dir;
+        let looking_at = Vec3::new(looking_at.x, looking_at.y, looking_at.z);
+
+        Transform::from_xyz(camera_pos.x, camera_pos.y, camera_pos.z)
+            .looking_at(looking_at, Vec3::Y)
     }
 
     fn pan_direction(look_at_dir: Vector3<f64>, direction: Vector3<i32>) -> Vector3<f64> {

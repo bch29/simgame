@@ -30,7 +30,7 @@ use bevy::{
     wgpu2::WgpuRenderResourceContext,
     window::{WindowId, Windows},
 };
-use cgmath::{Matrix4, SquareMatrix};
+use cgmath::{Matrix4, SquareMatrix, Point3, EuclideanSpace};
 use zerocopy::{AsBytes, FromBytes};
 
 use simgame_types::{TextureDirectory, VoxelDirectory};
@@ -147,22 +147,28 @@ struct ComputeStageState {
 }
 
 struct RenderStageState {
-    uniforms: BufferSyncedData<RenderUniforms, RenderUniforms>,
-    bind_group: BindGroup,
+    view_uniforms: BufferSyncedData<ViewUniforms, ViewUniforms>,
+    render_uniforms: BufferSyncedData<RenderUniforms, RenderUniforms>,
+    view_bind_group: BindGroup,
+    render_bind_group: BindGroup,
 }
 
 #[derive(Debug, Clone, Copy, AsBytes, FromBytes)]
 #[repr(C)]
 struct RenderUniforms {
-    proj: [[f32; 4]; 4],
-    view: [[f32; 4]; 4],
     model: [[f32; 4]; 4],
-    camera_pos: [f32; 3],
-    _padding0: f32,
     visible_box_origin: [f32; 3],
-    _padding1: f32,
+    _padding0: f32,
     visible_box_limit: [f32; 3],
-    _padding2: f32,
+    _padding1: f32,
+}
+
+#[derive(Debug, Clone, Copy, AsBytes, FromBytes)]
+#[repr(C)]
+struct ViewUniforms {
+    view_proj: [[f32; 4]; 4],
+    view_world_position: [f32; 3],
+    _padding: f32,
 }
 
 #[repr(C)]
@@ -423,7 +429,8 @@ fn prepare_chunks(
             .compute_stage
             .uniforms
             .update_view_box(active_view_box);
-        *state.render_stage.uniforms = RenderUniforms::new(&*view_state, model, active_view_box);
+        *state.render_stage.view_uniforms = ViewUniforms::new(&*view_state);
+        *state.render_stage.render_uniforms = RenderUniforms::new(model, active_view_box);
     }
 
     {
@@ -450,7 +457,8 @@ fn queue_chunks(
 
     commands.insert_resource(CountWorkGroups { count_work_groups });
 
-    state.render_stage.uniforms.sync(&ctx);
+    state.render_stage.render_uniforms.sync(&ctx);
+    state.render_stage.view_uniforms.sync(&ctx);
 }
 
 impl bevy::render2::render_graph::Node for VoxelDriverNode {
@@ -573,7 +581,13 @@ impl bevy::render2::render_graph::Node for VoxelRenderNode {
             pass.set_bind_group(
                 0,
                 layout.bind_groups[0].id,
-                state.render_stage.bind_group.id,
+                state.render_stage.render_bind_group.id,
+                None,
+            );
+            pass.set_bind_group(
+                1,
+                layout.bind_groups[1].id,
+                state.render_stage.view_bind_group.id,
                 None,
             );
             pass.multi_draw_indirect(
@@ -733,7 +747,11 @@ impl VoxelRenderState {
             RenderStageState::new(ctx, voxel_info, view_state, &chunk_state, &geometry_buffers);
         ctx.create_bind_group(
             render_node.pipeline_descriptor.layout.bind_groups[0].id,
-            &render_stage.bind_group,
+            &render_stage.render_bind_group,
+        );
+        ctx.create_bind_group(
+            render_node.pipeline_descriptor.layout.bind_groups[1].id,
+            &render_stage.view_bind_group,
         );
 
         Ok(VoxelRenderState {
@@ -779,15 +797,20 @@ impl RenderStageState {
         chunk_state: &ChunkState,
         geometry_buffers: &GeometryBuffers,
     ) -> RenderStageState {
-        let uniforms = RenderUniforms::new(
-            view_state,
+        let view_uniforms = ViewUniforms::new(view_state).into_buffer_synced(ctx);
+
+        let render_uniforms = RenderUniforms::new(
             Matrix4::identity(),
             view_state.params.calculate_view_box(),
         )
         .into_buffer_synced(ctx);
 
-        let bind_group = BindGroupBuilder::default()
-            .add_binding(0, uniforms.as_binding())
+        let view_bind_group = BindGroupBuilder::default()
+            .add_binding(0, view_uniforms.as_binding())
+            .finish();
+
+        let render_bind_group = BindGroupBuilder::default()
+            .add_binding(0, render_uniforms.as_binding())
             .add_binding(1, voxel_info.voxel_info_buf.as_binding())
             .add_binding(3, chunk_state.chunk_metadata_binding())
             .add_binding(4, geometry_buffers.faces.as_binding())
@@ -802,8 +825,10 @@ impl RenderStageState {
             .finish();
 
         RenderStageState {
-            uniforms,
-            bind_group,
+            view_uniforms,
+            view_bind_group,
+            render_uniforms,
+            render_bind_group,
         }
     }
 }
@@ -834,18 +859,43 @@ impl GeometryBuffers {
     }
 }
 
-impl RenderUniforms {
-    fn new(view_state: &ViewState, model: Matrix4<f32>, view_box: Bounds<i32>) -> Self {
+impl ViewUniforms {
+    fn new(view_state: &ViewState) -> Self {
         Self {
-            proj: view_state.proj().into(),
+            view_proj: (view_state.proj() * view_state.view()).into(),
+            view_world_position: (Point3::origin() - view_state.camera_pos()).into(),
+            _padding: 0.0,
+        }
+    }
+}
+
+impl BufferSyncable for ViewUniforms {
+    type Item = ViewUniforms;
+
+    fn sync<'a>(&self, fill_buffer: &mut FillBuffer<'a, Self::Item>) {
+        fill_buffer.advance(&[*self]);
+    }
+}
+
+impl IntoBufferSynced for ViewUniforms {
+    fn buffer_sync_desc(&self) -> BufferSyncHelperDesc {
+        BufferSyncHelperDesc {
+            label: "voxel render uniforms",
+            buffer_len: 1,
+            max_chunk_len: 1,
+            usage: BufferUsage::UNIFORM | BufferUsage::COPY_DST,
+        }
+    }
+}
+
+impl RenderUniforms {
+    fn new(model: Matrix4<f32>, view_box: Bounds<i32>) -> Self {
+        Self {
             model: model.into(),
-            view: view_state.view().into(),
-            camera_pos: view_state.camera_pos().into(),
-            _padding0: 0.0,
             visible_box_origin: convert_point!(view_box.origin(), f32).into(),
-            _padding1: 0.0,
+            _padding0: 0.0,
             visible_box_limit: convert_point!(view_box.limit(), f32).into(),
-            _padding2: 0.0,
+            _padding1: 0.0,
         }
     }
 }

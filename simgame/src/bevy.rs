@@ -13,7 +13,7 @@ use bevy::{
 };
 use structopt::StructOpt;
 
-use crate::{controls, files::FileContext};
+use crate::{controls, files::FileContext, settings::Settings};
 use simgame_types::VoxelDirectory;
 
 #[derive(Debug, Clone, StructOpt)]
@@ -107,7 +107,7 @@ pub fn run_bevy(ctx: FileContext, options: BevyOpts) -> Result<()> {
         .add_plugin(bevy::winit::WinitPlugin::default())
         .add_plugin(bevy::diagnostic::FrameTimeDiagnosticsPlugin::default())
         .add_plugin(bevy::diagnostic::LogDiagnosticsPlugin::default());
-        // .add_plugin(bevy::wgpu2::diagnostic::WgpuResourceDiagnosticsPlugin::default());
+    // .add_plugin(bevy::wgpu2::diagnostic::WgpuResourceDiagnosticsPlugin::default());
 
     app.insert_resource(simgame_render::assets::SimgameAssetsParams {
         config: ctx.core_settings.asset_config.clone(),
@@ -125,30 +125,38 @@ pub fn run_bevy(ctx: FileContext, options: BevyOpts) -> Result<()> {
         })
         .add_asset_loader(ShaderLoader)
         .add_plugin(load_world::LoadWorldPlugin)
-        .add_plugin(controls::ControlsPlugin(controls::ControlState::new(
-            &settings.render_test_params,
-        )));
+        .add_plugin(controls::ControlsPlugin);
 
     app.insert_resource(simgame_render::voxels::Params {
         max_visible_chunks: settings.render_test_params.max_visible_chunks,
     })
     .add_plugin(simgame_render::voxels::VoxelRenderPlugin);
 
-    app.add_startup_system(startup_system.system());
+    app.insert_resource(settings)
+        .add_startup_system(startup_system.system());
 
     app.run();
 
     Ok(())
 }
 
-fn startup_system(mut commands: Commands, asset_server: Res<AssetServer>) {
+fn startup_system(
+    mut commands: Commands,
+    settings: Res<Settings>,
+    asset_server: Res<AssetServer>,
+) {
     asset_server.watch_for_changes().unwrap();
 
     // camera
-    commands.spawn_bundle(PerspectiveCameraBundle {
-        transform: Transform::from_xyz(-50.0, -100.0, 15.0).looking_at(Vec3::ZERO, Vec3::Y),
-        ..Default::default()
-    });
+    commands
+        .spawn()
+        .insert_bundle(PerspectiveCameraBundle {
+            transform: Transform::from_xyz(-50.0, -100.0, 15.0).looking_at(Vec3::ZERO, Vec3::Y),
+            ..Default::default()
+        })
+        .insert(crate::controls::PlayerCamera(controls::ControlState::new(
+            &settings.render_test_params,
+        )));
 }
 
 mod load_world {

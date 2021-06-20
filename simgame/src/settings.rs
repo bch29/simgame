@@ -1,10 +1,7 @@
 use cgmath::{Point3, Vector2, Vector3};
 use serde::{Deserialize, Serialize};
 
-use simgame_types::{
-    config::{AssetConfig, EntityConfig},
-    Behavior,
-};
+use simgame_types::config::{AssetConfig, EntityConfig};
 use simgame_voxels::VoxelConfig;
 use simgame_world::tree::TreeConfig;
 
@@ -60,7 +57,7 @@ pub struct VideoSettings {
 pub struct RenderTestEntity {
     pub archetype: String,
     pub location: Point3<f64>,
-    pub behaviors: Option<Vec<Box<dyn Behavior>>>,
+    // pub behaviors: Option<Vec<Box<dyn Behavior + Send>>>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -68,7 +65,7 @@ pub struct EntityArchetype {
     pub name: String,
     pub clone_from: Option<String>,
     pub model: Option<String>,
-    pub behaviors: Option<Vec<Box<dyn Behavior>>>,
+    // pub behaviors: Option<Vec<Box<dyn Behavior + Send>>>,
 }
 
 impl Default for RenderTestParams {

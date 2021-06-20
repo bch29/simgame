@@ -1,4 +1,4 @@
-use cgmath::{Deg, InnerSpace, Matrix4, Point3, Vector2, Vector3};
+use cgmath::{Deg, EuclideanSpace, InnerSpace, Matrix4, Point3, Vector2, Vector3};
 use simgame_util::{convert_point, convert_vec, Bounds};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -79,7 +79,7 @@ impl ViewState {
             Point3::new(0., 0., 0.),
             self.params().look_at_dir,
             Vector3::unit_z(),
-        )
+        ) * Matrix4::from_translation(Point3::origin() - self.params.effective_camera_pos())
     }
 
     pub fn camera_pos(&self) -> Point3<f32> {
